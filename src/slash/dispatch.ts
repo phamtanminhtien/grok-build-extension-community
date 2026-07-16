@@ -186,7 +186,7 @@ async function runHostAction(
     case "settings":
       await vscode.commands.executeCommand(
         "workbench.action.openSettings",
-        "@ext:tienpham.grok-build-community",
+        "@ext:tienpham.grok-build-community-edition",
       );
       // Fallback filter if publisher id differs
       await vscode.commands.executeCommand(

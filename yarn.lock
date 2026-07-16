@@ -2145,9 +2145,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"grok-build-community@workspace:.":
+"grok-build-community-edition@workspace:.":
   version: 0.0.0-use.local
-  resolution: "grok-build-community@workspace:."
+  resolution: "grok-build-community-edition@workspace:."
   dependencies:
     "@agentclientprotocol/sdk": "npm:^1.2.1"
     "@tabler/icons-webfont": "npm:^3.44.0"

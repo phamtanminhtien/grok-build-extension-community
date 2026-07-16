@@ -124,7 +124,7 @@ watchdog.unref?.();
 
 try {
   const result = await acp
-    .client({ name: "grok-build-community-smoke" })
+    .client({ name: "grok-build-community-edition-smoke" })
     .onRequest(acp.methods.client.session.requestPermission, async () => ({
       outcome: { outcome: "cancelled" },
     }))

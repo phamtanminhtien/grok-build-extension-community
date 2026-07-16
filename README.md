@@ -31,7 +31,7 @@ The VSIX does **not** bundle the `grok` binary. Install the CLI first on the mac
 # In this repo
 cd grok-vscode-extension
 yarn install
-yarn package   # → grok-build-community-0.3.1.vsix
+yarn package   # → grok-build-community-edition-0.3.1.vsix
 ```
 
 Then in VS Code: **Extensions → ⋯ → Install from VSIX…** and pick the `.vsix`.
@@ -90,9 +90,9 @@ Full checklist: `docs/L0-manual-test.md`
 ### Package / publish
 
 ```bash
-yarn package          # local .vsix (grok-build-community-<version>.vsix)
+yarn package          # local .vsix (grok-build-community-edition-<version>.vsix)
 # yarn publish:vsce   # VS Code Marketplace (needs VSCE_PAT / vsce login)
-# npx ovsx publish grok-build-community-<version>.vsix   # Open VSX (needs OVSX_PAT)
+# npx ovsx publish grok-build-community-edition-<version>.vsix   # Open VSX (needs OVSX_PAT)
 ```
 
 **Automated release ([release-please](https://github.com/googleapis/release-please)):**

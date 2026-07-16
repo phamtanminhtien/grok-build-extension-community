@@ -1392,7 +1392,7 @@ export class AgentService implements vscode.Disposable {
 
     const identity = <T,>(p: T): T => p;
     const connection = acp
-      .client({ name: "grok-build-community" })
+      .client({ name: "grok-build-community-edition" })
       .onRequest(acp.methods.client.session.requestPermission, (ctx) =>
         this.permissions.handle(ctx.params),
       )
