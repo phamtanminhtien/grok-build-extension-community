@@ -2,11 +2,17 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   appendAssistantText,
+  appendAssistantThought,
   applyAgentMessageChunk,
+  applyAgentThoughtChunk,
   applyToolEvent,
   applyUserMessageChunk,
+  assistantHasRunningThought,
   assistantPlainText,
   emptyAssistant,
+  extractToolContentText,
+  finishAssistantThoughts,
+  formatToolValue,
   isStreamingTailUpdate,
   shouldApplyUserMessageChunk,
   shouldCloseAssistantOnUserChunk,
@@ -136,6 +142,7 @@ describe("timeline: text + tools in stream order", () => {
       id: "t1",
       status: "completed",
       paths: ["/x.ts"],
+      output: "ok",
     });
 
     assert.equal(msg.items.length, 3);
@@ -144,6 +151,7 @@ describe("timeline: text + tools in stream order", () => {
       assert.equal(msg.items[1].tool.status, "completed");
       assert.deepEqual(msg.items[1].tool.paths, ["/x.ts"]);
       assert.equal(msg.items[1].tool.title, "Edit");
+      assert.equal(msg.items[1].tool.output, "ok");
     }
     // Still between the two text segments
     assert.equal(msg.items[0]?.kind, "text");
@@ -167,6 +175,107 @@ describe("timeline: text + tools in stream order", () => {
     assert.equal(asst.items[1]?.kind, "tool");
     assert.equal(asst.items[2]?.kind, "text");
     assert.equal(assistantPlainText(asst), "Looking… Found it.");
+  });
+});
+
+describe("timeline: thoughts stay split across tools", () => {
+  it("does not merge think → tool → think into one thought blob", () => {
+    const msg = emptyAssistant("a1");
+    appendAssistantThought(msg, "Plan A ", { running: true, newId: () => "th1" });
+    appendAssistantThought(msg, "more A", { running: true });
+    finishAssistantThoughts(msg, 1200);
+    upsertAssistantTool(msg, {
+      id: "t1",
+      title: "Read",
+      status: "completed",
+      output: "file body",
+    });
+    appendAssistantThought(msg, "Plan B after tool", {
+      running: true,
+      newId: () => "th2",
+    });
+    finishAssistantThoughts(msg, 800);
+    appendAssistantText(msg, "Final answer");
+
+    assert.equal(msg.items.length, 4);
+    assert.equal(msg.items[0]?.kind, "thought");
+    assert.equal(msg.items[1]?.kind, "tool");
+    assert.equal(msg.items[2]?.kind, "thought");
+    assert.equal(msg.items[3]?.kind, "text");
+
+    if (msg.items[0]?.kind === "thought") {
+      assert.equal(msg.items[0].thought.text, "Plan A more A");
+      assert.equal(msg.items[0].thought.running, false);
+      assert.equal(msg.items[0].thought.elapsedMs, 1200);
+      assert.equal(msg.items[0].thought.id, "th1");
+    }
+    if (msg.items[2]?.kind === "thought") {
+      assert.equal(msg.items[2].thought.text, "Plan B after tool");
+      assert.equal(msg.items[2].thought.running, false);
+      assert.equal(msg.items[2].thought.elapsedMs, 800);
+      assert.equal(msg.items[2].thought.id, "th2");
+    }
+    assert.equal(assistantPlainText(msg), "Final answer");
+    assert.equal(assistantHasRunningThought(msg), false);
+  });
+
+  it("applyAgentThoughtChunk + tool + thought preserve stream order", () => {
+    let state = liveStateWithOptimistic("Q?");
+    const uid = uidSeq(10);
+    state = applyAgentThoughtChunk(state, "Think 1", uid, { running: true });
+    state = applyToolEvent(
+      state,
+      {
+        id: "tc1",
+        title: "bash",
+        status: "completed",
+        input: "ls",
+        output: "a.ts\nb.ts",
+      },
+      uid,
+    );
+    state = applyAgentThoughtChunk(state, "Think 2", uid, { running: true });
+    state = applyAgentMessageChunk(state, "Answer", uid);
+
+    const asst = state.messages.find((m) => m.type === "assistant");
+    assert.ok(asst && asst.type === "assistant");
+    assert.equal(asst.items.map((i) => i.kind).join(","), "thought,tool,thought,text");
+    if (asst.items[0]?.kind === "thought") {
+      assert.equal(asst.items[0].thought.text, "Think 1");
+      assert.equal(asst.items[0].thought.running, false);
+    }
+    if (asst.items[1]?.kind === "tool") {
+      assert.equal(asst.items[1].tool.input, "ls");
+      assert.equal(asst.items[1].tool.output, "a.ts\nb.ts");
+    }
+    if (asst.items[2]?.kind === "thought") {
+      assert.equal(asst.items[2].thought.text, "Think 2");
+      assert.equal(asst.items[2].thought.running, false);
+    }
+  });
+});
+
+describe("tool detail helpers", () => {
+  it("formatToolValue prefers output/command fields", () => {
+    assert.equal(formatToolValue("plain"), "plain");
+    assert.equal(formatToolValue({ output: "hi" }), "hi");
+    assert.equal(formatToolValue({ command: "rg foo", description: "search" }), "rg foo\nsearch");
+    assert.equal(formatToolValue({ stdout: "out", stderr: "err" }), "out\nerr");
+    assert.equal(
+      formatToolValue({ type: "ReadFile", data: { raw_output: "file body" } }),
+      "file body",
+    );
+  });
+
+  it("extractToolContentText flattens ACP content blocks", () => {
+    const text = extractToolContentText([
+      { type: "content", content: { type: "text", text: "hello" } },
+      { type: "diff", path: "/a.ts", oldText: "a", newText: "b" },
+    ]);
+    assert.ok(text);
+    assert.match(text!, /hello/);
+    assert.match(text!, /diff \/a\.ts/);
+    assert.match(text!, /b/);
   });
 });
 

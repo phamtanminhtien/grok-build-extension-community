@@ -26,11 +26,17 @@ import { logError } from "../log/output";
 import { renderMarkdownToSafeHtml } from "./markdown";
 import {
   applyAgentMessageChunk,
+  applyAgentThoughtChunk,
   applyToolEvent,
   applyUserMessageChunk,
+  assistantHasRunningThought,
   assistantPlainText,
   emptyAssistant,
+  extractToolContentText,
+  finishAssistantThoughts,
+  formatToolValue,
   type AssistantItem,
+  type ThoughtSegment,
   type ToolCard,
 } from "./sessionMessageMerge";
 import { parseSessionNotificationMeta } from "./sessionNotificationMeta";
@@ -50,20 +56,20 @@ type UiMessage =
   | {
       type: "assistant";
       id: string;
-      thought: string;
-      /** Live thought stream active (TUI Thinking… header). */
-      thoughtRunning?: boolean;
-      /** Frozen elapsed for "Thought for Xs" after stream ends. */
-      thoughtElapsedMs?: number;
+      /** Ordered timeline: thoughts, text, tools (TUI scrollback order). */
       items: AssistantItem[];
     }
   | { type: "system"; id: string; text: string };
 
 interface SerializedTimelineItem {
-  kind: "text" | "tool";
+  kind: "text" | "tool" | "thought";
   text?: string;
   html?: string;
   tool?: ToolCard;
+  thought?: ThoughtSegment & {
+    html?: string;
+    label?: string;
+  };
 }
 
 interface SerializedMessage {
@@ -71,14 +77,8 @@ interface SerializedMessage {
   id: string;
   text?: string;
   html?: string;
-  thought?: string;
-  thoughtHtml?: string;
-  /** TUI-aligned header: Thinking… / Thought for Xs / Thought */
-  thoughtLabel?: string;
-  /** Open details while running; collapse when finished (TUI fold). */
-  thoughtRunning?: boolean;
   chips?: string[];
-  /** Ordered timeline: text segments interleaved with tool calls. */
+  /** Ordered timeline: thoughts, text, tools in stream order. */
   items?: SerializedTimelineItem[];
 }
 
@@ -328,6 +328,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   endHistoryLoad(): void {
     this.loadingHistory = false;
+    // Collapse any thought still marked running from replay (no wall-clock).
+    for (const m of this.messages) {
+      if (m.type === "assistant") {
+        finishAssistantThoughts(m);
+      }
+    }
     this.currentAssistantId = undefined;
     this.currentUserId = undefined;
     this.thoughtStartedAt = undefined;
@@ -384,7 +390,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   /**
    * End the live thinking stream: freeze elapsed for the TUI-style
-   * "Thought for Xs" label and collapse the block on the next render.
+   * "Thought for Xs" label and collapse the open thought on the timeline.
    * History replay never arms the local timer (matches TUI streaming_replay).
    */
   private finishThoughtPhase(): void {
@@ -396,17 +402,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const msg = this.messages.find(
       (m) => m.type === "assistant" && m.id === id,
     );
-    if (!msg || msg.type !== "assistant" || !msg.thoughtRunning) {
+    if (!msg || msg.type !== "assistant" || !assistantHasRunningThought(msg)) {
       this.thoughtStartedAt = undefined;
       return;
     }
-    msg.thoughtRunning = false;
-    if (
-      this.thoughtStartedAt != null &&
-      (msg.thoughtElapsedMs == null || msg.thoughtElapsedMs <= 0)
-    ) {
-      msg.thoughtElapsedMs = Math.max(0, Date.now() - this.thoughtStartedAt);
-    }
+    const elapsed =
+      this.thoughtStartedAt != null
+        ? Math.max(0, Date.now() - this.thoughtStartedAt)
+        : undefined;
+    finishAssistantThoughts(msg, elapsed);
     this.thoughtStartedAt = undefined;
   }
 
@@ -844,6 +848,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.finishThoughtPhase();
       const paths =
         update.locations?.map((l) => l.path).filter(Boolean) ?? [];
+      // Capture input/output so expanding a tool row shows results (TUI fold).
+      const input = formatToolValue(
+        (update as { rawInput?: unknown }).rawInput,
+      );
+      const contentText = extractToolContentText(
+        (update as { content?: unknown }).content,
+      );
+      const rawOut = formatToolValue(
+        (update as { rawOutput?: unknown }).rawOutput,
+      );
+      const output = contentText || rawOut || undefined;
       const next = applyToolEvent(
         {
           messages: this.messages,
@@ -857,6 +872,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           status: update.status ?? undefined,
           kind: update.kind ?? undefined,
           paths,
+          input: input ?? undefined,
+          output,
         },
         uid,
       );
@@ -881,28 +898,37 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    // agent_thought_chunk — TUI ThinkingBlock: header "Thinking…" while live
-    this.currentUserId = undefined;
-    if (!this.currentAssistantId) {
-      const asstId = uid();
-      this.currentAssistantId = asstId;
-      this.messages.push(emptyAssistant(asstId));
-    }
-    const msg = this.messages.find(
-      (m) => m.type === "assistant" && m.id === this.currentAssistantId,
-    );
-    if (!msg || msg.type !== "assistant") {
+    // agent_thought_chunk — timeline Thought item (TUI ThinkingBlock order)
+    if (!showThoughts || update.content.type !== "text") {
       return;
     }
-    if (showThoughts && update.content.type === "text") {
-      msg.thought += update.content.text;
-      // Live only: arm running timer (history replay has no local wall-clock).
-      if (!this.loadingHistory) {
-        if (!msg.thoughtRunning) {
-          msg.thoughtRunning = true;
-          this.thoughtStartedAt = Date.now();
-        }
-      }
+    const thoughtText = update.content.text;
+    const wasRunning =
+      !!this.currentAssistantId &&
+      (() => {
+        const m = this.messages.find(
+          (x) => x.type === "assistant" && x.id === this.currentAssistantId,
+        );
+        return !!m && m.type === "assistant" && assistantHasRunningThought(m);
+      })();
+    const next = applyAgentThoughtChunk(
+      {
+        messages: this.messages,
+        currentUserId: this.currentUserId,
+        currentAssistantId: this.currentAssistantId,
+        loadingHistory: this.loadingHistory,
+      },
+      thoughtText,
+      uid,
+      // Keep segment open so consecutive chunks merge; tool/text/finish closes it.
+      { running: true },
+    );
+    this.messages = next.messages as UiMessage[];
+    this.currentUserId = next.currentUserId;
+    this.currentAssistantId = next.currentAssistantId;
+    // Live only: arm wall-clock for "Thought for Xs" (history has no timer).
+    if (!this.loadingHistory && !wasRunning) {
+      this.thoughtStartedAt = Date.now();
     }
     this.scheduleMessagesPost();
   }
@@ -982,32 +1008,37 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
               html: this.cachedMarkdown(`${m.id}:t${i}`, item.text || ""),
             };
           }
+          if (item.kind === "thought") {
+            const t = item.thought;
+            return {
+              kind: "thought",
+              thought: {
+                ...t,
+                html: t.text
+                  ? this.cachedMarkdown(`${m.id}:thought:${t.id}`, t.text)
+                  : "",
+                label: formatThoughtHeader({
+                  running: !!t.running,
+                  elapsedMs: t.elapsedMs,
+                }),
+              },
+            };
+          }
           return { kind: "tool", tool: item.tool };
         });
         const plain = assistantPlainText(m);
-        const thoughtRunning = !!m.thoughtRunning;
-        // Live elapsed while streaming so the header can stay "Thinking…"
-        // (body updates continuously); freeze only when finishThoughtPhase runs.
+        const hasStructured = items.some(
+          (it) => it.kind === "tool" || it.kind === "thought",
+        );
         return {
           type: m.type,
           id: m.id,
           text: plain,
-          // Legacy single-bubble fields kept empty when timeline has tools;
+          // Legacy single-bubble fields kept empty when timeline has structure;
           // webview prefers `items` when present.
-          html: items.some((it) => it.kind === "tool")
+          html: hasStructured
             ? ""
             : this.cachedMarkdown(`${m.id}:t0`, plain || ""),
-          thought: m.thought,
-          thoughtHtml: m.thought
-            ? this.cachedMarkdown(`${m.id}:thought`, m.thought)
-            : "",
-          thoughtRunning,
-          thoughtLabel: m.thought
-            ? formatThoughtHeader({
-                running: thoughtRunning,
-                elapsedMs: m.thoughtElapsedMs,
-              })
-            : undefined,
           items,
         };
       }
@@ -1615,6 +1646,33 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   .tool-row .tool-detail button.link:hover { text-decoration: underline; }
   .tool-row .tool-meta {
     opacity: 0.75;
+  }
+  /* Tool expand body — TUI-style truncated output */
+  .tool-row .tool-io {
+    margin: 0;
+    padding: 6px 8px;
+    max-height: 220px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--fg);
+    background: color-mix(in srgb, var(--fg) 6%, transparent);
+    border-radius: 4px;
+  }
+  .tool-row .tool-io-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.7;
+    margin-top: 2px;
+  }
+  /* Thoughts inside the assistant timeline (not only at the top) */
+  .assistant-timeline > .thought {
+    margin-bottom: 2px;
   }
 
   /* ── Empty state ── */
@@ -2594,16 +2652,17 @@ function fillTextBubble(b, text, html) {
 }
 
 /** TUI ThinkingBlock header: Thinking… / Thought for Xs / Thought */
-function thoughtHeaderLabel(m) {
-  if (m.thoughtLabel) return m.thoughtLabel;
-  if (m.thoughtRunning) return 'Thinking…';
+function thoughtHeaderLabel(t) {
+  if (t && t.label) return t.label;
+  if (t && t.running) return 'Thinking…';
   return 'Thought';
 }
 
-function fillThoughtBlock(d, m) {
-  d.className = 'thought' + (m.thoughtRunning ? ' thought-running' : '');
-  // Running → open (truncated-like); finished → collapsed (TUI fold).
-  d.open = !!m.thoughtRunning;
+/** Fill a thought <details> from a timeline thought segment. */
+function fillThoughtBlock(d, t) {
+  const running = !!(t && t.running);
+  d.className = 'thought' + (running ? ' thought-running' : '');
+  if (t && t.id) d.dataset.thoughtId = t.id;
   let summary = d.querySelector('summary');
   if (!summary) {
     summary = document.createElement('summary');
@@ -2611,7 +2670,7 @@ function fillThoughtBlock(d, m) {
   }
   summary.innerHTML =
     icon('brain') +
-    ' <span class="thought-label">' + esc(thoughtHeaderLabel(m)) + '</span>';
+    ' <span class="thought-label">' + esc(thoughtHeaderLabel(t)) + '</span>';
   let body = d.querySelector('.thought-body');
   if (!body) {
     body = document.createElement('div');
@@ -2620,14 +2679,22 @@ function fillThoughtBlock(d, m) {
   } else {
     body.className = 'thought-body md';
   }
-  if (m.thoughtHtml) {
-    body.innerHTML = m.thoughtHtml;
+  if (t && t.html) {
+    body.innerHTML = t.html;
   } else {
-    body.textContent = m.thought || '';
+    body.textContent = (t && t.text) || '';
   }
-  if (m.thoughtRunning && body.scrollHeight > body.clientHeight) {
+  if (running && body.scrollHeight > body.clientHeight) {
     body.scrollTop = body.scrollHeight;
   }
+}
+
+function renderThoughtRow(t, forceOpen) {
+  const d = document.createElement('details');
+  fillThoughtBlock(d, t);
+  // Running → open; finished → collapsed unless user had it expanded (forceOpen).
+  d.open = !!(t && t.running) || !!forceOpen;
+  return d;
 }
 
 function renderToolRow(t, open) {
@@ -2647,7 +2714,7 @@ function renderToolRow(t, open) {
   detail.className = 'tool-detail';
   const metaBits = [];
   if (t.kind) metaBits.push(esc(t.kind));
-  if (t.id) metaBits.push('<span class="tool-meta">' + esc(t.id) + '</span>');
+  if (t.status) metaBits.push(esc(t.status));
   if (metaBits.length) {
     const meta = document.createElement('div');
     meta.innerHTML = metaBits.join(' · ');
@@ -2666,7 +2733,29 @@ function renderToolRow(t, open) {
           : '');
     }).join('');
     detail.appendChild(paths);
-  } else if (!metaBits.length) {
+  }
+  // Input / output body — what TUI shows when a tool block is expanded.
+  if (t.input) {
+    const lab = document.createElement('div');
+    lab.className = 'tool-io-label';
+    lab.textContent = 'Input';
+    detail.appendChild(lab);
+    const pre = document.createElement('pre');
+    pre.className = 'tool-io';
+    pre.textContent = t.input;
+    detail.appendChild(pre);
+  }
+  if (t.output) {
+    const lab = document.createElement('div');
+    lab.className = 'tool-io-label';
+    lab.textContent = 'Output';
+    detail.appendChild(lab);
+    const pre = document.createElement('pre');
+    pre.className = 'tool-io';
+    pre.textContent = t.output;
+    detail.appendChild(pre);
+  }
+  if (!t.input && !t.output && !(t.paths && t.paths.length) && !metaBits.length) {
     const empty = document.createElement('div');
     empty.className = 'tool-meta';
     empty.textContent = 'No extra details';
@@ -2676,8 +2765,8 @@ function renderToolRow(t, open) {
   return d;
 }
 
-/** Build timeline nodes (text bubbles + tool rows) in stream order. */
-function renderAssistantTimeline(m, openToolIds) {
+/** Build timeline nodes (thoughts + text + tools) in stream order. */
+function renderAssistantTimeline(m, openToolIds, openThoughtIds) {
   const timeline = document.createElement('div');
   timeline.className = 'assistant-timeline';
   const items = Array.isArray(m.items) ? m.items : null;
@@ -2696,6 +2785,11 @@ function renderAssistantTimeline(m, openToolIds) {
       } else if (item.kind === 'tool' && item.tool) {
         const open = openToolIds && openToolIds.has(item.tool.id);
         timeline.appendChild(renderToolRow(item.tool, open));
+      } else if (item.kind === 'thought' && item.thought) {
+        const open =
+          !!item.thought.running ||
+          (openThoughtIds && openThoughtIds.has(item.thought.id));
+        timeline.appendChild(renderThoughtRow(item.thought, open));
       }
     }
     return timeline;
@@ -2727,6 +2821,15 @@ function collectOpenToolIds(wrap) {
   return ids;
 }
 
+function collectOpenThoughtIds(wrap) {
+  const ids = new Set();
+  wrap.querySelectorAll('details.thought[open]').forEach((el) => {
+    const id = el.dataset.thoughtId;
+    if (id) ids.add(id);
+  });
+  return ids;
+}
+
 function renderOneMessage(m) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + m.type;
@@ -2745,12 +2848,8 @@ function renderOneMessage(m) {
     b.textContent = m.text || '';
     wrap.appendChild(b);
   } else if (m.type === 'assistant') {
-    if (m.thought) {
-      const d = document.createElement('details');
-      fillThoughtBlock(d, m);
-      wrap.appendChild(d);
-    }
-    wrap.appendChild(renderAssistantTimeline(m, null));
+    // Thoughts live on the timeline with tools/text (TUI scrollback order).
+    wrap.appendChild(renderAssistantTimeline(m, null, null));
   } else {
     const b = document.createElement('div');
     b.className = 'bubble';
@@ -2785,22 +2884,15 @@ function patchLastAssistant(m) {
   }
   if (!wrap) return false;
 
-  const openIds = collectOpenToolIds(wrap);
+  // Preserve which tool/thought rows the user has expanded across stream patches.
+  const openToolIds = collectOpenToolIds(wrap);
+  const openThoughtIds = collectOpenThoughtIds(wrap);
 
-  // Thought block (TUI: Thinking… while running, Thought for Xs when done)
-  let thought = wrap.querySelector(':scope > details.thought');
-  if (m.thought) {
-    if (!thought) {
-      thought = document.createElement('details');
-      wrap.insertBefore(thought, wrap.firstChild);
-    }
-    fillThoughtBlock(thought, m);
-  } else if (thought) {
-    thought.remove();
-  }
+  // Drop legacy top-level thought (pre-timeline); everything is in the timeline now.
+  wrap.querySelectorAll(':scope > details.thought').forEach((el) => el.remove());
 
   const oldTimeline = wrap.querySelector(':scope > .assistant-timeline');
-  const nextTimeline = renderAssistantTimeline(m, openIds);
+  const nextTimeline = renderAssistantTimeline(m, openToolIds, openThoughtIds);
   if (oldTimeline) oldTimeline.replaceWith(nextTimeline);
   else wrap.appendChild(nextTimeline);
   return true;
