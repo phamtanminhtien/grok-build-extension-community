@@ -80,7 +80,7 @@ Verified headless 2026-07-16: `initialize` + `session/new` + prompt → `L0 OK` 
 ### Scope
 
 - [x] Diff presentation for edits
-- [x] Session resume / history list (local index always; ACP `session/load` when advertised)
+- [x] Session resume / history list (`~/.grok/sessions` like TUI + ACP `session/load`)
 - [x] Richer `@` context picker
 - [x] Model QuickPick (settings + restart; curated list + free text)
 - [ ] Better terminal story (per [04](04-host-capabilities.md) decision)

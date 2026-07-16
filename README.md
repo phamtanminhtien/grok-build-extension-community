@@ -62,7 +62,7 @@ Full checklist: [docs/L0-manual-test.md](docs/L0-manual-test.md)
 | `Grok Build: Cancel Turn` | `session/cancel` |
 | `Grok Build: Add Context…` | `@` sticky context picker |
 | `Grok Build: Select Model` | QuickPick → `grok.model` + agent restart |
-| `Grok Build: Resume Session…` | Local history ± ACP `session/list`/`load` |
+| `Grok Build: Resume Session…` | Same store as TUI: `~/.grok/sessions` + ACP `session/load` |
 | `Grok Build: Review Edits…` | Multi-file diff review |
 | `Grok Build: Login / Set API Key` | SecretStorage API key |
 | `Grok Build: Smoke Test (L0)` | Headless-style prompt via agent |

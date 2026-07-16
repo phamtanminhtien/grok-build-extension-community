@@ -66,6 +66,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly disposables: vscode.Disposable[] = [];
   private history: SessionHistoryStore | undefined;
   private diffs: DiffReviewService | undefined;
+  /** True while ACP session/load is replaying history into the UI. */
+  private loadingHistory = false;
+  private currentUserId: string | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -197,7 +200,38 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   clearMessages(): void {
     this.messages = [];
     this.currentAssistantId = undefined;
-    this.scheduleMessagesPost();
+    this.currentUserId = undefined;
+    this.scheduleMessagesPost(true);
+  }
+
+  /**
+   * Prepare UI for ACP session/load history replay.
+   */
+  beginHistoryLoad(sessionId: string): void {
+    this.loadingHistory = true;
+    this.messages = [];
+    this.currentAssistantId = undefined;
+    this.currentUserId = undefined;
+    this.diffs?.clear();
+    this.pushSystem(`Loading session ${sessionId.slice(0, 8)}…`);
+    this.post({ type: "busy", busy: true });
+  }
+
+  endHistoryLoad(): void {
+    this.loadingHistory = false;
+    this.currentAssistantId = undefined;
+    this.currentUserId = undefined;
+    this.post({ type: "busy", busy: false });
+    // Drop the transient "Loading…" system line if it is the only system msg at start
+    if (
+      this.messages.length > 0 &&
+      this.messages[0]?.type === "system" &&
+      this.messages[0].text.startsWith("Loading session")
+    ) {
+      this.messages.shift();
+    }
+    this.scheduleMessagesPost(true);
+    void this.persistHistory();
   }
 
   async refreshState(): Promise<void> {
@@ -341,6 +375,45 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private handleSessionUpdate(n: SessionNotification): void {
     const update = n.update;
     const showThoughts = getSettings().showThoughts;
+    const kind = update.sessionUpdate;
+
+    // History replay + live: user turns close the current assistant bubble
+    if (kind === "user_message_chunk") {
+      this.currentAssistantId = undefined;
+      if (!this.currentUserId) {
+        const id = uid();
+        this.currentUserId = id;
+        this.messages.push({ type: "user", id, text: "", chips: [] });
+      }
+      const user = this.messages.find(
+        (m) => m.type === "user" && m.id === this.currentUserId,
+      );
+      if (user && user.type === "user" && update.content.type === "text") {
+        user.text += update.content.text;
+      }
+      this.scheduleMessagesPost();
+      return;
+    }
+
+    // End of a turn (seen on session/load replay; may be extension-specific)
+    if ((kind as string) === "turn_completed") {
+      this.currentUserId = undefined;
+      this.currentAssistantId = undefined;
+      this.scheduleMessagesPost();
+      return;
+    }
+
+    if (
+      kind !== "agent_message_chunk" &&
+      kind !== "agent_thought_chunk" &&
+      kind !== "tool_call" &&
+      kind !== "tool_call_update"
+    ) {
+      return;
+    }
+
+    // Starting assistant output ends user chunk accumulation
+    this.currentUserId = undefined;
 
     if (!this.currentAssistantId) {
       const asstId = uid();
@@ -361,7 +434,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    switch (update.sessionUpdate) {
+    switch (kind) {
       case "agent_message_chunk":
         if (update.content.type === "text") {
           msg.text += update.content.text;
@@ -382,12 +455,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           kind: update.kind ?? undefined,
           paths,
         });
-        void this.maybeSnapshotToolPaths(
-          update.toolCallId,
-          update.title ?? "",
-          update.kind,
-          paths,
-        );
+        if (!this.loadingHistory) {
+          void this.maybeSnapshotToolPaths(
+            update.toolCallId,
+            update.title ?? "",
+            update.kind,
+            paths,
+          );
+        }
         break;
       }
       case "tool_call_update": {
@@ -413,7 +488,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             paths,
           });
         }
-        if (paths.length) {
+        if (paths.length && !this.loadingHistory) {
           void this.maybeSnapshotToolPaths(
             update.toolCallId,
             update.title ?? t?.title ?? "",
