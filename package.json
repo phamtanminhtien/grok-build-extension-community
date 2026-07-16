@@ -248,12 +248,14 @@
     "watch": "node esbuild.mjs --watch",
     "compile": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node scripts/run-tests.mjs",
     "package": "vsce package --no-dependencies",
     "smoke:cli": "node scripts/smoke-cli.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.2.1",
     "@tabler/icons-webfont": "^3.44.0",
+    "marked": "^15.0.12",
     "zod": "^3.25.0"
   },
   "devDependencies": {
