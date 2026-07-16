@@ -2,7 +2,7 @@
   "name": "grok-build-community",
   "displayName": "Grok Build - Community",
   "description": "Community VS Code host for Grok Build — thin ACP client for `grok agent stdio`.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "xai",
   "license": "UNLICENSED",
   "engines": {
@@ -129,6 +129,29 @@
         "category": "Grok Build"
       },
       {
+        "command": "grok.addContext",
+        "title": "Grok Build: Add Context…",
+        "category": "Grok Build",
+        "icon": "$(mention)"
+      },
+      {
+        "command": "grok.selectModel",
+        "title": "Grok Build: Select Model",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.resumeSession",
+        "title": "Grok Build: Resume Session…",
+        "category": "Grok Build",
+        "icon": "$(history)"
+      },
+      {
+        "command": "grok.reviewEdits",
+        "title": "Grok Build: Review Edits…",
+        "category": "Grok Build",
+        "icon": "$(diff)"
+      },
+      {
         "command": "grok.smokeTest",
         "title": "Grok Build: Smoke Test (L0)",
         "category": "Grok Build"
@@ -138,6 +161,16 @@
       "view/title": [
         {
           "command": "grok.newSession",
+          "when": "view == grok.chatView || view == grok.chatView.secondary",
+          "group": "navigation"
+        },
+        {
+          "command": "grok.resumeSession",
+          "when": "view == grok.chatView || view == grok.chatView.secondary",
+          "group": "navigation"
+        },
+        {
+          "command": "grok.reviewEdits",
           "when": "view == grok.chatView || view == grok.chatView.secondary",
           "group": "navigation"
         },

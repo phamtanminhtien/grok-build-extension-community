@@ -4,9 +4,20 @@ import type { AgentService } from "../agent/agentService";
 import type { AuthService } from "../auth/authService";
 import { promptAndStoreApiKey } from "../auth/authService";
 import { BinaryNotFoundError } from "../agent/binaryResolver";
-import { buildPromptBlocks } from "../context/editorContext";
-import { getSettings } from "../config/settings";
+import {
+  buildPromptBlocks,
+  type ContextChip,
+} from "../context/editorContext";
+import { pickContextChips } from "../context/contextPicker";
+import { getSettings, resolveSessionCwd } from "../config/settings";
 import { logError } from "../log/output";
+import { renderMarkdownToSafeHtml } from "./markdown";
+import type { DiffReviewService } from "../diff/diffReviewService";
+import {
+  deriveTitle,
+  type SessionHistoryStore,
+} from "../session/sessionHistoryStore";
+import { readTextFileHost } from "../agent/hostFs";
 
 type UiMessage =
   | { type: "user"; id: string; text: string; chips?: string[] }
@@ -27,22 +38,34 @@ interface ToolCard {
   paths: string[];
 }
 
+interface SerializedMessage {
+  type: string;
+  id: string;
+  text?: string;
+  html?: string;
+  thought?: string;
+  thoughtHtml?: string;
+  chips?: string[];
+  tools?: ToolCard[];
+}
+
 /**
- * Sidebar webview chat for Grok Build - Community (L1).
+ * Sidebar webview chat for Grok Build - Community (L1 + L2 polish).
  */
 export class ChatViewProvider implements vscode.WebviewViewProvider {
-  /** Primary Activity Bar (left) — always available. */
   public static readonly viewType = "grok.chatView";
-  /** Secondary Side Bar (right) — tab strip next to Chat / Claude / Codex. */
   public static readonly secondaryViewType = "grok.chatView.secondary";
 
-  /** Last resolved webview (either location). */
   private view?: vscode.WebviewView;
   private readonly views = new Map<string, vscode.WebviewView>();
   private supportsSecondarySidebar = true;
   private messages: UiMessage[] = [];
   private currentAssistantId: string | undefined;
+  private stickyChips: ContextChip[] = [];
+  private messagesFlushTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly disposables: vscode.Disposable[] = [];
+  private history: SessionHistoryStore | undefined;
+  private diffs: DiffReviewService | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -64,11 +87,30 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
               : state.kind === "error"
                 ? state.message
                 : "",
+          model: getSettings().model || "default",
         }),
       ),
       this.agent.onTurnEnd(() => {
         this.currentAssistantId = undefined;
         this.post({ type: "busy", busy: false });
+        void this.persistHistory();
+      }),
+    );
+  }
+
+  setHistoryStore(store: SessionHistoryStore): void {
+    this.history = store;
+  }
+
+  setDiffReview(diffs: DiffReviewService): void {
+    this.diffs = diffs;
+    this.disposables.push(
+      diffs.onDidChange((entries) => {
+        this.post({
+          type: "review",
+          count: entries.length,
+          paths: entries.map((e) => e.path),
+        });
       }),
     );
   }
@@ -84,9 +126,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.options = {
       enableScripts: true,
-      localResourceRoots: [
-        vscode.Uri.joinPath(this.extensionUri, "media"),
-      ],
+      localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, "media")],
     };
     webviewView.webview.html = this.getHtml(webviewView.webview);
 
@@ -106,14 +146,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
     });
 
-    // Re-hydrate UI when webview becomes visible again
     void this.pushFullState();
   }
 
-  /**
-   * Prefer secondary sidebar when available (agent tab strip), else activity bar.
-   * Both locations stay registered; user can open either.
-   */
   async openChat(): Promise<void> {
     if (this.supportsSecondarySidebar) {
       try {
@@ -129,7 +164,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         );
         return;
       } catch {
-        // Secondary not visible / not resolved yet — fall through to activity bar
+        /* fall through */
       }
     }
     await vscode.commands.executeCommand(
@@ -137,7 +172,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     );
   }
 
-  /** Open the classic left Activity Bar view explicitly. */
   async openActivityBarChat(): Promise<void> {
     await vscode.commands.executeCommand(
       `${ChatViewProvider.viewType}.focus`,
@@ -149,7 +183,31 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     await this.handleSend(text);
   }
 
+  async addContextFromPicker(): Promise<void> {
+    await this.openChat();
+    const picked = await pickContextChips();
+    for (const c of picked) {
+      if (!this.stickyChips.some((x) => x.id === c.id)) {
+        this.stickyChips.push(c);
+      }
+    }
+    this.postSticky();
+  }
+
+  clearMessages(): void {
+    this.messages = [];
+    this.currentAssistantId = undefined;
+    this.scheduleMessagesPost();
+  }
+
+  async refreshState(): Promise<void> {
+    await this.pushFullState();
+  }
+
   dispose(): void {
+    if (this.messagesFlushTimer) {
+      clearTimeout(this.messagesFlushTimer);
+    }
     for (const d of this.disposables) {
       d.dispose();
     }
@@ -159,6 +217,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     type: string;
     text?: string;
     path?: string;
+    id?: string;
   }): Promise<void> {
     switch (msg.type) {
       case "ready":
@@ -178,9 +237,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
       case "openFile":
         if (msg.path) {
-          const uri = vscode.Uri.file(msg.path);
-          await vscode.window.showTextDocument(uri);
+          await vscode.window.showTextDocument(vscode.Uri.file(msg.path));
         }
+        break;
+      case "openDiff":
+        if (msg.path && this.diffs) {
+          await this.diffs.openDiff(msg.path);
+        }
+        break;
+      case "reviewEdits":
+        await this.diffs?.pickAndOpen();
         break;
       case "login":
         await promptAndStoreApiKey(this.auth);
@@ -195,6 +261,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         }
         await this.pushFullState();
         break;
+      case "addContext":
+        await this.addContextFromPicker();
+        break;
+      case "removeChip":
+        if (msg.id) {
+          this.stickyChips = this.stickyChips.filter((c) => c.id !== msg.id);
+          this.postSticky();
+        }
+        break;
+      case "selectModel":
+        await vscode.commands.executeCommand("grok.selectModel");
+        break;
+      case "resumeSession":
+        await vscode.commands.executeCommand("grok.resumeSession");
+        break;
       default:
         break;
     }
@@ -206,7 +287,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const { blocks, chips } = buildPromptBlocks(text);
+    const { blocks, chips } = buildPromptBlocks(text, {
+      stickyChips: this.stickyChips,
+    });
     const userId = uid();
     this.messages.push({
       type: "user",
@@ -224,7 +307,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       thought: "",
       tools: [],
     });
-    this.post({ type: "messages", messages: this.messages });
+    this.scheduleMessagesPost(true);
     this.post({ type: "busy", busy: true });
 
     try {
@@ -240,14 +323,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private async handleNewSession(): Promise<void> {
     try {
+      await this.persistHistory();
       if (this.agent.isBusy()) {
         await this.agent.cancelTurn();
       }
       const id = await this.agent.newSession();
       this.messages = [];
       this.currentAssistantId = undefined;
+      this.diffs?.clear();
       this.pushSystem(`New session ${id.slice(0, 8)}…`);
-      this.post({ type: "messages", messages: this.messages });
+      this.scheduleMessagesPost(true);
     } catch (err) {
       this.pushSystem(errMessage(err));
     }
@@ -258,7 +343,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const showThoughts = getSettings().showThoughts;
 
     if (!this.currentAssistantId) {
-      // Create assistant bubble if stream arrives without local send (edge)
       const asstId = uid();
       this.currentAssistantId = asstId;
       this.messages.push({
@@ -298,10 +382,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           kind: update.kind ?? undefined,
           paths,
         });
+        void this.maybeSnapshotToolPaths(
+          update.toolCallId,
+          update.title ?? "",
+          update.kind,
+          paths,
+        );
         break;
       }
       case "tool_call_update": {
         const t = msg.tools.find((x) => x.id === update.toolCallId);
+        const paths =
+          update.locations?.map((l) => l.path).filter(Boolean) ?? [];
         if (t) {
           if (update.status) {
             t.status = update.status;
@@ -309,8 +401,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           if (update.title) {
             t.title = update.title;
           }
-          if (update.locations?.length) {
-            t.paths = update.locations.map((l) => l.path);
+          if (paths.length) {
+            t.paths = paths;
           }
         } else {
           msg.tools.push({
@@ -318,8 +410,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             title: update.title ?? update.toolCallId,
             status: update.status ?? "pending",
             kind: update.kind ?? undefined,
-            paths: update.locations?.map((l) => l.path) ?? [],
+            paths,
           });
+        }
+        if (paths.length) {
+          void this.maybeSnapshotToolPaths(
+            update.toolCallId,
+            update.title ?? t?.title ?? "",
+            update.kind ?? t?.kind,
+            paths,
+          );
         }
         break;
       }
@@ -327,12 +427,116 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
     }
 
-    this.post({ type: "messages", messages: this.messages });
+    this.scheduleMessagesPost();
+  }
+
+  private async maybeSnapshotToolPaths(
+    toolCallId: string,
+    title: string,
+    kind: string | undefined,
+    paths: string[],
+  ): Promise<void> {
+    if (!this.diffs || paths.length === 0) {
+      return;
+    }
+    const s = `${kind ?? ""} ${title}`.toLowerCase();
+    const isEdit = /edit|write|patch|replace|create.?file|search_replace|apply/.test(
+      s,
+    );
+    if (!isEdit) {
+      return;
+    }
+    for (const p of paths) {
+      await this.diffs.captureIfMissing(p, async () => {
+        const { content } = await readTextFileHost(p);
+        return content;
+      });
+      this.diffs.recordEdit({ path: p, toolCallId, title });
+    }
   }
 
   private pushSystem(text: string): void {
     this.messages.push({ type: "system", id: uid(), text });
-    this.post({ type: "messages", messages: this.messages });
+    this.scheduleMessagesPost(true);
+  }
+
+  private serializeMessages(messages: UiMessage[]): SerializedMessage[] {
+    return messages.map((m) => {
+      if (m.type === "assistant") {
+        return {
+          type: m.type,
+          id: m.id,
+          text: m.text,
+          html: renderMarkdownToSafeHtml(m.text || ""),
+          thought: m.thought,
+          thoughtHtml: m.thought
+            ? renderMarkdownToSafeHtml(m.thought)
+            : "",
+          tools: m.tools,
+        };
+      }
+      if (m.type === "user") {
+        return {
+          type: m.type,
+          id: m.id,
+          text: m.text,
+          chips: m.chips,
+        };
+      }
+      return { type: m.type, id: m.id, text: m.text };
+    });
+  }
+
+  private scheduleMessagesPost(immediate = false): void {
+    if (immediate) {
+      if (this.messagesFlushTimer) {
+        clearTimeout(this.messagesFlushTimer);
+        this.messagesFlushTimer = undefined;
+      }
+      this.post({
+        type: "messages",
+        messages: this.serializeMessages(this.messages),
+      });
+      return;
+    }
+    if (this.messagesFlushTimer) {
+      return;
+    }
+    this.messagesFlushTimer = setTimeout(() => {
+      this.messagesFlushTimer = undefined;
+      this.post({
+        type: "messages",
+        messages: this.serializeMessages(this.messages),
+      });
+    }, 50);
+  }
+
+  private postSticky(): void {
+    this.post({
+      type: "stickyChips",
+      chips: this.stickyChips.map((c) => ({ id: c.id, label: c.label })),
+    });
+  }
+
+  private async persistHistory(): Promise<void> {
+    if (!this.history) {
+      return;
+    }
+    const sessionId = this.agent.getSessionId();
+    if (!sessionId) {
+      return;
+    }
+    const firstUser = this.messages.find((m) => m.type === "user");
+    const preview =
+      firstUser && firstUser.type === "user" ? firstUser.text : "";
+    await this.history.upsert({
+      sessionId,
+      cwd: resolveSessionCwd(),
+      title: deriveTitle(preview, sessionId),
+      updatedAt: Date.now(),
+      preview: preview.slice(0, 200),
+      messageCount: this.messages.length,
+    });
   }
 
   private async pushFullState(): Promise<void> {
@@ -340,7 +544,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const state = this.agent.getState();
     this.post({
       type: "init",
-      messages: this.messages,
+      messages: this.serializeMessages(this.messages),
       busy: this.agent.isBusy(),
       hasAuth,
       agentState: state.kind,
@@ -351,11 +555,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             ? state.message
             : "",
       model: getSettings().model || "default",
+      stickyChips: this.stickyChips.map((c) => ({
+        id: c.id,
+        label: c.label,
+      })),
+      reviewCount: this.diffs?.getEntries().length ?? 0,
     });
   }
 
   private post(payload: unknown): void {
-    // Broadcast to every live location (activity bar + secondary sidebar)
     if (this.views.size === 0) {
       void this.view?.webview.postMessage(payload);
       return;
@@ -434,6 +642,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     --error: var(--vscode-errorForeground);
     --font: var(--vscode-font-family);
     --font-size: var(--vscode-font-size, 13px);
+    --code-bg: var(--vscode-textCodeBlock-background, rgba(127,127,127,0.12));
   }
   * { box-sizing: border-box; }
   html, body {
@@ -447,19 +656,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   @media (prefers-reduced-motion: reduce) {
     .ti-spin { animation: none; }
   }
-  #app {
-    display: flex; flex-direction: column; height: 100%;
-  }
+  #app { display: flex; flex-direction: column; height: 100%; }
   header {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: center; gap: 6px;
     padding: 8px 10px; border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
+    flex-shrink: 0; flex-wrap: wrap;
   }
   header .brand {
     display: flex; align-items: center; gap: 6px;
     font-weight: 600; flex: 1; min-width: 0;
   }
-  header .brand .ti { font-size: 1.2em; flex-shrink: 0; }
   header .brand .title {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
@@ -467,6 +673,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     color: var(--muted); font-size: 11px;
     display: flex; align-items: center; gap: 4px;
   }
+  header button.linkish {
+    background: transparent; color: var(--link); padding: 2px 6px;
+    font-size: 11px; border: 1px solid transparent; border-radius: 4px;
+  }
+  header button.linkish:hover { border-color: var(--border); }
+  #review-bar {
+    display: none; padding: 6px 10px; border-bottom: 1px solid var(--border);
+    font-size: 12px; align-items: center; gap: 8px; flex-shrink: 0;
+  }
+  #review-bar.visible { display: flex; }
   #messages {
     flex: 1; overflow-y: auto; padding: 10px;
     display: flex; flex-direction: column; gap: 10px;
@@ -476,24 +692,53 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   .msg.assistant, .msg.system { align-self: stretch; }
   .bubble {
     padding: 8px 10px; border-radius: 8px;
-    white-space: pre-wrap; word-break: break-word; line-height: 1.45;
+    word-break: break-word; line-height: 1.45;
   }
   .msg.user .bubble {
     background: var(--bubble-user); color: var(--bubble-user-fg);
+    white-space: pre-wrap;
   }
-  .msg.assistant .bubble {
-    background: var(--bubble-asst);
+  .msg.assistant .bubble { background: var(--bubble-asst); }
+  .msg.assistant .bubble.md p { margin: 0 0 0.6em; }
+  .msg.assistant .bubble.md p:last-child { margin-bottom: 0; }
+  .msg.assistant .bubble.md pre {
+    position: relative; background: var(--code-bg); padding: 8px 10px;
+    border-radius: 6px; overflow: auto; margin: 0.5em 0;
+  }
+  .msg.assistant .bubble.md code {
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 0.92em;
+  }
+  .msg.assistant .bubble.md :not(pre) > code {
+    background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px;
+  }
+  .msg.assistant .bubble.md table {
+    border-collapse: collapse; width: 100%; margin: 0.5em 0; font-size: 0.92em;
+  }
+  .msg.assistant .bubble.md th,
+  .msg.assistant .bubble.md td {
+    border: 1px solid var(--border); padding: 4px 6px;
+  }
+  .copy-code {
+    position: absolute; top: 4px; right: 4px;
+    background: var(--btn-sec); color: var(--btn-sec-fg);
+    border: none; border-radius: 3px; padding: 2px 6px;
+    font-size: 10px; cursor: pointer;
   }
   .msg.system .bubble {
     color: var(--muted); font-size: 12px; padding: 4px 0; background: transparent;
-    display: flex; align-items: flex-start; gap: 6px;
+    display: flex; align-items: flex-start; gap: 6px; white-space: pre-wrap;
   }
-  .msg.system .bubble .ti { margin-top: 1px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; justify-content: flex-end; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+  .msg.user .chips { justify-content: flex-end; }
   .chip {
     font-size: 11px; padding: 2px 8px; border-radius: 999px;
     border: 1px solid var(--border); color: var(--muted);
     display: inline-flex; align-items: center; gap: 4px;
+  }
+  .chip button {
+    background: transparent; border: none; color: var(--muted);
+    cursor: pointer; padding: 0 2px; font-size: 12px; line-height: 1;
   }
   .thought {
     margin-bottom: 6px; font-size: 12px; color: var(--muted);
@@ -503,9 +748,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     display: flex; align-items: center; gap: 6px; list-style: none;
   }
   .thought summary::-webkit-details-marker { display: none; }
-  .thought pre {
-    margin: 4px 0 0; white-space: pre-wrap; word-break: break-word;
-    max-height: 160px; overflow: auto; opacity: 0.9;
+  .thought .thought-body {
+    margin: 4px 0 0; max-height: 160px; overflow: auto; opacity: 0.9;
   }
   .tools { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
   .tool {
@@ -513,16 +757,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     font-size: 12px;
   }
   .tool .row { display: flex; gap: 6px; align-items: center; }
-  .tool .row .tool-icon { color: var(--muted); }
   .tool .status {
     color: var(--muted); margin-left: auto; text-transform: uppercase;
     font-size: 10px; display: inline-flex; align-items: center; gap: 4px;
   }
-  .tool .paths a {
+  .tool .paths a, .tool .paths button.link {
     color: var(--link); cursor: pointer; text-decoration: none;
-    display: flex; align-items: center; gap: 4px; margin-top: 4px;
+    display: inline-flex; align-items: center; gap: 4px; margin-top: 4px;
+    margin-right: 8px; background: none; border: none; padding: 0; font: inherit;
   }
-  .tool .paths a:hover { text-decoration: underline; }
+  .tool .paths a:hover, .tool .paths button.link:hover { text-decoration: underline; }
   #empty {
     margin: auto; text-align: center; color: var(--muted); padding: 24px 16px;
     max-width: 280px; line-height: 1.5;
@@ -537,6 +781,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   footer {
     border-top: 1px solid var(--border); padding: 8px; flex-shrink: 0;
     display: flex; flex-direction: column; gap: 6px;
+  }
+  #sticky {
+    display: flex; flex-wrap: wrap; gap: 4px; min-height: 0;
   }
   #composer {
     width: 100%; min-height: 56px; max-height: 160px; resize: vertical;
@@ -556,6 +803,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   #send { margin-left: auto; }
+  .vspacer { flex-shrink: 0; width: 100%; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -565,13 +813,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       <i class="ti ti-message-chatbot" aria-hidden="true"></i>
       <span class="title">Grok Build</span>
     </div>
+    <button type="button" class="linkish" id="btn-model" title="Select model">model ▾</button>
+    <button type="button" class="linkish" id="btn-history" title="Session history">History</button>
     <div class="meta" id="meta"><i class="ti ti-circle-dashed"></i><span>idle</span></div>
   </header>
+  <div id="review-bar">
+    <i class="ti ti-file-diff" aria-hidden="true"></i>
+    <span id="review-label">Review edits</span>
+    <button type="button" class="secondary" id="btn-review" style="margin-left:auto;padding:3px 8px;font-size:11px">Open</button>
+  </div>
   <div id="messages"></div>
   <div id="empty" hidden>
     <i class="ti ti-message-chatbot hero-icon" aria-hidden="true"></i>
     <h2>Grok Build - Community</h2>
-    <p>Ask about this workspace. Active file and selection are attached when available.</p>
+    <p>Ask about this workspace. Use @ to attach files. Active selection attaches automatically.</p>
     <p id="empty-hint"></p>
     <div class="empty-actions">
       <button id="empty-start" type="button"><i class="ti ti-player-play"></i> Start agent</button>
@@ -579,8 +834,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     </div>
   </div>
   <footer>
-    <textarea id="composer" placeholder="Message Grok… (Enter to send, Shift+Enter newline)" rows="3"></textarea>
+    <div id="sticky"></div>
+    <textarea id="composer" placeholder="Message Grok… (@ context, Enter send, Shift+Enter newline)" rows="3"></textarea>
     <div class="actions">
+      <button id="at" class="secondary" type="button" title="Add context"><i class="ti ti-at"></i></button>
       <button id="stop" class="secondary" type="button" disabled title="Stop"><i class="ti ti-player-stop"></i> Stop</button>
       <button id="new" class="secondary" type="button" title="New session"><i class="ti ti-plus"></i> New</button>
       <button id="send" type="button" title="Send"><i class="ti ti-send"></i> Send</button>
@@ -597,7 +854,15 @@ const composer = document.getElementById('composer');
 const sendBtn = document.getElementById('send');
 const stopBtn = document.getElementById('stop');
 const newBtn = document.getElementById('new');
+const stickyEl = document.getElementById('sticky');
+const reviewBar = document.getElementById('review-bar');
+const reviewLabel = document.getElementById('review-label');
+const btnModel = document.getElementById('btn-model');
 let busy = false;
+let allMessages = [];
+let stickyChips = [];
+const EST_ROW = 96;
+const VIRT_THRESHOLD = 40;
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({
@@ -630,74 +895,166 @@ function statusIcon(status) {
 
 function chipIcon(label) {
   if (String(label).startsWith('selection:')) return 'highlight';
+  if (String(label).startsWith('folder:')) return 'folder';
   if (String(label).startsWith('file:')) return 'file';
   return 'paperclip';
 }
 
-function renderMessages(messages) {
-  messagesEl.innerHTML = '';
-  emptyEl.hidden = messages.length > 0;
-  for (const m of messages) {
-    const wrap = document.createElement('div');
-    wrap.className = 'msg ' + m.type;
-    if (m.type === 'user') {
-      if (m.chips && m.chips.length) {
-        const chips = document.createElement('div');
-        chips.className = 'chips';
-        chips.innerHTML = m.chips.map(c =>
-          '<span class="chip">' + icon(chipIcon(c)) + esc(c) + '</span>'
-        ).join('');
-        wrap.appendChild(chips);
-      }
-      const b = document.createElement('div');
-      b.className = 'bubble';
-      b.textContent = m.text;
-      wrap.appendChild(b);
-    } else if (m.type === 'assistant') {
-      if (m.thought) {
-        const d = document.createElement('details');
-        d.className = 'thought';
-        d.open = false;
-        d.innerHTML = '<summary>' + icon('brain') + ' Thinking</summary><pre></pre>';
-        d.querySelector('pre').textContent = m.thought;
-        wrap.appendChild(d);
-      }
-      const b = document.createElement('div');
-      b.className = 'bubble';
-      b.textContent = m.text || (m.tools && m.tools.length ? '' : '…');
-      wrap.appendChild(b);
-      if (m.tools && m.tools.length) {
-        const tools = document.createElement('div');
-        tools.className = 'tools';
-        for (const t of m.tools) {
-          const card = document.createElement('div');
-          card.className = 'tool';
-          let paths = '';
-          if (t.paths && t.paths.length) {
-            paths = '<div class="paths">' + t.paths.map(p =>
-              '<a data-path="' + esc(p) + '" href="#">' + icon('file') + esc(p) + '</a>'
-            ).join('') + '</div>';
-          }
-          card.innerHTML =
-            '<div class="row">' +
-              '<span class="tool-icon">' + icon(toolIconName(t)) + '</span>' +
-              '<span>' + esc(t.title) + '</span>' +
-              '<span class="status">' + statusIcon(t.status) + esc(t.status) + '</span>' +
-            '</div>' + paths;
-          tools.appendChild(card);
-        }
-        wrap.appendChild(tools);
-      }
-    } else {
-      const b = document.createElement('div');
-      b.className = 'bubble';
-      b.innerHTML = icon('info-circle') + '<span></span>';
-      b.querySelector('span').textContent = m.text;
-      wrap.appendChild(b);
+function computeVirtualWindow(args) {
+  const total = args.total, scrollTop = args.scrollTop, viewportHeight = args.viewportHeight;
+  const estimatedRowHeight = args.estimatedRowHeight, overscan = args.overscan ?? 5;
+  if (total <= 0 || estimatedRowHeight <= 0) return { start: 0, end: 0 };
+  const first = Math.floor(scrollTop / estimatedRowHeight);
+  const visible = Math.ceil(viewportHeight / estimatedRowHeight);
+  return {
+    start: Math.max(0, first - overscan),
+    end: Math.min(total, first + visible + overscan),
+  };
+}
+
+function shouldStickToBottom(scrollTop, scrollHeight, viewportHeight, thresholdPx) {
+  thresholdPx = thresholdPx == null ? 48 : thresholdPx;
+  return scrollTop + viewportHeight >= scrollHeight - thresholdPx;
+}
+
+function renderOneMessage(m) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ' + m.type;
+  if (m.type === 'user') {
+    if (m.chips && m.chips.length) {
+      const chips = document.createElement('div');
+      chips.className = 'chips';
+      chips.innerHTML = m.chips.map(c =>
+        '<span class="chip">' + icon(chipIcon(c)) + esc(c) + '</span>'
+      ).join('');
+      wrap.appendChild(chips);
     }
-    messagesEl.appendChild(wrap);
+    const b = document.createElement('div');
+    b.className = 'bubble';
+    b.textContent = m.text || '';
+    wrap.appendChild(b);
+  } else if (m.type === 'assistant') {
+    if (m.thought) {
+      const d = document.createElement('details');
+      d.className = 'thought';
+      d.open = false;
+      const summary = document.createElement('summary');
+      summary.innerHTML = icon('brain') + ' Thinking';
+      d.appendChild(summary);
+      const body = document.createElement('div');
+      body.className = 'thought-body';
+      if (m.thoughtHtml) body.innerHTML = m.thoughtHtml;
+      else body.textContent = m.thought;
+      d.appendChild(body);
+      wrap.appendChild(d);
+    }
+    const b = document.createElement('div');
+    b.className = 'bubble md';
+    if (m.html) {
+      b.innerHTML = m.html || (m.tools && m.tools.length ? '' : '…');
+      b.querySelectorAll('pre').forEach((pre) => {
+        if (pre.querySelector('.copy-code')) return;
+        const btn = document.createElement('button');
+        btn.className = 'copy-code';
+        btn.type = 'button';
+        btn.textContent = 'Copy';
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const text = pre.innerText.replace(/^Copy\\n?/, '');
+          navigator.clipboard.writeText(text);
+        });
+        pre.style.position = 'relative';
+        pre.prepend(btn);
+      });
+    } else {
+      b.textContent = m.text || (m.tools && m.tools.length ? '' : '…');
+    }
+    wrap.appendChild(b);
+    if (m.tools && m.tools.length) {
+      const tools = document.createElement('div');
+      tools.className = 'tools';
+      for (const t of m.tools) {
+        const card = document.createElement('div');
+        card.className = 'tool';
+        let paths = '';
+        if (t.paths && t.paths.length) {
+          paths = '<div class="paths">' + t.paths.map(p => {
+            const isEdit = /edit|write|patch|replace|create.?file|search_replace|apply/i.test(
+              (t.kind || '') + ' ' + (t.title || '')
+            );
+            return '<a data-path="' + esc(p) + '" href="#">' + icon('file') + esc(p) + '</a>' +
+              (isEdit
+                ? '<button type="button" class="link" data-diff="' + esc(p) + '">' + icon('file-diff') + ' Diff</button>'
+                : '');
+          }).join('') + '</div>';
+        }
+        card.innerHTML =
+          '<div class="row">' +
+            '<span class="tool-icon">' + icon(toolIconName(t)) + '</span>' +
+            '<span>' + esc(t.title) + '</span>' +
+            '<span class="status">' + statusIcon(t.status) + esc(t.status) + '</span>' +
+          '</div>' + paths;
+        tools.appendChild(card);
+      }
+      wrap.appendChild(tools);
+    }
+  } else {
+    const b = document.createElement('div');
+    b.className = 'bubble';
+    b.innerHTML = icon('info-circle') + '<span></span>';
+    b.querySelector('span').textContent = m.text || '';
+    wrap.appendChild(b);
   }
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return wrap;
+}
+
+function renderMessages(messages) {
+  allMessages = messages || [];
+  const stick = shouldStickToBottom(
+    messagesEl.scrollTop, messagesEl.scrollHeight, messagesEl.clientHeight
+  );
+  emptyEl.hidden = allMessages.length > 0;
+  messagesEl.innerHTML = '';
+
+  let start = 0;
+  let end = allMessages.length;
+  if (allMessages.length > VIRT_THRESHOLD) {
+    const w = computeVirtualWindow({
+      total: allMessages.length,
+      scrollTop: messagesEl.scrollTop,
+      viewportHeight: messagesEl.clientHeight || 400,
+      estimatedRowHeight: EST_ROW,
+      overscan: 6,
+    });
+    start = w.start;
+    end = w.end;
+    const top = document.createElement('div');
+    top.className = 'vspacer';
+    top.style.height = (start * EST_ROW) + 'px';
+    messagesEl.appendChild(top);
+  }
+
+  for (let i = start; i < end; i++) {
+    messagesEl.appendChild(renderOneMessage(allMessages[i]));
+  }
+
+  if (allMessages.length > VIRT_THRESHOLD) {
+    const bottom = document.createElement('div');
+    bottom.className = 'vspacer';
+    bottom.style.height = ((allMessages.length - end) * EST_ROW) + 'px';
+    messagesEl.appendChild(bottom);
+  }
+
+  if (stick || allMessages.length <= VIRT_THRESHOLD) {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+}
+
+function renderSticky() {
+  stickyEl.innerHTML = stickyChips.map(c =>
+    '<span class="chip">' + icon(chipIcon(c.label)) + esc(c.label) +
+    '<button type="button" data-chip-id="' + esc(c.id) + '" title="Remove">×</button></span>'
+  ).join('');
 }
 
 function setMeta(text, spinning) {
@@ -710,18 +1067,46 @@ function setBusy(b) {
   sendBtn.disabled = b;
   stopBtn.disabled = !b;
   composer.disabled = false;
-  if (b) {
-    setMeta('working…', true);
+  if (b) setMeta('working…', true);
+  else setMeta(meta.dataset.base || 'idle', false);
+}
+
+function setReview(count) {
+  if (count > 0) {
+    reviewBar.classList.add('visible');
+    reviewLabel.textContent = 'Review edits (' + count + ')';
   } else {
-    setMeta(meta.dataset.base || 'idle', false);
+    reviewBar.classList.remove('visible');
   }
 }
+
+messagesEl.addEventListener('scroll', () => {
+  if (allMessages.length > VIRT_THRESHOLD) {
+    const stick = shouldStickToBottom(
+      messagesEl.scrollTop, messagesEl.scrollHeight, messagesEl.clientHeight
+    );
+    if (!stick) renderMessages(allMessages);
+  }
+});
 
 messagesEl.addEventListener('click', (e) => {
   const a = e.target.closest('a[data-path]');
   if (a) {
     e.preventDefault();
     vscode.postMessage({ type: 'openFile', path: a.getAttribute('data-path') });
+    return;
+  }
+  const d = e.target.closest('[data-diff]');
+  if (d) {
+    e.preventDefault();
+    vscode.postMessage({ type: 'openDiff', path: d.getAttribute('data-diff') });
+  }
+});
+
+stickyEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-chip-id]');
+  if (btn) {
+    vscode.postMessage({ type: 'removeChip', id: btn.getAttribute('data-chip-id') });
   }
 });
 
@@ -734,10 +1119,17 @@ sendBtn.addEventListener('click', () => {
 
 stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
 newBtn.addEventListener('click', () => vscode.postMessage({ type: 'newSession' }));
+document.getElementById('at').addEventListener('click', () =>
+  vscode.postMessage({ type: 'addContext' }));
 document.getElementById('empty-start').addEventListener('click', () =>
   vscode.postMessage({ type: 'startAgent' }));
 document.getElementById('empty-login').addEventListener('click', () =>
   vscode.postMessage({ type: 'login' }));
+btnModel.addEventListener('click', () => vscode.postMessage({ type: 'selectModel' }));
+document.getElementById('btn-history').addEventListener('click', () =>
+  vscode.postMessage({ type: 'resumeSession' }));
+document.getElementById('btn-review').addEventListener('click', () =>
+  vscode.postMessage({ type: 'reviewEdits' }));
 
 composer.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -747,6 +1139,17 @@ composer.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && busy) {
     vscode.postMessage({ type: 'cancel' });
   }
+  if (e.key === '@') {
+    // Open picker after the character is inserted
+    setTimeout(() => {
+      const v = composer.value;
+      const pos = composer.selectionStart || 0;
+      const before = v.slice(0, pos);
+      if (/(^|[\\s])@$/.test(before)) {
+        vscode.postMessage({ type: 'addContext' });
+      }
+    }, 0);
+  }
 });
 
 window.addEventListener('message', (event) => {
@@ -754,9 +1157,13 @@ window.addEventListener('message', (event) => {
   if (!msg || !msg.type) return;
   if (msg.type === 'init') {
     renderMessages(msg.messages || []);
+    stickyChips = msg.stickyChips || [];
+    renderSticky();
+    setReview(msg.reviewCount || 0);
+    const model = msg.model || 'default';
+    btnModel.textContent = model + ' ▾';
     const base = (msg.agentState || 'idle') +
-      (msg.agentDetail ? ' · ' + String(msg.agentDetail).slice(0, 12) : '') +
-      ' · ' + (msg.model || '');
+      (msg.agentDetail ? ' · ' + String(msg.agentDetail).slice(0, 12) : '');
     meta.dataset.base = base;
     setBusy(!!msg.busy);
     emptyHint.textContent = msg.hasAuth
@@ -771,7 +1178,13 @@ window.addEventListener('message', (event) => {
     const base = (msg.state || 'idle') +
       (msg.detail ? ' · ' + String(msg.detail).slice(0, 12) : '');
     meta.dataset.base = base;
+    if (msg.model) btnModel.textContent = msg.model + ' ▾';
     if (!busy) setMeta(base, false);
+  } else if (msg.type === 'stickyChips') {
+    stickyChips = msg.chips || [];
+    renderSticky();
+  } else if (msg.type === 'review') {
+    setReview(msg.count || 0);
   }
 });
 

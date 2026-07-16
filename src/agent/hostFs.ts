@@ -3,6 +3,15 @@ import * as vscode from "vscode";
 import { getSettings } from "../config/settings";
 import { logInfo, logWarn } from "../log/output";
 
+let beforeWrite: ((filePath: string) => Promise<void>) | undefined;
+
+/** Hook run before host fs/write_text_file (e.g. snapshot for diffs). */
+export function setBeforeWriteHook(
+  hook?: (filePath: string) => Promise<void>,
+): void {
+  beforeWrite = hook;
+}
+
 export async function readTextFileHost(filePath: string): Promise<{
   content: string;
 }> {
@@ -38,6 +47,9 @@ export async function writeTextFileHost(
   filePath: string,
   content: string,
 ): Promise<Record<string, never>> {
+  if (beforeWrite) {
+    await beforeWrite(filePath);
+  }
   const settings = getSettings();
   const uri = toFileUri(filePath);
   const edit = new vscode.WorkspaceEdit();

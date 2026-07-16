@@ -38,6 +38,19 @@ export type AgentState =
     }
   | { kind: "error"; message: string };
 
+export interface AgentCaps {
+  loadSession: boolean;
+  listSessions: boolean;
+  resumeSession: boolean;
+}
+
+export interface RemoteSessionInfo {
+  sessionId: string;
+  cwd: string;
+  title?: string;
+  updatedAt?: number;
+}
+
 export class AgentService implements vscode.Disposable {
   private state: AgentState = { kind: "idle" };
   private spawned: SpawnedAgent | undefined;
@@ -48,6 +61,11 @@ export class AgentService implements vscode.Disposable {
   private busy = false;
   private readonly permissions = new PermissionBroker();
   private auth: AuthService | undefined;
+  private caps: AgentCaps = {
+    loadSession: false,
+    listSessions: false,
+    resumeSession: false,
+  };
 
   private readonly _onStateChange = new vscode.EventEmitter<AgentState>();
   readonly onStateChange = this._onStateChange.event;
@@ -76,6 +94,10 @@ export class AgentService implements vscode.Disposable {
 
   getSessionId(): string | undefined {
     return this.state.kind === "ready" ? this.state.sessionId : undefined;
+  }
+
+  getCapabilities(): AgentCaps {
+    return { ...this.caps };
   }
 
   /**
@@ -181,6 +203,88 @@ export class AgentService implements vscode.Disposable {
       this.setState({ ...this.state, sessionId: session.sessionId });
     }
     logInfo(`session/new ok sessionId=${session.sessionId}`);
+    return session.sessionId;
+  }
+
+  /**
+   * List sessions from the agent when sessionCapabilities.list is advertised.
+   */
+  async listRemoteSessions(): Promise<RemoteSessionInfo[]> {
+    await this.ensureStarted();
+    if (!this.caps.listSessions || !this.connection) {
+      return [];
+    }
+    try {
+      const res = await this.connection.agent.request(
+        acp.methods.agent.session.list,
+        { cwd: resolveSessionCwd() },
+      );
+      return (res.sessions ?? []).map((s) => ({
+        sessionId: s.sessionId,
+        cwd: s.cwd,
+        title: s.title ?? undefined,
+        updatedAt: s.updatedAt ? Date.parse(s.updatedAt) || undefined : undefined,
+      }));
+    } catch (err) {
+      logWarn(`session/list failed: ${formatUserError(err)}`);
+      return [];
+    }
+  }
+
+  /**
+   * Load an existing session (requires agent loadSession capability).
+   * History is replayed via session/update notifications.
+   */
+  async loadSession(sessionId: string, cwd?: string): Promise<string> {
+    await this.ensureStarted();
+    if (!this.connection) {
+      throw new Error("No connection");
+    }
+    if (!this.caps.loadSession) {
+      throw new Error(
+        "Agent does not support session/load. History is local-only for this binary.",
+      );
+    }
+
+    if (this.busy) {
+      await this.cancelTurn();
+    }
+
+    try {
+      this.session?.dispose();
+    } catch {
+      /* ignore */
+    }
+    this.session = undefined;
+    this.permissions.resetSessionMemory();
+
+    const sessionCwd = cwd || resolveSessionCwd();
+    logInfo(`session/load sessionId=${sessionId} cwd=${sessionCwd}`);
+    const loadRes = await this.connection.agent.request(
+      acp.methods.agent.session.load,
+      {
+        sessionId,
+        cwd: sessionCwd,
+        mcpServers: [],
+      },
+    );
+
+    // SDK attachSession is internal; load response has no sessionId field.
+    type Attachable = {
+      attachSession: (r: { sessionId: string } & typeof loadRes) => ActiveSession;
+    };
+    const agentCtx = this.connection.agent as unknown as Attachable;
+    const session = agentCtx.attachSession({
+      sessionId,
+      ...loadRes,
+    });
+    this.session = session;
+    void this.pumpSessionUpdates(session);
+
+    if (this.state.kind === "ready") {
+      this.setState({ ...this.state, sessionId: session.sessionId });
+    }
+    logInfo(`session/load ok sessionId=${session.sessionId}`);
     return session.sessionId;
   }
 
@@ -319,6 +423,16 @@ export class AgentService implements vscode.Disposable {
     );
 
     logInfo(`initialize ok protocolVersion=${initResult.protocolVersion}`);
+    const agentCaps = initResult.agentCapabilities;
+    const sessionCaps = agentCaps?.sessionCapabilities;
+    this.caps = {
+      loadSession: !!agentCaps?.loadSession,
+      listSessions: sessionCaps?.list != null,
+      resumeSession: sessionCaps?.resume != null,
+    };
+    logInfo(
+      `agent caps loadSession=${this.caps.loadSession} list=${this.caps.listSessions} resume=${this.caps.resumeSession}`,
+    );
 
     const cwd = resolveSessionCwd(settings);
     logInfo(`session/new cwd=${cwd}`);

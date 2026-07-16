@@ -1,13 +1,26 @@
 import * as vscode from "vscode";
 import { AgentService } from "./agent/agentService";
 import { BinaryNotFoundError } from "./agent/binaryResolver";
+import {
+  readTextFileHost,
+  setBeforeWriteHook,
+} from "./agent/hostFs";
 import { AuthService, promptAndStoreApiKey } from "./auth/authService";
+import {
+  selectModelQuickPick,
+  setModelSetting,
+} from "./config/modelService";
+import { DiffReviewService } from "./diff/diffReviewService";
 import {
   disposeOutput,
   logError,
   logInfo,
   openOutput,
 } from "./log/output";
+import {
+  deriveTitle,
+  SessionHistoryStore,
+} from "./session/sessionHistoryStore";
 import { ChatViewProvider } from "./ui/chatViewProvider";
 import { GrokStatusBar } from "./ui/statusBar";
 
@@ -28,12 +41,26 @@ export function activate(context: vscode.ExtensionContext): void {
   const auth = new AuthService(context.secrets);
   agentService.setAuthService(auth);
 
+  const history = new SessionHistoryStore(context.workspaceState);
+  const diffs = new DiffReviewService();
+
+  setBeforeWriteHook(async (filePath) => {
+    await diffs.captureIfMissing(filePath, async () => {
+      const { content } = await readTextFileHost(filePath);
+      return content;
+    });
+    diffs.recordEdit({ path: filePath });
+  });
+
   const chat = new ChatViewProvider(
     context.extensionUri,
     agentService,
     auth,
     { supportsSecondarySidebar },
   );
+  chat.setHistoryStore(history);
+  chat.setDiffReview(diffs);
+
   const statusBar = new GrokStatusBar(agentService);
 
   const webviewOpts = { webviewOptions: { retainContextWhenHidden: true } };
@@ -42,6 +69,7 @@ export function activate(context: vscode.ExtensionContext): void {
     agentService,
     chat,
     statusBar,
+    diffs,
     // Same provider instance for activity-bar fallback + secondary sidebar
     vscode.window.registerWebviewViewProvider(
       ChatViewProvider.viewType,
@@ -91,6 +119,7 @@ export function activate(context: vscode.ExtensionContext): void {
             `Grok Build agent restarted (session ${state.sessionId})`,
           );
         }
+        await chat.refreshState();
       } catch (err) {
         await showStartError(err);
       }
@@ -114,9 +143,11 @@ export function activate(context: vscode.ExtensionContext): void {
       try {
         await chat.openChat();
         const id = await agentService!.newSession();
+        chat.clearMessages();
         void vscode.window.showInformationMessage(
           `Grok Build: new session ${id.slice(0, 8)}…`,
         );
+        await chat.refreshState();
       } catch (err) {
         await showStartError(err);
       }
@@ -175,6 +206,125 @@ export function activate(context: vscode.ExtensionContext): void {
       );
     }),
 
+    vscode.commands.registerCommand("grok.addContext", async () => {
+      await chat.addContextFromPicker();
+    }),
+
+    vscode.commands.registerCommand("grok.selectModel", async () => {
+      const model = await selectModelQuickPick();
+      if (model === undefined) {
+        return;
+      }
+      if (agentService!.isBusy()) {
+        const ok = await vscode.window.showWarningMessage(
+          "A turn is in progress. Cancel and restart agent with the new model?",
+          "Restart",
+          "Cancel",
+        );
+        if (ok !== "Restart") {
+          return;
+        }
+        await agentService!.cancelTurn();
+      }
+      await setModelSetting(model);
+      try {
+        await agentService!.restart();
+        void vscode.window.showInformationMessage(
+          `Grok model set to ${model || "default"}`,
+        );
+        await chat.refreshState();
+      } catch (err) {
+        await showStartError(err);
+      }
+    }),
+
+    vscode.commands.registerCommand("grok.resumeSession", async () => {
+      try {
+        await chat.openChat();
+        const local = history.list();
+        const remote = await agentService!.listRemoteSessions();
+        const byId = new Map<
+          string,
+          {
+            sessionId: string;
+            cwd: string;
+            title: string;
+            updatedAt: number;
+            preview: string;
+            source: string;
+          }
+        >();
+        for (const e of local) {
+          byId.set(e.sessionId, {
+            sessionId: e.sessionId,
+            cwd: e.cwd,
+            title: e.title,
+            updatedAt: e.updatedAt,
+            preview: e.preview,
+            source: "local",
+          });
+        }
+        for (const r of remote) {
+          const prev = byId.get(r.sessionId);
+          byId.set(r.sessionId, {
+            sessionId: r.sessionId,
+            cwd: r.cwd || prev?.cwd || "",
+            title:
+              r.title ||
+              prev?.title ||
+              deriveTitle(prev?.preview ?? "", r.sessionId),
+            updatedAt: r.updatedAt || prev?.updatedAt || Date.now(),
+            preview: prev?.preview ?? "",
+            source: prev ? "local+agent" : "agent",
+          });
+        }
+        const items = [...byId.values()].sort(
+          (a, b) => b.updatedAt - a.updatedAt,
+        );
+        if (items.length === 0) {
+          void vscode.window.showInformationMessage(
+            "No previous Grok sessions yet. Chat first, then History will list them.",
+          );
+          return;
+        }
+        const pick = await vscode.window.showQuickPick(
+          items.map((e) => ({
+            label: e.title,
+            description: `${e.sessionId.slice(0, 8)}… · ${e.source}`,
+            detail: `${new Date(e.updatedAt).toLocaleString()} · ${e.cwd}`,
+            entry: e,
+          })),
+          { title: "Resume Grok session" },
+        );
+        if (!pick) {
+          return;
+        }
+        const caps = agentService!.getCapabilities();
+        if (!caps.loadSession) {
+          void vscode.window.showWarningMessage(
+            "This agent binary does not advertise session/load. Showing local history only; start a new session or upgrade the agent for full resume.",
+          );
+          return;
+        }
+        chat.clearMessages();
+        diffs.clear();
+        await agentService!.loadSession(
+          pick.entry.sessionId,
+          pick.entry.cwd || undefined,
+        );
+        void vscode.window.showInformationMessage(
+          `Loaded session ${pick.entry.sessionId.slice(0, 8)}…`,
+        );
+        await chat.refreshState();
+      } catch (err) {
+        await showStartError(err);
+      }
+    }),
+
+    vscode.commands.registerCommand("grok.reviewEdits", async () => {
+      await diffs.pickAndOpen();
+    }),
+
     vscode.commands.registerCommand("grok.smokeTest", async () => {
       openOutput();
       try {
@@ -197,12 +347,13 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  logInfo("Grok Build - Community activated (L1)");
+  logInfo("Grok Build - Community activated (L2 polish)");
 }
 
 export async function deactivate(): Promise<void> {
   logInfo("Grok Build - Community deactivating…");
   try {
+    setBeforeWriteHook(undefined);
     await agentService?.disposeAsync();
   } catch (err) {
     logError("Error during deactivate", err);

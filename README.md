@@ -9,8 +9,9 @@ that speaks **ACP** to `grok agent stdio`. The agent runtime stays in Rust.
 |-------|--------|
 | Design docs | Done (`docs/`) |
 | L0 — Protocol wire-up | Done |
-| **L1 — MVP chat** | **Implemented** |
-| L2 — IDE-native | Not started |
+| L1 — MVP chat | Done |
+| **L2 — IDE-native polish** | **Implemented** (markdown, `@` context, model pick, diffs, history; session/load capability-gated) |
+| L3 — Depth & productization | Not started |
 
 ## Principle
 
@@ -29,6 +30,7 @@ cd grok-vscode-extension
 npm install
 npm run build
 npm run typecheck
+npm test
 ```
 
 ### Headless L0 smoke (no VS Code)
@@ -58,6 +60,10 @@ Full checklist: [docs/L0-manual-test.md](docs/L0-manual-test.md)
 | `Grok Build: Start Agent` | Spawn → `initialize` → `session/new` |
 | `Grok Build: New Session` | New ACP session + clear UI |
 | `Grok Build: Cancel Turn` | `session/cancel` |
+| `Grok Build: Add Context…` | `@` sticky context picker |
+| `Grok Build: Select Model` | QuickPick → `grok.model` + agent restart |
+| `Grok Build: Resume Session…` | Local history ± ACP `session/list`/`load` |
+| `Grok Build: Review Edits…` | Multi-file diff review |
 | `Grok Build: Login / Set API Key` | SecretStorage API key |
 | `Grok Build: Smoke Test (L0)` | Headless-style prompt via agent |
 | `Grok Build: Restart / Stop Agent` | Process lifecycle |
