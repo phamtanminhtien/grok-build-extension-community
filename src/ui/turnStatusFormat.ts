@@ -104,12 +104,41 @@ export function formatTokensContextBar(tokens: number): string {
   return `${Math.round(n / 1_000_000)}M`;
 }
 
-/** Shell default when model meta has no window size. */
+/**
+ * Last-resort denominator only when neither ACP `usage_update.size` nor agent
+ * model meta `totalContextTokens` is available. Prefer
+ * {@link resolveContextWindowSize} with the live catalog.
+ */
 export const DEFAULT_CONTEXT_WINDOW = 200_000;
 
 /**
- * Header / status-bar context display: `8.5K / 200K`.
+ * Resolve context window size (TUI priority):
+ * 1. Live usage size (`usage_update.size` / context_state.total)
+ * 2. Current model meta from agent (`totalContextTokens`)
+ * 3. {@link DEFAULT_CONTEXT_WINDOW} only if `allowDefault`
+ */
+export function resolveContextWindowSize(
+  usageSize: number | undefined,
+  modelContextWindow: number | undefined,
+  allowDefault = true,
+): number | undefined {
+  if (usageSize != null && Number.isFinite(usageSize) && usageSize > 0) {
+    return Math.floor(usageSize);
+  }
+  if (
+    modelContextWindow != null &&
+    Number.isFinite(modelContextWindow) &&
+    modelContextWindow > 0
+  ) {
+    return Math.floor(modelContextWindow);
+  }
+  return allowDefault ? DEFAULT_CONTEXT_WINDOW : undefined;
+}
+
+/**
+ * Header / status-bar context display: `8.5K / 500K`.
  * Requires used > 0; uses `size` or {@link DEFAULT_CONTEXT_WINDOW}.
+ * Callers should pass agent model window via `size` when known.
  */
 export function formatContextBar(
   used?: number,
@@ -195,7 +224,11 @@ export function resolveUsedTokens(usage: SessionUsageSnapshot): number | undefin
 }
 
 /** Header top-right context chip (TUI status-bar style). */
-export function buildContextBarParts(usage: SessionUsageSnapshot): {
+export function buildContextBarParts(
+  usage: SessionUsageSnapshot,
+  /** Agent model meta window when usage.size is absent (TUI model_window). */
+  modelContextWindow?: number,
+): {
   visible: boolean;
   text: string;
   pct: number;
@@ -203,8 +236,9 @@ export function buildContextBarParts(usage: SessionUsageSnapshot): {
   title: string;
 } {
   const used = resolveUsedTokens(usage);
-  const bar = formatContextBar(used, usage.size);
-  if (!bar) {
+  const total = resolveContextWindowSize(usage.size, modelContextWindow);
+  const bar = formatContextBar(used, total);
+  if (!bar || total == null) {
     return {
       visible: false,
       text: "",
@@ -213,10 +247,6 @@ export function buildContextBarParts(usage: SessionUsageSnapshot): {
       title: "",
     };
   }
-  const total =
-    usage.size != null && usage.size > 0
-      ? usage.size
-      : DEFAULT_CONTEXT_WINDOW;
   return {
     visible: true,
     text: bar.text,
@@ -226,7 +256,11 @@ export function buildContextBarParts(usage: SessionUsageSnapshot): {
   };
 }
 
-export function buildTurnStatusParts(view: TurnStatusView): {
+export function buildTurnStatusParts(
+  view: TurnStatusView,
+  /** Agent catalog context window for the current model. */
+  modelContextWindow?: number,
+): {
   visible: boolean;
   process: string;
   time: string;
@@ -244,7 +278,7 @@ export function buildTurnStatusParts(view: TurnStatusView): {
       ? `↓${formatTokensCompact(used)}`
       : "";
   const cost = formatCost(usage.costAmount, usage.currency) ?? "";
-  const context = buildContextBarParts(usage);
+  const context = buildContextBarParts(usage, modelContextWindow);
 
   if (busy) {
     return {

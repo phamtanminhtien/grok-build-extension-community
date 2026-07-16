@@ -1235,6 +1235,29 @@ export class AgentService implements vscode.Disposable {
       parsed.models.length > 0 &&
       parsed.models.every((m) => this.models.some((x) => x.id === m.id))
     ) {
+      // Enrich kept models with agent meta (e.g. totalContextTokens) from the
+      // smaller-but-richer snapshot so the context bar does not stay at 200K.
+      for (const incoming of parsed.models) {
+        const existing = this.models.find((x) => x.id === incoming.id);
+        if (!existing) {
+          continue;
+        }
+        if (incoming.contextWindow != null && incoming.contextWindow > 0) {
+          existing.contextWindow = incoming.contextWindow;
+        }
+        if (incoming.reasoningEfforts?.length) {
+          existing.reasoningEfforts = incoming.reasoningEfforts;
+        }
+        if (incoming.supportsReasoningEffort != null) {
+          existing.supportsReasoningEffort = incoming.supportsReasoningEffort;
+        }
+        if (incoming.reasoningEffort) {
+          existing.reasoningEffort = incoming.reasoningEffort;
+        }
+        if (incoming.label && incoming.label !== incoming.id) {
+          existing.label = incoming.label;
+        }
+      }
       // Still update current + efforts if provided.
       if (parsed.currentModelId) {
         this.currentModelId = parsed.currentModelId;

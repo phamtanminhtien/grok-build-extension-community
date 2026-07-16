@@ -24,6 +24,7 @@ import {
 } from "../context/contextPicker";
 import { getSettings } from "../config/settings";
 import {
+  contextWindowFromCatalog,
   effortDisplayLabel,
   fallbackModels,
   modelDisplayLabel,
@@ -215,6 +216,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             m.currentEffortLabel ||
             effortDisplayLabel(m.efforts, m.currentEffortId),
         });
+        // Context bar denominator comes from agent model meta — refresh when catalog changes.
+        this.postTurnStatus();
       }),
       this.agent.onModeChange((m) => {
         this.postModeState(m.mode);
@@ -591,16 +594,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.thoughtStartedAt = undefined;
   }
 
+  /** Current model context window from agent catalog (meta.totalContextTokens). */
+  private agentContextWindow(): number | undefined {
+    const catalog = this.agent.getModels();
+    return contextWindowFromCatalog(catalog.models, catalog.currentModelId);
+  }
+
   private postTurnStatus(): void {
     const busy = this.agent.isBusy();
     const elapsedMs =
       busy && this.turnStartedAt ? Date.now() - this.turnStartedAt : 0;
-    const parts = buildTurnStatusParts({
-      busy,
-      process: this.turnProcess,
-      elapsedMs,
-      usage: this.sessionUsage,
-    });
+    const parts = buildTurnStatusParts(
+      {
+        busy,
+        process: this.turnProcess,
+        elapsedMs,
+        usage: this.sessionUsage,
+      },
+      this.agentContextWindow(),
+    );
     this.post({
       type: "turnStatus",
       ...parts,
@@ -1632,12 +1644,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const busy = this.agent.isBusy();
     const elapsedMs =
       busy && this.turnStartedAt ? Date.now() - this.turnStartedAt : 0;
-    const turnStatus = buildTurnStatusParts({
-      busy,
-      process: this.turnProcess,
-      elapsedMs,
-      usage: this.sessionUsage,
-    });
     const catalog = this.agent.getModels();
     // Only use bundled fallback for the button label when the agent has not
     // produced a catalog yet — never pretend it is the full TUI list.
@@ -1650,6 +1656,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           }));
     const currentModelId =
       catalog.currentModelId || settings.model || models[0]?.id || "";
+    const modelCw = contextWindowFromCatalog(models, currentModelId);
+    const turnStatus = buildTurnStatusParts(
+      {
+        busy,
+        process: this.turnProcess,
+        elapsedMs,
+        usage: this.sessionUsage,
+      },
+      modelCw,
+    );
     const currentLabel =
       catalog.currentLabel ||
       modelDisplayLabel(models, currentModelId) ||

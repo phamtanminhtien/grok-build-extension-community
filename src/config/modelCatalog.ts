@@ -9,6 +9,11 @@ export interface GrokModelOption {
   label: string;
   description?: string;
   selected?: boolean;
+  /**
+   * Context window tokens from agent model meta (`totalContextTokens`).
+   * Same source the TUI uses via `ModelState::get_context_window()`.
+   */
+  contextWindow?: number;
   /** Model supports reasoning effort selector. */
   supportsReasoningEffort?: boolean;
   /** Effort menu for this model (from meta.reasoningEfforts). */
@@ -103,6 +108,50 @@ function parseEffortOptions(
   return out;
 }
 
+/** Read context window from ACP model meta (shell `to_acp_model_info`). */
+export function parseContextWindowTokens(
+  meta: Record<string, unknown> | undefined,
+): number | undefined {
+  if (!meta) {
+    return undefined;
+  }
+  const raw =
+    meta.totalContextTokens ??
+    meta.total_context_tokens ??
+    meta.contextWindow ??
+    meta.context_window;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return Math.floor(raw);
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) {
+      return Math.floor(n);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Context window for the current model — same priority as TUI
+ * `ModelState::get_context_window()` (model meta `totalContextTokens`).
+ */
+export function contextWindowFromCatalog(
+  models: readonly GrokModelOption[],
+  currentModelId: string,
+): number | undefined {
+  const id = currentModelId.trim();
+  if (!id) {
+    return undefined;
+  }
+  const m = models.find((x) => x.id === id);
+  const cw = m?.contextWindow;
+  if (cw != null && Number.isFinite(cw) && cw > 0) {
+    return Math.floor(cw);
+  }
+  return undefined;
+}
+
 function parseModelInfo(raw: unknown): GrokModelOption | undefined {
   const m = asRecord(raw);
   if (!m) {
@@ -127,6 +176,7 @@ function parseModelInfo(raw: unknown): GrokModelOption | undefined {
     label: (typeof m.name === "string" && m.name.trim()) || id,
     description:
       typeof m.description === "string" ? m.description : undefined,
+    contextWindow: parseContextWindowTokens(meta),
     supportsReasoningEffort: supports,
     reasoningEffort: effortId,
     reasoningEfforts: parseEffortOptions(meta, effortId),
@@ -269,6 +319,10 @@ export function parseModelsFromSessionMeta(
             existing.reasoningEfforts ?? m.reasoningEfforts;
           existing.reasoningEffort =
             existing.reasoningEffort ?? m.reasoningEffort;
+          // Prefer agent meta context window when enrichment has it.
+          if (m.contextWindow != null && m.contextWindow > 0) {
+            existing.contextWindow = m.contextWindow;
+          }
           if (!existing.label || existing.label === existing.id) {
             existing.label = m.label;
           }

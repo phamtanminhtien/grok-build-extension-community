@@ -12,6 +12,7 @@ import {
   formatTokensCompact,
   formatTokensContextBar,
   processLabelForSessionUpdate,
+  resolveContextWindowSize,
 } from "./turnStatusFormat.ts";
 
 describe("formatElapsed", () => {
@@ -57,6 +58,14 @@ describe("formatTokensContextBar / formatContextBar", () => {
 
   it("uses explicit window size", () => {
     assert.equal(formatContextBar(8_500, 256_000)?.text, "8.5K / 256K");
+  });
+
+  it("prefers agent model window 500K over default", () => {
+    assert.equal(resolveContextWindowSize(undefined, 500_000), 500_000);
+    assert.equal(resolveContextWindowSize(256_000, 500_000), 256_000);
+    const c = buildContextBarParts({ used: 12_000 }, 500_000);
+    assert.equal(c.visible, true);
+    assert.equal(c.text, "12K / 500K");
   });
 });
 

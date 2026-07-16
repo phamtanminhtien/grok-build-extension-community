@@ -9,10 +9,12 @@ import {
 
 export type { GrokEffortOption, GrokModelOption, ModelCatalogSnapshot } from "./modelCatalog";
 export {
+  contextWindowFromCatalog,
   effortDisplayLabel,
   fallbackModels,
   LEGACY_EFFORT_OPTIONS,
   modelDisplayLabel,
+  parseContextWindowTokens,
   parseModelsFromSessionMeta,
   parseSessionModelState,
 } from "./modelCatalog";

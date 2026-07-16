@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  contextWindowFromCatalog,
   modelDisplayLabel,
   parseModelsFromSessionMeta,
   parseSessionModelState,
@@ -93,6 +94,29 @@ describe("parseSessionModelState (x.ai/models/update)", () => {
     assert.equal(snap.efforts.length, 2);
     assert.equal(snap.currentEffortId, "high");
     assert.equal(snap.efforts.find((e) => e.id === "high")?.selected, true);
+  });
+
+  it("reads totalContextTokens from agent model meta (TUI source)", () => {
+    const snap = parseSessionModelState({
+      currentModelId: "grok-4.5",
+      availableModels: [
+        {
+          modelId: "grok-4.5",
+          name: "Grok 4.5",
+          meta: { totalContextTokens: 500_000 },
+        },
+        {
+          modelId: "grok-build",
+          name: "Grok Build",
+          meta: { totalContextTokens: 500_000 },
+        },
+      ],
+    });
+    assert.equal(snap.models[0]?.contextWindow, 500_000);
+    assert.equal(
+      contextWindowFromCatalog(snap.models, "grok-4.5"),
+      500_000,
+    );
   });
 
   it("uses legacy effort menu when supports but list empty", () => {
