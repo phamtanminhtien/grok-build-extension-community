@@ -57,18 +57,19 @@ Verified headless 2026-07-16: `initialize` + `session/new` + prompt → `L0 OK` 
 
 ### Acceptance
 
-- [ ] User can ask “what does this repo do?” and get a streamed answer
-- [ ] Tool calls appear as cards; file paths open on click
-- [ ] Permission prompt works end-to-end for a shell tool
-- [ ] Deny stops the tool path cleanly
-- [ ] New session clears UI and creates new ACP session
-- [ ] Restart recovers after killing the binary externally
-- [ ] Works on macOS; smoke on Linux and Windows
+- [x] User can ask “what does this repo do?” and get a streamed answer
+- [x] Tool calls appear as cards; file paths open on click
+- [x] Permission prompt works end-to-end for a shell tool
+- [x] Deny stops the tool path cleanly
+- [x] New session clears UI and creates new ACP session
+- [x] Restart recovers after killing the binary externally
+- [ ] Works on macOS; smoke on Linux and Windows *(macOS verified; Win/Linux TBD)*
 
 ### Exit artifacts
 
-- Internal VSIX or `F5` dogfood guide
-- Known limitations list
+- [x] Runnable extension in Extension Development Host (`F5`) + sidebar chat
+- [ ] Internal VSIX packaging polish
+- Known limitations: no markdown render (plain text), no browser OAuth UI yet (API key + CLI auth), terminal host capability deferred
 
 ---
 

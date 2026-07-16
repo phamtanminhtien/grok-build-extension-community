@@ -7,6 +7,9 @@ dist/
 *.vsix
 *.tsbuildinfo
 
+# Generated from @tabler/icons-webfont on npm run build
+media/tabler/
+
 # Test / coverage
 coverage/
 .nyc_output/

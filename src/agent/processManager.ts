@@ -23,6 +23,7 @@ export type ProcessExitHandler = (
  */
 export async function spawnAgentProcess(options?: {
   settings?: GrokSettings;
+  env?: NodeJS.ProcessEnv;
   onExit?: ProcessExitHandler;
   onStderrLine?: (line: string) => void;
 }): Promise<SpawnedAgent> {
@@ -36,7 +37,7 @@ export async function spawnAgentProcess(options?: {
 
   const child = spawn(binary, args, {
     cwd: process.cwd(),
-    env: { ...process.env },
+    env: options?.env ?? { ...process.env },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
@@ -142,7 +143,6 @@ async function killProcessTree(
           // ignore
         }
       }
-      // Give a moment for exit event; don't hang forever
       setTimeout(done, 500);
     }, graceMs);
   });

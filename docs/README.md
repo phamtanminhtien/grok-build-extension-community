@@ -11,7 +11,8 @@ Rust; this extension is the client UI and host integration layer.
 | Design docs | Done (this folder) |
 | Extension scaffold | Done (`src/`, esbuild) |
 | L0 protocol wire-up | Done — see [L0 manual test](L0-manual-test.md) |
-| L1+ implementation | Not started |
+| L1 MVP chat | Done — sidebar webview, permissions, host FS, status bar |
+| L2+ | Not started |
 
 ## Reading order
 

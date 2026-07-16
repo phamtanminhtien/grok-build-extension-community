@@ -2,7 +2,7 @@
   "name": "grok-build-community",
   "displayName": "Grok Build - Community",
   "description": "Community VS Code host for Grok Build — thin ACP client for `grok agent stdio`.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "xai",
   "license": "UNLICENSED",
   "engines": {
@@ -24,7 +24,55 @@
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "grok",
+          "title": "Grok Build",
+          "icon": "media/grok.svg"
+        }
+      ],
+      "secondarySidebar": [
+        {
+          "id": "grok-secondary",
+          "title": "Grok Build",
+          "icon": "media/grok.svg",
+          "when": "!grok.doesNotSupportSecondarySidebar"
+        }
+      ]
+    },
+    "views": {
+      "grok": [
+        {
+          "type": "webview",
+          "id": "grok.chatView",
+          "name": "Grok Build",
+          "visibility": "visible"
+        }
+      ],
+      "grok-secondary": [
+        {
+          "type": "webview",
+          "id": "grok.chatView.secondary",
+          "name": "Grok Build",
+          "visibility": "visible",
+          "when": "!grok.doesNotSupportSecondarySidebar"
+        }
+      ]
+    },
     "commands": [
+      {
+        "command": "grok.openChat",
+        "title": "Grok Build: Open Chat",
+        "category": "Grok Build",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "grok.openChatActivityBar",
+        "title": "Grok Build: Open Chat (Activity Bar)",
+        "category": "Grok Build",
+        "icon": "$(layout-sidebar-left)"
+      },
       {
         "command": "grok.openOutput",
         "title": "Grok Build: Open Output",
@@ -46,11 +94,67 @@
         "category": "Grok Build"
       },
       {
+        "command": "grok.newSession",
+        "title": "Grok Build: New Session",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.cancel",
+        "title": "Grok Build: Cancel Turn",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.login",
+        "title": "Grok Build: Login / Set API Key",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.setApiKey",
+        "title": "Grok Build: Set API Key",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.clearApiKey",
+        "title": "Grok Build: Clear API Key",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.addSelectionToChat",
+        "title": "Grok Build: Add Selection to Chat",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.addFileToChat",
+        "title": "Grok Build: Add Active File to Chat",
+        "category": "Grok Build"
+      },
+      {
         "command": "grok.smokeTest",
         "title": "Grok Build: Smoke Test (L0)",
         "category": "Grok Build"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "grok.newSession",
+          "when": "view == grok.chatView || view == grok.chatView.secondary",
+          "group": "navigation"
+        },
+        {
+          "command": "grok.openOutput",
+          "when": "view == grok.chatView || view == grok.chatView.secondary",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "grok.addSelectionToChat",
+          "when": "editorHasSelection",
+          "group": "grok@1"
+        }
+      ]
+    },
     "configuration": {
       "title": "Grok Build",
       "properties": {
@@ -79,6 +183,61 @@
           "default": 30000,
           "minimum": 5000,
           "markdownDescription": "Timeout for spawn + `initialize` before killing the agent process."
+        },
+        "grok.permissionTimeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 5000,
+          "markdownDescription": "How long to wait for a permission decision before auto-deny."
+        },
+        "grok.inheritEnvApiKey": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "If no SecretStorage key, pass `XAI_API_KEY` from the extension host environment."
+        },
+        "grok.ui.showThoughts": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show agent thinking chunks in the chat panel."
+        },
+        "grok.context.autoAttachActiveFile": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Attach the active editor file as context on each prompt."
+        },
+        "grok.context.autoAttachSelection": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When there is a non-empty selection, attach it instead of (or with) the full file link."
+        },
+        "grok.context.excludeGlob": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/.env",
+            "**/.env.*",
+            "**/secrets/**",
+            "**/*credential*",
+            "**/*.pem"
+          ],
+          "markdownDescription": "Do not auto-attach paths matching these patterns."
+        },
+        "grok.fs.preferOpenBuffers": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Host `fs/read_text_file` prefers unsaved editor buffers."
+        },
+        "grok.fs.autoSave": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Save after host `fs/write_text_file`."
+        },
+        "grok.fs.maxReadBytes": {
+          "type": "number",
+          "default": 5000000,
+          "markdownDescription": "Max bytes for host file reads."
         }
       }
     }
@@ -94,6 +253,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.2.1",
+    "@tabler/icons-webfont": "^3.44.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {

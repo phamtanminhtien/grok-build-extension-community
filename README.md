@@ -8,8 +8,8 @@ that speaks **ACP** to `grok agent stdio`. The agent runtime stays in Rust.
 | Phase | Status |
 |-------|--------|
 | Design docs | Done (`docs/`) |
-| **L0 — Protocol wire-up** | **Implemented** |
-| L1 — MVP chat | Not started |
+| L0 — Protocol wire-up | Done |
+| **L1 — MVP chat** | **Implemented** |
 | L2 — IDE-native | Not started |
 
 ## Principle
@@ -41,23 +41,26 @@ npm run smoke:cli
 
 1. Open this folder in VS Code / Cursor
 2. Press **F5** (Run Extension)
-3. Command Palette:
-   - **Grok Build: Open Output**
-   - **Grok Build: Start Agent**
-   - **Grok Build: Smoke Test (L0)**
-   - **Grok Build: Restart Agent** / **Grok Build: Stop Agent**
+3. **Both locations work:**
+   - **Activity Bar** (left) — classic Grok Build icon (always)
+   - **Secondary Side Bar** (right) — tab next to Chat / Claude Code / Codex (VS Code ≥ 1.106)
+4. **Grok Build: Open Chat** prefers the secondary tab strip; **Open Chat (Activity Bar)** forces the left sidebar
+5. Type a prompt and Send (active file / selection attach automatically)
 
 Full checklist: [docs/L0-manual-test.md](docs/L0-manual-test.md)
 
-## Commands (L0)
+## Commands
 
 | Command | Action |
 |---------|--------|
+| `Grok Build: Open Chat` | Focus sidebar chat |
 | `Grok Build: Open Output` | Show Output channel `Grok Build` |
 | `Grok Build: Start Agent` | Spawn → `initialize` → `session/new` |
-| `Grok Build: Smoke Test (L0)` | Start + send test prompt; stream to Output |
-| `Grok Build: Restart Agent` | Kill + re-init |
-| `Grok Build: Stop Agent` | Graceful process shutdown |
+| `Grok Build: New Session` | New ACP session + clear UI |
+| `Grok Build: Cancel Turn` | `session/cancel` |
+| `Grok Build: Login / Set API Key` | SecretStorage API key |
+| `Grok Build: Smoke Test (L0)` | Headless-style prompt via agent |
+| `Grok Build: Restart / Stop Agent` | Process lifecycle |
 
 ## Settings
 
@@ -73,16 +76,21 @@ Full checklist: [docs/L0-manual-test.md](docs/L0-manual-test.md)
 
 ```
 src/
-  extension.ts              # activate / commands
-  agent/
-    binaryResolver.ts       # PATH + setting resolution
-    processManager.ts       # spawn / kill grok agent stdio
-    agentService.ts         # ACP client lifecycle
+  extension.ts
+  agent/          # process, ACP, host FS, permissions
+  ui/             # chat webview + status bar
+  auth/           # SecretStorage API key
+  context/        # active file / selection → ACP blocks
   config/settings.ts
   log/output.ts
-scripts/smoke-cli.mjs       # headless acceptance
-docs/                       # design + L0 manual test
+media/grok.svg              # activity bar (Tabler message-chatbot)
+media/tabler/               # webfont copied on build for chat UI
+scripts/smoke-cli.mjs
+docs/
 ```
+
+Chat UI uses **[@tabler/icons-webfont](https://tabler.io/icons)** (`npm run build` copies CSS/fonts into `media/tabler/`).
+
 
 ## Documentation
 
