@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+out/
+dist/
+*.vsix
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+.nyc_output/
+.vscode-test/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors / IDEs
+.idea/
+*.swp
+*.swo
+*~
+
+# VS Code (keep shared recommendations if added later)
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/settings.json.example
+
+# Package manager caches / locks (uncomment if you prefer not to commit locks)
+# package-lock.json
+# pnpm-lock.yaml
+# yarn.lock
+
+# TypeScript incremental
+*.tsbuildinfo
+
+# Optional local tooling
+.turbo/
+.cache/
+tmp/
+temp/
