@@ -108,7 +108,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("grok.startAgent", async () => {
       openOutput();
       try {
-        await agentService!.ensureStarted();
+        await chat.openChat();
+        await chat.runStartAgent();
         const state = agentService!.getState();
         if (state.kind === "ready") {
           void vscode.window.showInformationMessage("Grok Build agent ready");
@@ -121,14 +122,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("grok.restartAgent", async () => {
       openOutput();
       try {
-        await agentService!.restart();
+        await chat.openChat();
+        await chat.runRestartAgent();
         const state = agentService!.getState();
         if (state.kind === "ready") {
           void vscode.window.showInformationMessage(
             "Grok Build agent restarted",
           );
         }
-        await chat.refreshState();
       } catch (err) {
         await showStartError(err);
       }
@@ -151,10 +152,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("grok.newSession", async () => {
       try {
         await chat.openChat();
-        await agentService!.newSession();
-        chat.clearMessages();
+        await chat.runNewSession();
         void vscode.window.showInformationMessage("Grok Build: new session");
-        await chat.refreshState();
       } catch (err) {
         await showStartError(err);
       }

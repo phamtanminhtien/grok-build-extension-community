@@ -31,6 +31,9 @@ export interface DispatchDeps {
   getTranscript: () => { role: string; text: string }[];
   clearUi: () => void;
   newSession: () => Promise<void>;
+  /** Optional host wrappers (loading indicator, system lines). */
+  startAgent?: () => Promise<void>;
+  restartAgent?: () => Promise<void>;
 }
 
 /**
@@ -121,7 +124,7 @@ async function runHostAction(
   switch (action) {
     case "newSession":
       await deps.newSession();
-      // handleNewSession already posts a system line
+      // runNewSession already posts a system line
       return undefined;
     case "resumeSession":
       await vscode.commands.executeCommand("grok.resumeSession");
@@ -285,9 +288,17 @@ async function runHostAction(
       await vscode.commands.executeCommand("grok.reviewEdits");
       return undefined;
     case "startAgent":
+      if (deps.startAgent) {
+        await deps.startAgent();
+        return undefined;
+      }
       await deps.agent.ensureStarted();
       return "Agent ready";
     case "restartAgent":
+      if (deps.restartAgent) {
+        await deps.restartAgent();
+        return undefined;
+      }
       await deps.agent.restart();
       return "Agent restarted";
     case "openExtensions": {

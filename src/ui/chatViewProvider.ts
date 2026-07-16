@@ -161,6 +161,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         timer?: ReturnType<typeof setTimeout>;
       }
     | undefined;
+  /** Centered loading indicator (start / new session) — nest-safe. */
+  private blockingLoadCount = 0;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -697,7 +699,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.pushSystem("Cancel requested…");
         break;
       case "newSession":
-        await this.handleNewSession();
+        await this.runNewSession();
         break;
       case "openFile":
         if (msg.path) {
@@ -769,22 +771,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "startAgent":
-        try {
-          const probe = await probeGrokBinary();
-          if (!probe.found) {
-            const outcome = await promptMissingCli();
-            if (outcome === "retry") {
-              await this.agent.ensureStarted();
-              this.pushSystem("Agent ready");
-            }
-          } else {
-            await this.agent.ensureStarted();
-            this.pushSystem("Agent ready");
-          }
-        } catch (err) {
-          await this.showStartError(err);
-        }
-        await this.pushFullState();
+        await this.runStartAgent();
         break;
       case "copyInstallCommand": {
         const info = getCliInstallInfo();
@@ -811,18 +798,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           void vscode.window.showInformationMessage(
             `Found grok at ${probe.path}`,
           );
-          try {
-            await this.agent.ensureStarted();
-            this.pushSystem("Agent ready");
-          } catch (err) {
-            await this.showStartError(err);
-          }
+          await this.runStartAgent();
         } else {
           void vscode.window.showWarningMessage(
             "Still cannot find `grok`. Install the CLI, then try again.",
           );
+          await this.pushFullState();
         }
-        await this.pushFullState();
         break;
       }
       case "addContext":
@@ -1054,7 +1036,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           this.scheduleMessagesPost(true);
         },
         newSession: async () => {
-          await this.handleNewSession();
+          await this.runNewSession();
+        },
+        startAgent: async () => {
+          await this.runStartAgent();
+        },
+        restartAgent: async () => {
+          await this.runRestartAgent();
         },
       });
 
@@ -1203,25 +1191,105 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async handleNewSession(): Promise<void> {
-    try {
-      if (this.agent.isBusy()) {
-        await this.agent.cancelTurn();
-      }
-      await this.agent.newSession();
-      this.messages = [];
-      this.currentAssistantId = undefined;
-      this.thoughtStartedAt = undefined;
-      this.mdCache.clear();
-      this.sessionUsage = {};
-      this.endTurnStatusClock();
-      this.diffs?.clear();
-      this.pushSystem("New session");
-      this.scheduleMessagesPost(true);
-      this.postTurnStatus();
-    } catch (err) {
-      this.pushSystem(errMessage(err));
+  /**
+   * Centered loading indicator for long host ops (start / new session).
+   * Non-blocking — does not disable the webview.
+   */
+  private setBlockingLoad(active: boolean, message?: string): void {
+    if (active) {
+      this.blockingLoadCount += 1;
+      this.post({
+        type: "blockingLoad",
+        active: true,
+        message: message?.trim() || "Loading…",
+      });
+      return;
     }
+    this.blockingLoadCount = Math.max(0, this.blockingLoadCount - 1);
+    if (this.blockingLoadCount === 0) {
+      this.post({ type: "blockingLoad", active: false, message: "" });
+    }
+  }
+
+  private async withBlockingLoad<T>(
+    message: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    this.setBlockingLoad(true, message);
+    try {
+      return await fn();
+    } finally {
+      this.setBlockingLoad(false);
+    }
+  }
+
+  /** Start (or re-check) the agent with a centered loading indicator. */
+  async runStartAgent(): Promise<void> {
+    if (this.blockingLoadCount > 0) {
+      return;
+    }
+    await this.withBlockingLoad("Starting agent…", async () => {
+      try {
+        const probe = await probeGrokBinary();
+        if (!probe.found) {
+          const outcome = await promptMissingCli();
+          if (outcome === "retry") {
+            await this.agent.ensureStarted();
+            this.pushSystem("Agent ready");
+          }
+        } else {
+          await this.agent.ensureStarted();
+          this.pushSystem("Agent ready");
+        }
+      } catch (err) {
+        await this.showStartError(err);
+      }
+      await this.pushFullState();
+    });
+  }
+
+  /** Restart the agent with a centered loading indicator. */
+  async runRestartAgent(): Promise<void> {
+    if (this.blockingLoadCount > 0) {
+      return;
+    }
+    await this.withBlockingLoad("Restarting agent…", async () => {
+      try {
+        await this.agent.restart();
+        this.pushSystem("Agent restarted");
+      } catch (err) {
+        await this.showStartError(err);
+      }
+      await this.pushFullState();
+    });
+  }
+
+  /** New ACP session with a centered loading indicator. */
+  async runNewSession(): Promise<void> {
+    if (this.blockingLoadCount > 0) {
+      return;
+    }
+    await this.withBlockingLoad("Creating new session…", async () => {
+      try {
+        if (this.agent.isBusy()) {
+          await this.agent.cancelTurn();
+        }
+        await this.agent.newSession();
+        this.messages = [];
+        this.currentAssistantId = undefined;
+        this.thoughtStartedAt = undefined;
+        this.mdCache.clear();
+        this.sessionUsage = {};
+        this.endTurnStatusClock();
+        this.diffs?.clear();
+        this.pushSystem("New session");
+        this.scheduleMessagesPost(true);
+        this.postTurnStatus();
+      } catch (err) {
+        this.pushSystem(errMessage(err));
+      }
+      await this.pushFullState();
+    });
   }
 
   private handleSessionUpdate(n: SessionNotification): void {
@@ -1846,6 +1914,37 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
   #app { display: flex; flex-direction: column; height: 100%; }
 
+  /* Centered loading + light overlay (start agent / new session) — non-blocking */
+  #blocking-load {
+    position: fixed; inset: 0; z-index: 10000;
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px;
+    pointer-events: none;
+    color: var(--fg);
+    background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 28%, transparent);
+  }
+  #blocking-load.active {
+    display: flex;
+  }
+  #blocking-load .bl-card {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px;
+    padding: 16px 22px;
+    border-radius: var(--radius-md, 10px);
+    background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--muted) 22%, transparent);
+    box-shadow: 0 4px 18px color-mix(in srgb, #000 18%, transparent);
+  }
+  #blocking-load .bl-spinner {
+    font-size: 22px; color: var(--btn-bg);
+    line-height: 1;
+  }
+  #blocking-load .bl-label {
+    font-size: 12px; font-weight: 500;
+    color: var(--muted);
+    letter-spacing: 0.01em;
+  }
+
   /* ── Header ── */
   header {
     display: flex; align-items: center; gap: var(--space-2);
@@ -2016,7 +2115,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
   .msg-actions button:hover {
     color: var(--fg);
-    background: color-mix(in srgb, var(--fg) 10%, transparent);
+    background: color-mix(in srgb, var(--fg) 6%, transparent);
   }
   .msg-actions button.copied {
     color: var(--vscode-testing-iconPassed, #3fb950);
@@ -2065,12 +2164,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
   .copy-code {
     position: absolute; top: 8px; right: 8px;
-    background: var(--btn-sec); color: var(--btn-sec-fg);
+    background: color-mix(in srgb, var(--fg) 6%, transparent);
+    color: var(--muted);
     border: none; border-radius: var(--radius-xs); padding: 3px 8px;
     font-size: 10px; font-weight: 500; cursor: pointer;
-    opacity: 0.85; transition: opacity var(--ease), background var(--ease);
+    opacity: 0.9; transition: opacity var(--ease), background var(--ease), color var(--ease);
   }
-  .copy-code:hover { opacity: 1; background: var(--btn-sec-hover); }
+  .copy-code:hover {
+    opacity: 1; color: var(--fg);
+    background: color-mix(in srgb, var(--fg) 8%, transparent);
+  }
   .msg.system .bubble {
     color: var(--muted); font-size: 12px; padding: 8px 0; background: transparent;
     display: flex; align-items: center; gap: 10px; width: 100%;
@@ -2774,6 +2877,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   button:hover:not(:disabled) {
     background: var(--btn-hover);
   }
+  /* Message / code copy-edit: light hover only (override primary button hover) */
+  .msg-actions button:hover:not(:disabled),
+  button.copy-code:hover:not(:disabled) {
+    color: var(--fg);
+    background: color-mix(in srgb, var(--fg) 6%, transparent);
+  }
   button:active:not(:disabled) {
     transform: translateY(0.5px);
   }
@@ -2797,11 +2906,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
   #send {
     border-radius: var(--radius-pill);
-    padding: 6px 12px;
-    min-height: 30px;
-    min-width: 0;
-    flex: 0 0 auto; /* keep primary action full width of its label */
+    width: 30px; min-width: 30px; min-height: 30px;
+    padding: 0;
+    flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
     box-shadow: 0 1px 2px color-mix(in srgb, var(--btn-bg) 35%, transparent);
+  }
+  #send .ti {
+    font-size: 15px; line-height: 1;
+    margin: 0;
   }
   #send:hover:not(:disabled) {
     box-shadow: 0 2px 6px color-mix(in srgb, var(--btn-bg) 40%, transparent);
@@ -2820,6 +2933,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 </style>
 </head>
 <body>
+<div id="blocking-load" role="status" aria-live="polite" aria-busy="false" hidden>
+  <div class="bl-card">
+    <i class="ti ti-loader ti-spin bl-spinner" aria-hidden="true"></i>
+    <span class="bl-label" id="blocking-load-label">Loading…</span>
+  </div>
+</div>
 <div id="app">
   <header>
     <div class="brand">
@@ -2964,7 +3083,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
               <span class="effort-btn-label" id="effort-btn-label">effort</span>
               <i class="ti ti-chevron-up" aria-hidden="true"></i>
             </button>
-            <button id="send" type="button" title="Send"><i class="ti ti-send"></i> Send</button>
+            <button id="send" type="button" title="Send" aria-label="Send"><i class="ti ti-send" aria-hidden="true"></i></button>
           </div>
         </div>
       </div>
@@ -5232,6 +5351,22 @@ function renderTurnStatus(s) {
   tsCost.style.display = s.cost ? '' : 'none';
 }
 
+function setBlockingLoad(active, message) {
+  const el = document.getElementById('blocking-load');
+  const label = document.getElementById('blocking-load-label');
+  if (!el) return;
+  if (active) {
+    if (label) label.textContent = message || 'Loading…';
+    el.hidden = false;
+    el.classList.add('active');
+    el.setAttribute('aria-busy', 'true');
+  } else {
+    el.hidden = true;
+    el.classList.remove('active');
+    el.setAttribute('aria-busy', 'false');
+  }
+}
+
 function setBusy(b) {
   const wasBusy = busy;
   busy = b;
@@ -5268,19 +5403,19 @@ function updateSendStopButton() {
   // Block send while CLI missing; otherwise only disable when busy with draft.
   sendBtn.disabled = cliMissing || (busy && !empty);
   if (cliMissing) {
-    sendBtn.innerHTML = '<i class="ti ti-send"></i> Send';
+    sendBtn.innerHTML = '<i class="ti ti-send" aria-hidden="true"></i>';
     sendBtn.title = 'Install Grok Build CLI first';
     sendBtn.setAttribute('aria-label', 'Send (disabled — CLI missing)');
   } else if (asStop) {
-    sendBtn.innerHTML = '<i class="ti ti-player-stop"></i> Stop';
+    sendBtn.innerHTML = '<i class="ti ti-player-stop" aria-hidden="true"></i>';
     sendBtn.title = 'Stop current turn (Esc)';
     sendBtn.setAttribute('aria-label', 'Stop');
   } else if (pendingEdit) {
-    sendBtn.innerHTML = '<i class="ti ti-check"></i> Resubmit';
+    sendBtn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i>';
     sendBtn.title = 'Resubmit edited message (choose rewind mode)';
     sendBtn.setAttribute('aria-label', 'Resubmit');
   } else {
-    sendBtn.innerHTML = '<i class="ti ti-send"></i> Send';
+    sendBtn.innerHTML = '<i class="ti ti-send" aria-hidden="true"></i>';
     sendBtn.title = 'Send';
     sendBtn.setAttribute('aria-label', 'Send');
   }
@@ -5700,6 +5835,8 @@ window.addEventListener('message', (event) => {
     restoreEditComposer(msg.id, msg.text);
   } else if (msg.type === 'busy') {
     setBusy(!!msg.busy);
+  } else if (msg.type === 'blockingLoad') {
+    setBlockingLoad(!!msg.active, msg.message || '');
   } else if (msg.type === 'turnStatus') {
     renderTurnStatus(msg);
   } else if (msg.type === 'contextBar') {

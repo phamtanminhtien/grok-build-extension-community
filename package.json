@@ -103,7 +103,8 @@
       {
         "command": "grok.newSession",
         "title": "Grok Build: New Session",
-        "category": "Grok Build"
+        "category": "Grok Build",
+        "icon": "$(add)"
       },
       {
         "command": "grok.cancel",
@@ -178,19 +179,24 @@
     "menus": {
       "view/title": [
         {
+          "command": "grok.newSession",
+          "when": "view == grok.chatView || view == grok.chatView.secondary",
+          "group": "navigation@1"
+        },
+        {
           "command": "grok.resumeSession",
           "when": "view == grok.chatView || view == grok.chatView.secondary",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "grok.reviewEdits",
           "when": "view == grok.chatView || view == grok.chatView.secondary",
-          "group": "navigation"
+          "group": "navigation@3"
         },
         {
           "command": "grok.openExtensions",
           "when": "view == grok.chatView || view == grok.chatView.secondary",
-          "group": "navigation"
+          "group": "navigation@4"
         }
       ],
       "editor/context": [
