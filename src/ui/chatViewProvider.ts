@@ -242,6 +242,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           this.postAutoContext();
         }
       }),
+      // Keep empty-state Sign in / Log out + account label in sync when the
+      // CLI mutates ~/.grok/auth.json (grok login / grok logout).
+      this.auth.onDidChange((status) => {
+        void vscode.commands.executeCommand(
+          "setContext",
+          "grok.signedIn",
+          status.hasAny,
+        );
+        void this.pushFullState();
+      }),
     );
   }
 
@@ -679,7 +689,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         } else if (choice === "browser") {
           try {
             await this.agent.interactiveBrowserLogin();
-            this.pushSystem("Signed in with browser");
+            await this.auth.refresh();
+            const after = await this.auth.getStatus();
+            this.pushSystem(
+              after.cliEmail
+                ? `Signed in with browser as ${after.cliEmail} (CLI session)`
+                : "Signed in with browser (CLI session)",
+            );
           } catch (err) {
             await this.showStartError(err);
           }
@@ -688,9 +704,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "logout": {
+        const status = await this.auth.getStatus();
+        if (!status.hasAny && this.agent.getState().kind !== "ready") {
+          this.pushSystem("Already signed out");
+          await this.pushFullState();
+          break;
+        }
+        const confirm = await vscode.window.showWarningMessage(
+          "Sign out of Grok? This clears the CLI session (~/.grok/auth.json) and any API key stored in VS Code — same as `grok logout`.",
+          { modal: true },
+          "Log out",
+        );
+        if (confirm !== "Log out") {
+          break;
+        }
         try {
           const { logout, clearedSecretKey } = await this.agent.logout();
           this.pushSystem(formatLogoutMessage(logout, clearedSecretKey));
+          await this.auth.refresh();
         } catch (err) {
           await this.showStartError(err);
         }
@@ -1522,6 +1553,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private async pushFullState(): Promise<void> {
     const authStatus = await this.auth.getStatus();
     const hasAuth = authStatus.hasAny;
+    void vscode.commands.executeCommand("setContext", "grok.signedIn", hasAuth);
     const state = this.agent.getState();
     const settings = getSettings();
     const busy = this.agent.isBusy();
@@ -2689,7 +2721,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     <p id="empty-hint"></p>
     <div class="empty-actions">
       <button id="empty-start" type="button"><i class="ti ti-player-play"></i> Start agent</button>
-      <button id="empty-login" class="secondary" type="button"><i class="ti ti-login-2"></i> Sign in</button>
+      <button id="empty-auth" class="secondary" type="button" data-action="login" title="Sign in with browser or API key (same as grok login)"><i class="ti ti-login-2"></i> Sign in</button>
     </div>
   </div>
   <footer>
@@ -2807,6 +2839,25 @@ const vscode = acquireVsCodeApi();
 const messagesEl = document.getElementById('messages');
 const emptyEl = document.getElementById('empty');
 const emptyHint = document.getElementById('empty-hint');
+const emptyAuthBtn = document.getElementById('empty-auth');
+/** Toggle empty-state auth CTA: Sign in when logged out, Log out when signed in (CLI/API). */
+function updateEmptyAuthUi(hasAuth, authSummary) {
+  emptyHint.textContent = hasAuth
+    ? (authSummary || 'Signed in. You can start chatting.')
+    : 'Not signed in — use Sign in (browser OAuth or API key), same as grok login.';
+  if (!emptyAuthBtn) return;
+  if (hasAuth) {
+    emptyAuthBtn.setAttribute('data-action', 'logout');
+    emptyAuthBtn.title =
+      'Sign out of Grok — clears CLI session (~/.grok/auth.json), same as grok logout';
+    emptyAuthBtn.innerHTML = '<i class="ti ti-logout"></i> Log out';
+  } else {
+    emptyAuthBtn.setAttribute('data-action', 'login');
+    emptyAuthBtn.title =
+      'Sign in with browser or API key (same as grok login)';
+    emptyAuthBtn.innerHTML = '<i class="ti ti-login-2"></i> Sign in';
+  }
+}
 const meta = document.getElementById('meta');
 const composer = document.getElementById('composer');
 const sendBtn = document.getElementById('send');
@@ -5146,8 +5197,11 @@ btnEffort.addEventListener('click', () => {
 });
 document.getElementById('empty-start').addEventListener('click', () =>
   vscode.postMessage({ type: 'startAgent' }));
-document.getElementById('empty-login').addEventListener('click', () =>
-  vscode.postMessage({ type: 'login' }));
+document.getElementById('empty-auth').addEventListener('click', () => {
+  const btn = document.getElementById('empty-auth');
+  const action = (btn && btn.getAttribute('data-action')) || 'login';
+  vscode.postMessage({ type: action === 'logout' ? 'logout' : 'login' });
+});
 document.getElementById('btn-review').addEventListener('click', () =>
   vscode.postMessage({ type: 'reviewEdits' }));
 
@@ -5447,9 +5501,7 @@ window.addEventListener('message', (event) => {
     setBusy(!!msg.busy);
     if (msg.turnStatus) renderTurnStatus(msg.turnStatus);
     if (msg.context) renderContextBar(msg.context);
-    emptyHint.textContent = msg.hasAuth
-      ? (msg.authSummary || 'Signed in. You can start chatting.')
-      : 'Not signed in — use Sign in (browser OAuth or API key), same as grok login.';
+    updateEmptyAuthUi(!!msg.hasAuth, msg.authSummary || '');
     emptyEl.hidden = (msg.messages || []).length > 0;
   } else if (msg.type === 'messages') {
     renderMessages(msg.messages || []);

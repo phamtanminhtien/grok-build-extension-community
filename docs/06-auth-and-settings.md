@@ -40,15 +40,30 @@ User: Grok Build: Login  (or /login, or empty-state Sign in)
 ### Logout
 
 ```
-User: Grok Build: Logout  (or /logout)
-  → confirm modal
+User: Grok Build: Logout  (or empty-state Log out, or /logout)
+  → confirm modal (explains CLI session + SecretStorage clear)
   → x.ai/auth/logout when agent reachable (clears ~/.grok/auth.json)
   → clear SecretStorage API key
   → stop agent process
   → toast (email if known; warn if XAI_API_KEY env still set)
+  → empty-state CTA flips back to Sign in
 ```
 
 Do not delete `~/.grok` recursively from the extension.
+
+### Sync with CLI
+
+Extension and CLI share one account store:
+
+| Source | Path / store |
+|--------|----------------|
+| OAuth session | `~/.grok/auth.json` (agent `x.ai/auth/*`, same as `grok login` / `grok logout`) |
+| Extension API key | VS Code `SecretStorage` (`grok.apiKey`) |
+| Env key | `XAI_API_KEY` when `grok.inheritEnvApiKey` is true |
+
+The extension watches `~/.grok/auth.json` so a terminal `grok login` /
+`grok logout` updates the chat empty-state account line and Sign in / Log out
+button without restarting VS Code.
 
 ## Configuration surface
 

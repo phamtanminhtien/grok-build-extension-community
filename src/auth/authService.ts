@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { getSettings } from "../config/settings";
-import { logInfo } from "../log/output";
+import { logInfo, logWarn } from "../log/output";
 import { describeAuthPresence } from "./authFlow";
 
 const SECRET_KEY = "grok.apiKey";
@@ -18,8 +18,39 @@ export interface AuthStatus {
   summary: string;
 }
 
-export class AuthService {
-  constructor(private readonly secrets: vscode.SecretStorage) {}
+/**
+ * Extension auth orchestrator. OAuth lives in the CLI session file
+ * (`~/.grok/auth.json`); API keys may also live in SecretStorage / env.
+ * Login and logout both mutate the same CLI store so extension and `grok`
+ * CLI stay aligned.
+ */
+export class AuthService implements vscode.Disposable {
+  private readonly _onDidChange = new vscode.EventEmitter<AuthStatus>();
+  /** Fires when SecretStorage, env inheritance, or CLI auth.json changes. */
+  readonly onDidChange = this._onDidChange.event;
+
+  private readonly disposables: vscode.Disposable[] = [];
+  private cliWatcher: fs.FSWatcher | undefined;
+  private cliWatchDebounce: ReturnType<typeof setTimeout> | undefined;
+  private lastFingerprint = "";
+
+  constructor(private readonly secrets: vscode.SecretStorage) {
+    this.disposables.push(
+      this._onDidChange,
+      this.secrets.onDidChange((e) => {
+        if (e.key === SECRET_KEY) {
+          void this.emitIfChanged();
+        }
+      }),
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration("grok.inheritEnvApiKey")) {
+          void this.emitIfChanged();
+        }
+      }),
+    );
+    this.startCliAuthWatch();
+    void this.emitIfChanged();
+  }
 
   async getApiKey(): Promise<string | undefined> {
     const fromSecret = (await this.secrets.get(SECRET_KEY))?.trim();
@@ -44,11 +75,13 @@ export class AuthService {
   async setApiKey(key: string): Promise<void> {
     await this.secrets.store(SECRET_KEY, key.trim());
     logInfo("API key stored in SecretStorage");
+    await this.emitIfChanged();
   }
 
   async clearApiKey(): Promise<void> {
     await this.secrets.delete(SECRET_KEY);
     logInfo("API key cleared from SecretStorage");
+    await this.emitIfChanged();
   }
 
   /** True if SecretStorage / env key or CLI auth file looks present. */
@@ -91,6 +124,112 @@ export class AuthService {
     }
     return env;
   }
+
+  /**
+   * Force a status re-read (e.g. after login/logout via agent when the
+   * auth.json write might race the file watcher).
+   */
+  async refresh(): Promise<AuthStatus> {
+    return this.emitIfChanged(true);
+  }
+
+  dispose(): void {
+    if (this.cliWatchDebounce) {
+      clearTimeout(this.cliWatchDebounce);
+      this.cliWatchDebounce = undefined;
+    }
+    this.cliWatcher?.close();
+    this.cliWatcher = undefined;
+    for (const d of this.disposables) {
+      d.dispose();
+    }
+  }
+
+  private startCliAuthWatch(): void {
+    const grokDir = path.join(os.homedir(), ".grok");
+    const authPath = path.join(grokDir, "auth.json");
+    try {
+      if (!fs.existsSync(grokDir)) {
+        // Watch parent so a later `grok login` that creates ~/.grok is noticed.
+        const home = os.homedir();
+        this.cliWatcher = fs.watch(home, (_event, filename) => {
+          const name = filenameToString(filename);
+          if (name === ".grok" || name === "auth.json") {
+            this.scheduleCliAuthCheck();
+            // Once ~/.grok exists, rebind watcher to the more specific path.
+            if (fs.existsSync(grokDir)) {
+              this.cliWatcher?.close();
+              this.cliWatcher = undefined;
+              this.startCliAuthWatch();
+            }
+          }
+        });
+        return;
+      }
+      this.cliWatcher = fs.watch(grokDir, (_event, filename) => {
+        const name = filenameToString(filename);
+        if (!name || name === "auth.json") {
+          this.scheduleCliAuthCheck();
+        }
+      });
+      // Also touch-check the file itself when present (some platforms only
+      // fire dir events for create/delete, not content rewrite).
+      if (fs.existsSync(authPath)) {
+        try {
+          const fileWatcher = fs.watch(authPath, () => {
+            this.scheduleCliAuthCheck();
+          });
+          this.disposables.push({
+            dispose: () => fileWatcher.close(),
+          });
+        } catch {
+          /* dir watcher is enough on most platforms */
+        }
+      }
+    } catch (err) {
+      logWarn(
+        `Could not watch CLI auth file (${authPath}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  private scheduleCliAuthCheck(): void {
+    if (this.cliWatchDebounce) {
+      clearTimeout(this.cliWatchDebounce);
+    }
+    this.cliWatchDebounce = setTimeout(() => {
+      this.cliWatchDebounce = undefined;
+      void this.emitIfChanged();
+    }, 150);
+  }
+
+  private async emitIfChanged(force = false): Promise<AuthStatus> {
+    const status = await this.getStatus();
+    const fingerprint = [
+      status.hasSecretKey ? "1" : "0",
+      status.hasEnvKey ? "1" : "0",
+      status.hasCliAuth ? "1" : "0",
+      status.cliEmail ?? "",
+      status.summary,
+    ].join("|");
+    if (force || fingerprint !== this.lastFingerprint) {
+      this.lastFingerprint = fingerprint;
+      this._onDidChange.fire(status);
+    }
+    return status;
+  }
+}
+
+function filenameToString(
+  filename: string | Buffer | null | undefined,
+): string {
+  if (filename == null) {
+    return "";
+  }
+  if (typeof filename === "string") {
+    return filename;
+  }
+  return Buffer.isBuffer(filename) ? filename.toString("utf8") : "";
 }
 
 function readCliAuthSummary(): { present: boolean; email?: string } {

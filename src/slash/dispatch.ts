@@ -159,13 +159,14 @@ async function runHostAction(
         return ok ? "API key updated" : "Login cancelled";
       }
       await deps.agent.interactiveBrowserLogin();
-      const after = await deps.auth.getStatus();
+      const after = await deps.auth.refresh();
       return after.cliEmail
-        ? `Signed in as ${after.cliEmail}`
-        : "Signed in with browser";
+        ? `Signed in as ${after.cliEmail} (CLI session)`
+        : "Signed in with browser (CLI session)";
     }
     case "logout": {
       const { logout, clearedSecretKey } = await deps.agent.logout();
+      await deps.auth.refresh();
       return formatLogoutMessage(logout, clearedSecretKey);
     }
     case "help":

@@ -12,6 +12,11 @@ All notable changes to **Grok Build - Community** are documented in this file.
 - Fix TypeScript errors in interactive question option parsing
 - Add `vsce` devDependency and `publish:vsce` script
 
+### Auth UX
+
+- Empty state shows **Log out** when signed in (not only Sign in)
+- Login/logout share CLI session store (`~/.grok/auth.json`); UI watches the file so terminal `grok login` / `grok logout` stay in sync
+
 ## [0.3.0] — 2026-07-16
 
 ### Features

@@ -154,9 +154,14 @@ Removal: click ×. Adding: commands / drag file (L2) / `@` menu (L2).
 | State | Message | CTA |
 |-------|---------|-----|
 | No binary | “Grok CLI not found” | Install guide / set path |
-| Not logged in | “Sign in to use Grok” | Login / API key |
+| Not logged in | “Not signed in — use Sign in…” | **Sign in** (browser OAuth / API key) |
+| Signed in (CLI / API) | “Signed in via CLI session (email)…” | **Log out** (clears `~/.grok/auth.json`, same as `grok logout`) |
 | No workspace folder | “Open a folder to start” | Open folder |
 | Ready | Short tips / example prompts | — |
+
+Auth CTAs must stay in sync with the CLI session: login/logout write the same
+`~/.grok/auth.json` the `grok` CLI uses, and the empty-state button flips
+between Sign in and Log out from that shared status.
 
 ## Accessibility
 

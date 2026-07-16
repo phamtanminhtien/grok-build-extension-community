@@ -50,6 +50,7 @@ export function activate(context: vscode.ExtensionContext): void {
   agentService = new AgentService();
   const auth = new AuthService(context.secrets);
   agentService.setAuthService(auth);
+  context.subscriptions.push(auth);
 
   const diffs = new DiffReviewService();
 
@@ -388,12 +389,12 @@ async function runLoginFlow(
     return;
   }
 
-  // Browser OAuth via ACP authenticate + openExternal
+  // Browser OAuth via ACP authenticate + openExternal (writes ~/.grok/auth.json — same store as CLI)
   try {
     await agent.interactiveBrowserLogin();
-    const after = await auth.getStatus();
+    const after = await auth.refresh();
     void vscode.window.showInformationMessage(
-      `Grok Build: signed in${after.cliEmail ? ` as ${after.cliEmail}` : ""}`,
+      `Grok Build: signed in${after.cliEmail ? ` as ${after.cliEmail}` : ""} (CLI session)`,
     );
     await chat.refreshState();
   } catch (err) {
@@ -412,7 +413,7 @@ async function runLogoutFlow(
     return;
   }
   const confirm = await vscode.window.showWarningMessage(
-    "Sign out of Grok? This clears the CLI session (~/.grok/auth.json) and any API key stored in VS Code.",
+    "Sign out of Grok? This clears the CLI session (~/.grok/auth.json) and any API key stored in VS Code — same as `grok logout`.",
     { modal: true },
     "Log out",
   );
@@ -421,6 +422,7 @@ async function runLogoutFlow(
   }
   try {
     const { logout, clearedSecretKey } = await agent.logout();
+    await auth.refresh();
     void vscode.window.showInformationMessage(
       `Grok Build: ${formatLogoutMessage(logout, clearedSecretKey)}`,
     );
