@@ -97,15 +97,19 @@ npm run package          # local .vsix (grok-build-community-<version>.vsix)
 
 **Automated release (GitHub Actions):**
 
+> **Release does not run on every push to `main`.** It only starts when you push a version tag `v*` or click **Actions → Release → Run workflow**.
+
 1. Bump `version` in `package.json` and update `CHANGELOG.md`
-2. Commit, then tag and push:
+2. Commit to `main`, then tag and push the tag:
    ```bash
    git tag v0.3.1
    git push origin v0.3.1
    ```
-3. Workflow **Release** packages the VSIX, creates a GitHub Release, and publishes to:
+3. Workflow **Release** packages the VSIX, creates a GitHub Release, and (if secrets are set) publishes to:
    - [VS Code Marketplace](https://marketplace.visualstudio.com/) (`vsce`)
    - [Open VSX](https://open-vsx.org/) (`ovsx`)
+
+Without `VSCE_PAT` / `OVSX_PAT`, marketplace steps are skipped; the GitHub Release + VSIX still publish.
 
 Or run **Actions → Release → Run workflow** (optional dry-run).
 

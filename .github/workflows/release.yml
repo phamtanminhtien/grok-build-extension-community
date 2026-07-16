@@ -197,8 +197,9 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           if [ -z "${VSCE_PAT}" ]; then
-            echo "::error::VSCE_PAT secret is not set. Create an Azure DevOps PAT with Marketplace Publish and add it as repo secret VSCE_PAT."
-            exit 1
+            echo "::warning::VSCE_PAT secret is not set — skip VS Code Marketplace. Add Azure DevOps PAT (Marketplace Publish) as secret VSCE_PAT."
+            echo "marketplace_skipped=true" >> "$GITHUB_ENV"
+            exit 0
           fi
           npx vsce publish \
             --packagePath "${{ steps.pkg.outputs.vsix }}" \
@@ -212,8 +213,9 @@ jobs:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
           if [ -z "${OVSX_PAT}" ]; then
-            echo "::error::OVSX_PAT secret is not set. Create a token at https://open-vsx.org/user-settings/tokens and add it as repo secret OVSX_PAT."
-            exit 1
+            echo "::warning::OVSX_PAT secret is not set — skip Open VSX. Create a token at https://open-vsx.org/user-settings/tokens as secret OVSX_PAT."
+            echo "openvsx_skipped=true" >> "$GITHUB_ENV"
+            exit 0
           fi
           npx --yes ovsx publish \
             "${{ steps.pkg.outputs.vsix }}" \
