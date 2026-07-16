@@ -2938,6 +2938,7 @@ function closeOtherDropdowns() {
   if (typeof closeEffortPopover === 'function') closeEffortPopover();
   if (typeof closeSlash === 'function') closeSlash();
   if (typeof closeMention === 'function') closeMention();
+  if (typeof closeRewindPopover === 'function') closeRewindPopover();
 }
 
 function closePermissionPopover(send) {
@@ -3312,6 +3313,17 @@ function renderEffortList() {
   if (active) active.scrollIntoView({ block: 'nearest' });
 }
 
+function focusPopoverActive(listEl, selector) {
+  requestAnimationFrame(() => {
+    const el =
+      (listEl && listEl.querySelector(selector + '.active')) ||
+      (listEl && listEl.querySelector(selector));
+    if (el && typeof el.focus === 'function') {
+      try { el.focus(); } catch (_) { /* ignore */ }
+    }
+  });
+}
+
 function openModelPopover() {
   if (slashOpen) closeSlash();
   if (mentionOpen) closeMention();
@@ -3326,7 +3338,10 @@ function openModelPopover() {
   if (!modelItems.length) {
     vscode.postMessage({ type: 'selectModel' });
     closeModelPopover();
+    return;
   }
+  // Focus list so keyboard works even when opened from the model button.
+  focusPopoverActive(modelList, '.model-item');
 }
 
 function openEffortPopover() {
@@ -3338,6 +3353,7 @@ function openEffortPopover() {
   effortIndex = Math.max(0, effortItems.findIndex((e) => e.id === currentEffortId));
   if (effortIndex < 0) effortIndex = 0;
   renderEffortList();
+  focusPopoverActive(effortList, '.effort-item');
 }
 
 function acceptModel(idx) {
@@ -4592,6 +4608,60 @@ function acceptRewind(idx) {
   });
 }
 
+/** True when a dismissible (non-modal) popover is open. */
+function anyDropdownOpen() {
+  return !!(modelOpen || effortOpen || slashOpen || mentionOpen || rewindOpen);
+}
+
+/**
+ * Close popovers when clicking outside them.
+ * - Model / effort / slash / mention / rewind: dismiss
+ * - Permission / question: modal — only cancel if click is fully outside
+ *   those dialogs (not on their chrome)
+ * - Toggle buttons (#btn-model / #btn-effort) are excluded so click can toggle
+ * - Composer keeps slash/mention open (filter still driven by typing)
+ */
+document.addEventListener('pointerdown', (e) => {
+  if (!anyDropdownOpen() && !permissionOpen && !questionOpen) return;
+  const t = e.target;
+  if (!t || !t.closest) return;
+
+  // Inside any popover surface — leave open.
+  if (t.closest(
+    '#model-popover, #effort-popover, #slash-popover, #mention-popover, ' +
+    '#rewind-popover, #permission-popover, #question-popover',
+  )) {
+    return;
+  }
+
+  // Model/effort toggle buttons: their click handlers own open/close.
+  if (t.closest('#btn-model, #btn-effort')) {
+    return;
+  }
+
+  // Composer / shell: dismiss model/effort/rewind but keep slash/mention.
+  if (t.closest('#composer, .composer-shell, #edit-banner')) {
+    if (modelOpen) closeModelPopover();
+    if (effortOpen) closeEffortPopover();
+    if (rewindOpen) closeRewindPopover();
+    return;
+  }
+
+  if (modelOpen) closeModelPopover();
+  if (effortOpen) closeEffortPopover();
+  if (slashOpen) closeSlash();
+  if (mentionOpen) closeMention();
+  if (rewindOpen) closeRewindPopover();
+
+  // Modal dialogs: outside click = cancel (same as Esc).
+  if (permissionOpen) {
+    closePermissionPopover({ outcome: 'cancelled' });
+  }
+  if (questionOpen) {
+    closeQuestionPopover({ outcome: 'cancelled' });
+  }
+}, true);
+
 /** Send path when a composer edit is pending: open mode popover or no-op. */
 function trySubmitPendingEdit() {
   if (!pendingEdit) return false;
@@ -5099,7 +5169,11 @@ btnMode.addEventListener('click', () => {
   vscode.postMessage({ type: 'cycleMode' });
 });
 
-// Global key handling for permission/question so select works without composer focus
+/**
+ * Global key handling for ALL popovers (capture phase).
+ * Model/effort open from header buttons without focusing the composer — Esc and
+ * arrow keys must work even when focus is not in the input.
+ */
 window.addEventListener('keydown', (e) => {
   if (permissionOpen) {
     if (e.key === 'ArrowDown') {
@@ -5153,44 +5227,6 @@ window.addEventListener('keydown', (e) => {
       return;
     }
   }
-}, true);
-
-composer.addEventListener('keydown', (e) => {
-  // TUI Shift+Tab: cycle Normal → Plan → Always-Approve (even with draft text).
-  if (e.key === 'Tab' && e.shiftKey) {
-    e.preventDefault();
-    vscode.postMessage({ type: 'cycleMode' });
-    return;
-  }
-  // permission/question handled on window capture above
-  if (permissionOpen || questionOpen) return;
-  if (rewindOpen) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      moveRewind(1);
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      moveRewind(-1);
-      return;
-    }
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      e.preventDefault();
-      acceptRewind(rewindIndex);
-      return;
-    }
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeRewindPopover();
-      return;
-    }
-  }
-  if (pendingEdit && e.key === 'Escape' && !mentionOpen && !slashOpen && !modelOpen && !effortOpen) {
-    e.preventDefault();
-    cancelPendingEdit();
-    return;
-  }
   if (modelOpen) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -5236,6 +5272,28 @@ composer.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
       closeEffortPopover();
+      return;
+    }
+  }
+  if (rewindOpen) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveRewind(1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveRewind(-1);
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      acceptRewind(rewindIndex);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeRewindPopover();
       return;
     }
   }
@@ -5286,6 +5344,32 @@ composer.addEventListener('keydown', (e) => {
       closeMention();
       return;
     }
+  }
+}, true);
+
+composer.addEventListener('keydown', (e) => {
+  // TUI Shift+Tab: cycle Normal → Plan → Always-Approve (even with draft text).
+  if (e.key === 'Tab' && e.shiftKey) {
+    e.preventDefault();
+    vscode.postMessage({ type: 'cycleMode' });
+    return;
+  }
+  // Popover nav/Esc handled on window capture above — do not also Send/Cancel.
+  if (
+    permissionOpen ||
+    questionOpen ||
+    modelOpen ||
+    effortOpen ||
+    rewindOpen ||
+    slashOpen ||
+    mentionOpen
+  ) {
+    return;
+  }
+  if (pendingEdit && e.key === 'Escape') {
+    e.preventDefault();
+    cancelPendingEdit();
+    return;
   }
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
