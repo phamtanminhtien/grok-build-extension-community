@@ -3,7 +3,7 @@
  *
  * Live turns push an optimistic user + empty assistant in handleSend. The agent
  * then echoes user_message_chunk; treating that like history replay duplicates
- * the question and clears currentAssistantId, leaving a leftover "…" bubble
+ * the question and clears currentAssistantId, leaving a leftover empty assistant
  * when a second assistant is created for the reply.
  *
  * Assistant content is a timeline of items (text segments + tool calls) so tools
@@ -28,6 +28,10 @@ export type MergeUiMessage =
       type: "assistant";
       id: string;
       thought: string;
+      /** True while thought chunks are still streaming (TUI ThinkingBlock running). */
+      thoughtRunning?: boolean;
+      /** Frozen wall-clock ms for "Thought for Xs" (live turns only). */
+      thoughtElapsedMs?: number;
       items: AssistantItem[];
     }
   | { type: "system"; id: string; text: string };
@@ -64,7 +68,7 @@ export function shouldApplyUserMessageChunk(loadingHistory: boolean): boolean {
 /**
  * Only history replay should close the open assistant when a user chunk starts
  * (next turn). Live turns keep the optimistic assistant so streaming appends
- * into it instead of spawning a second "…" bubble.
+ * into it instead of spawning a second empty assistant bubble.
  */
 export function shouldCloseAssistantOnUserChunk(
   loadingHistory: boolean,

@@ -29,6 +29,7 @@ import {
 import { parseSessionNotificationMeta } from "./sessionNotificationMeta";
 import {
   buildTurnStatusParts,
+  formatThoughtHeader,
   processLabelForSessionUpdate,
   type SessionUsageSnapshot,
 } from "./turnStatusFormat";
@@ -43,6 +44,10 @@ type UiMessage =
       type: "assistant";
       id: string;
       thought: string;
+      /** Live thought stream active (TUI Thinking… header). */
+      thoughtRunning?: boolean;
+      /** Frozen elapsed for "Thought for Xs" after stream ends. */
+      thoughtElapsedMs?: number;
       items: AssistantItem[];
     }
   | { type: "system"; id: string; text: string };
@@ -61,6 +66,10 @@ interface SerializedMessage {
   html?: string;
   thought?: string;
   thoughtHtml?: string;
+  /** TUI-aligned header: Thinking… / Thought for Xs / Thought */
+  thoughtLabel?: string;
+  /** Open details while running; collapse when finished (TUI fold). */
+  thoughtRunning?: boolean;
   chips?: string[];
   /** Ordered timeline: text segments interleaved with tool calls. */
   items?: SerializedTimelineItem[];
@@ -92,6 +101,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private turnProcess = "";
   private sessionUsage: SessionUsageSnapshot = {};
   private turnStatusTimer: ReturnType<typeof setInterval> | undefined;
+  /** Wall-clock start of the current assistant's thought stream (live only). */
+  private thoughtStartedAt: number | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -109,6 +120,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         } else {
           this.endTurnStatusClock();
           this.postTurnStatus();
+          // Thought header may have frozen to "Thought for Xs" — re-render.
+          this.scheduleMessagesPost(true);
         }
       }),
       this.agent.onStateChange((state) =>
@@ -266,6 +279,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.messages = [];
     this.currentAssistantId = undefined;
     this.currentUserId = undefined;
+    this.thoughtStartedAt = undefined;
     this.mdCache.clear();
     this.scheduleMessagesPost(true);
   }
@@ -278,6 +292,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.messages = [];
     this.currentAssistantId = undefined;
     this.currentUserId = undefined;
+    this.thoughtStartedAt = undefined;
     this.mdCache.clear();
     this.sessionUsage = {};
     this.endTurnStatusClock();
@@ -291,6 +306,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.loadingHistory = false;
     this.currentAssistantId = undefined;
     this.currentUserId = undefined;
+    this.thoughtStartedAt = undefined;
     this.post({ type: "busy", busy: false });
     // Drop the transient "Loading…" system line if it is the only system msg at start
     if (
@@ -338,6 +354,36 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
     this.turnStartedAt = undefined;
     this.turnProcess = "";
+    // Freeze any open thought header to "Thought for Xs" (TUI finish).
+    this.finishThoughtPhase();
+  }
+
+  /**
+   * End the live thinking stream: freeze elapsed for the TUI-style
+   * "Thought for Xs" label and collapse the block on the next render.
+   * History replay never arms the local timer (matches TUI streaming_replay).
+   */
+  private finishThoughtPhase(): void {
+    const id = this.currentAssistantId;
+    if (!id) {
+      this.thoughtStartedAt = undefined;
+      return;
+    }
+    const msg = this.messages.find(
+      (m) => m.type === "assistant" && m.id === id,
+    );
+    if (!msg || msg.type !== "assistant" || !msg.thoughtRunning) {
+      this.thoughtStartedAt = undefined;
+      return;
+    }
+    msg.thoughtRunning = false;
+    if (
+      this.thoughtStartedAt != null &&
+      (msg.thoughtElapsedMs == null || msg.thoughtElapsedMs <= 0)
+    ) {
+      msg.thoughtElapsedMs = Math.max(0, Date.now() - this.thoughtStartedAt);
+    }
+    this.thoughtStartedAt = undefined;
   }
 
   private postTurnStatus(): void {
@@ -486,12 +532,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.postAutoContext();
         break;
       }
-      case "selectModel":
-        await vscode.commands.executeCommand("grok.selectModel");
-        break;
-      case "resumeSession":
-        await vscode.commands.executeCommand("grok.resumeSession");
-        break;
       default:
         break;
     }
@@ -580,6 +620,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       await this.agent.newSession();
       this.messages = [];
       this.currentAssistantId = undefined;
+      this.thoughtStartedAt = undefined;
       this.mdCache.clear();
       this.sessionUsage = {};
       this.endTurnStatusClock();
@@ -651,7 +692,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     // History replay only: live turns already pushed the user bubble in
     // handleSend. Applying agent user_message_chunk again duplicates the
-    // question and clears currentAssistantId, leaving a leftover "…" bubble.
+    // question and clears currentAssistantId, leaving a leftover empty assistant.
     if (kind === "user_message_chunk") {
       const text =
         update.content.type === "text" ? update.content.text : "";
@@ -677,6 +718,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     // End of a turn (seen on session/load replay; may be extension-specific)
     if ((kind as string) === "turn_completed") {
+      this.finishThoughtPhase();
       this.currentUserId = undefined;
       this.currentAssistantId = undefined;
       this.scheduleMessagesPost();
@@ -693,6 +735,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     if (kind === "agent_message_chunk") {
+      // Leaving thinking → responding: freeze "Thought for Xs" like TUI.
+      this.finishThoughtPhase();
       const text =
         update.content.type === "text" ? update.content.text : "";
       const next = applyAgentMessageChunk(
@@ -714,6 +758,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     // Thought / tool updates still need an open assistant bubble.
     if (kind === "tool_call" || kind === "tool_call_update") {
+      // Tool activity ends the thinking stream (TUI collapses thinking block).
+      this.finishThoughtPhase();
       const paths =
         update.locations?.map((l) => l.path).filter(Boolean) ?? [];
       const next = applyToolEvent(
@@ -753,7 +799,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    // agent_thought_chunk
+    // agent_thought_chunk — TUI ThinkingBlock: header "Thinking…" while live
     this.currentUserId = undefined;
     if (!this.currentAssistantId) {
       const asstId = uid();
@@ -768,6 +814,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
     if (showThoughts && update.content.type === "text") {
       msg.thought += update.content.text;
+      // Live only: arm running timer (history replay has no local wall-clock).
+      if (!this.loadingHistory) {
+        if (!msg.thoughtRunning) {
+          msg.thoughtRunning = true;
+          this.thoughtStartedAt = Date.now();
+        }
+      }
     }
     this.scheduleMessagesPost();
   }
@@ -850,6 +903,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           return { kind: "tool", tool: item.tool };
         });
         const plain = assistantPlainText(m);
+        const thoughtRunning = !!m.thoughtRunning;
+        // Live elapsed while streaming so the header can stay "Thinking…"
+        // (body updates continuously); freeze only when finishThoughtPhase runs.
         return {
           type: m.type,
           id: m.id,
@@ -863,6 +919,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           thoughtHtml: m.thought
             ? this.cachedMarkdown(`${m.id}:thought`, m.thought)
             : "",
+          thoughtRunning,
+          thoughtLabel: m.thought
+            ? formatThoughtHeader({
+                running: thoughtRunning,
+                elapsedMs: m.thoughtElapsedMs,
+              })
+            : undefined,
           items,
         };
       }
@@ -1311,28 +1374,39 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
   .chip button:active:not(:disabled) { transform: none; }
 
-  /* ── Thoughts & tools ── */
+  /* ── Thoughts (TUI ThinkingBlock) — no fill; muted text only ── */
   .thought {
     margin-bottom: 8px; font-size: 12px; color: var(--muted);
-    border: none;
-    border-radius: var(--radius-sm); padding: 8px 10px;
-    background: color-mix(in srgb, var(--muted) 8%, transparent);
+    border: none; border-radius: 0; padding: 0;
+    background: transparent;
+  }
+  .thought.thought-running {
+    background: transparent;
   }
   .thought summary {
     cursor: pointer; user-select: none;
     display: flex; align-items: center; gap: 6px; list-style: none;
-    font-weight: 500;
+    font-weight: 600;
+    color: var(--muted);
   }
+  .thought.thought-running summary {
+    color: var(--fg);
+  }
+  .thought summary .thought-label { min-width: 0; }
   .thought summary::-webkit-details-marker { display: none; }
   .thought .thought-body {
-    margin: 8px 0 0; max-height: 160px; overflow: auto; opacity: 0.9;
-    padding-top: 6px;
+    margin: 6px 0 0; max-height: 160px; overflow: auto; opacity: 0.88;
+    padding-top: 0; border: none;
+    font-weight: 400; color: var(--muted);
+    background: transparent;
   }
+  .thought .thought-body.md p { margin: 0 0 0.5em; }
+  .thought .thought-body.md p:last-child { margin-bottom: 0; }
   /* Assistant timeline: text bubbles + tool rows in stream order */
   .assistant-timeline {
     display: flex; flex-direction: column; gap: 6px;
   }
-  /* Single-line tool row — no card background; expand on click */
+  /* Single-line tool row — no chevron; click row to show detail (TUI fold) */
   .tool-row {
     margin: 0;
     border: none;
@@ -1355,15 +1429,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     overflow: hidden;
   }
   .tool-row > summary::-webkit-details-marker { display: none; }
-  .tool-row .tool-chevron {
-    flex-shrink: 0;
-    opacity: 0.45;
-    font-size: 12px;
-    transition: transform 0.12s ease;
-  }
-  .tool-row[open] > summary .tool-chevron {
-    transform: rotate(90deg);
-  }
   .tool-row .tool-ico {
     flex-shrink: 0;
     opacity: 0.75;
@@ -1390,7 +1455,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     gap: 3px;
   }
   .tool-row .tool-detail {
-    padding: 2px 0 4px 22px;
+    padding: 2px 0 4px 20px;
     font-size: 11px;
     color: var(--muted);
     display: flex;
@@ -1651,8 +1716,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       <span class="title">Grok Build</span>
     </div>
     <div class="header-right">
-      <button type="button" class="linkish" id="btn-model" title="Select model">model ▾</button>
-      <button type="button" class="linkish" id="btn-history" title="Session history">History</button>
       <div id="ctx-bar" hidden title="Context window usage" aria-label="Context tokens">—</div>
       <div class="meta" id="meta"><i class="ti ti-circle-dashed"></i><span>idle</span></div>
     </div>
@@ -1706,8 +1769,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       <div class="composer-shell">
         <textarea id="composer" placeholder="Message Grok… (/ commands, @ files, Enter send)" rows="3"></textarea>
         <div class="actions">
-          <button id="slash" class="secondary icon-btn" type="button" title="Slash commands (/)" aria-label="Slash commands"><i class="ti ti-slash"></i></button>
-          <button id="at" class="secondary icon-btn" type="button" title="Add context (@)" aria-label="Add context"><i class="ti ti-at"></i></button>
           <button id="stop" class="secondary" type="button" disabled title="Stop"><i class="ti ti-player-stop"></i> Stop</button>
           <button id="new" class="secondary" type="button" title="New session"><i class="ti ti-plus"></i> New</button>
           <button id="send" type="button" title="Send"><i class="ti ti-send"></i> Send</button>
@@ -1729,7 +1790,6 @@ const newBtn = document.getElementById('new');
 const stickyEl = document.getElementById('sticky');
 const reviewBar = document.getElementById('review-bar');
 const reviewLabel = document.getElementById('review-label');
-const btnModel = document.getElementById('btn-model');
 const ctxBarEl = document.getElementById('ctx-bar');
 const turnStatusEl = document.getElementById('turn-status');
 const tsProcess = turnStatusEl.querySelector('.ts-process');
@@ -2153,7 +2213,46 @@ function fillTextBubble(b, text, html) {
   } else if (text) {
     b.textContent = text;
   } else {
-    b.textContent = '…';
+    // No "…" placeholder — empty assistant waits silently; TUI uses turn-status
+    // / Thinking… block instead of a fake message bubble.
+    b.textContent = '';
+  }
+}
+
+/** TUI ThinkingBlock header: Thinking… / Thought for Xs / Thought */
+function thoughtHeaderLabel(m) {
+  if (m.thoughtLabel) return m.thoughtLabel;
+  if (m.thoughtRunning) return 'Thinking…';
+  return 'Thought';
+}
+
+function fillThoughtBlock(d, m) {
+  d.className = 'thought' + (m.thoughtRunning ? ' thought-running' : '');
+  // Running → open (truncated-like); finished → collapsed (TUI fold).
+  d.open = !!m.thoughtRunning;
+  let summary = d.querySelector('summary');
+  if (!summary) {
+    summary = document.createElement('summary');
+    d.appendChild(summary);
+  }
+  summary.innerHTML =
+    icon('brain') +
+    ' <span class="thought-label">' + esc(thoughtHeaderLabel(m)) + '</span>';
+  let body = d.querySelector('.thought-body');
+  if (!body) {
+    body = document.createElement('div');
+    body.className = 'thought-body md';
+    d.appendChild(body);
+  } else {
+    body.className = 'thought-body md';
+  }
+  if (m.thoughtHtml) {
+    body.innerHTML = m.thoughtHtml;
+  } else {
+    body.textContent = m.thought || '';
+  }
+  if (m.thoughtRunning && body.scrollHeight > body.clientHeight) {
+    body.scrollTop = body.scrollHeight;
   }
 }
 
@@ -2163,8 +2262,8 @@ function renderToolRow(t, open) {
   d.dataset.toolId = t.id || '';
   if (open) d.open = true;
   const summary = document.createElement('summary');
+  // No disclosure arrow — click the row to expand detail (TUI-style fold).
   summary.innerHTML =
-    '<span class="tool-chevron">' + icon('chevron-right') + '</span>' +
     '<span class="tool-ico">' + icon(toolIconName(t)) + '</span>' +
     '<span class="tool-title">' + esc(t.title || t.id || 'tool') + '</span>' +
     '<span class="tool-status">' + statusIcon(t.status) + esc(t.status || '') + '</span>';
@@ -2210,39 +2309,32 @@ function renderAssistantTimeline(m, openToolIds) {
   const items = Array.isArray(m.items) ? m.items : null;
 
   if (items && items.length) {
-    let hasVisible = false;
     for (const item of items) {
       if (item.kind === 'text') {
         const text = item.text || '';
         const html = item.html || '';
+        // Skip empty text segments — no "…" placeholder bubble (TUI-aligned).
         if (!text && !html) continue;
-        hasVisible = true;
         const b = document.createElement('div');
         b.className = 'bubble md';
         fillTextBubble(b, text, html);
         timeline.appendChild(b);
       } else if (item.kind === 'tool' && item.tool) {
-        hasVisible = true;
         const open = openToolIds && openToolIds.has(item.tool.id);
         timeline.appendChild(renderToolRow(item.tool, open));
       }
-    }
-    if (!hasVisible) {
-      const b = document.createElement('div');
-      b.className = 'bubble md';
-      b.textContent = '…';
-      timeline.appendChild(b);
     }
     return timeline;
   }
 
   // Legacy fallback (no items[]): single bubble + tools at end
   const hasTools = m.tools && m.tools.length;
-  const b = document.createElement('div');
-  b.className = 'bubble md';
-  if (m.html || m.text) fillTextBubble(b, m.text, m.html);
-  else if (!hasTools) b.textContent = '…';
-  if (m.html || m.text || !hasTools) timeline.appendChild(b);
+  if (m.html || m.text) {
+    const b = document.createElement('div');
+    b.className = 'bubble md';
+    fillTextBubble(b, m.text, m.html);
+    timeline.appendChild(b);
+  }
   if (hasTools) {
     for (const t of m.tools) {
       const open = openToolIds && openToolIds.has(t.id);
@@ -2281,16 +2373,7 @@ function renderOneMessage(m) {
   } else if (m.type === 'assistant') {
     if (m.thought) {
       const d = document.createElement('details');
-      d.className = 'thought';
-      d.open = false;
-      const summary = document.createElement('summary');
-      summary.innerHTML = icon('brain') + ' Thinking';
-      d.appendChild(summary);
-      const body = document.createElement('div');
-      body.className = 'thought-body';
-      if (m.thoughtHtml) body.innerHTML = m.thoughtHtml;
-      else body.textContent = m.thought;
-      d.appendChild(body);
+      fillThoughtBlock(d, m);
       wrap.appendChild(d);
     }
     wrap.appendChild(renderAssistantTimeline(m, null));
@@ -2330,26 +2413,16 @@ function patchLastAssistant(m) {
 
   const openIds = collectOpenToolIds(wrap);
 
-  // Thought block
+  // Thought block (TUI: Thinking… while running, Thought for Xs when done)
   let thought = wrap.querySelector(':scope > details.thought');
   if (m.thought) {
     if (!thought) {
       thought = document.createElement('details');
-      thought.className = 'thought';
-      thought.open = false;
-      const summary = document.createElement('summary');
-      summary.innerHTML = icon('brain') + ' Thinking';
-      thought.appendChild(summary);
-      const body = document.createElement('div');
-      body.className = 'thought-body';
-      thought.appendChild(body);
       wrap.insertBefore(thought, wrap.firstChild);
     }
-    const body = thought.querySelector('.thought-body');
-    if (body) {
-      if (m.thoughtHtml) body.innerHTML = m.thoughtHtml;
-      else body.textContent = m.thought;
-    }
+    fillThoughtBlock(thought, m);
+  } else if (thought) {
+    thought.remove();
   }
 
   const oldTimeline = wrap.querySelector(':scope > .assistant-timeline');
@@ -2553,42 +2626,10 @@ sendBtn.addEventListener('click', () => {
 
 stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
 newBtn.addEventListener('click', () => vscode.postMessage({ type: 'newSession' }));
-document.getElementById('slash').addEventListener('click', () => {
-  composer.focus();
-  const pos = composer.selectionStart || 0;
-  const v = composer.value;
-  if (!detectSlashContext(v, pos)) {
-    // Leading slash only (TUI-style); replace empty/non-slash input with /.
-    if (v.trim() === '' || pos === 0) {
-      composer.value = '/' + v.replace(/^\\s*/, '');
-      composer.setSelectionRange(1, 1);
-    } else {
-      composer.value = '/';
-      composer.setSelectionRange(1, 1);
-    }
-  }
-  syncSlashFromComposer();
-});
-document.getElementById('at').addEventListener('click', () => {
-  composer.focus();
-  const pos = composer.selectionStart || 0;
-  const v = composer.value;
-  const needsAt = !detectAtContext(v, pos);
-  if (needsAt) {
-    const insert = (pos === 0 || /\\s/.test(v[pos - 1] || '')) ? '@' : ' @';
-    composer.value = v.slice(0, pos) + insert + v.slice(pos);
-    const next = pos + insert.length;
-    composer.setSelectionRange(next, next);
-  }
-  syncMentionFromComposer();
-});
 document.getElementById('empty-start').addEventListener('click', () =>
   vscode.postMessage({ type: 'startAgent' }));
 document.getElementById('empty-login').addEventListener('click', () =>
   vscode.postMessage({ type: 'login' }));
-btnModel.addEventListener('click', () => vscode.postMessage({ type: 'selectModel' }));
-document.getElementById('btn-history').addEventListener('click', () =>
-  vscode.postMessage({ type: 'resumeSession' }));
 document.getElementById('btn-review').addEventListener('click', () =>
   vscode.postMessage({ type: 'reviewEdits' }));
 
@@ -2686,8 +2727,6 @@ window.addEventListener('message', (event) => {
     autoChip = msg.autoChip || null;
     renderSticky();
     setReview(msg.reviewCount || 0);
-    const model = msg.model || 'default';
-    btnModel.textContent = model + ' ▾';
     const base = (msg.agentState || 'idle') +
       (msg.agentDetail ? ' · ' + String(msg.agentDetail).slice(0, 12) : '');
     meta.dataset.base = base;
@@ -2710,7 +2749,6 @@ window.addEventListener('message', (event) => {
     const base = (msg.state || 'idle') +
       (msg.detail ? ' · ' + String(msg.detail).slice(0, 12) : '');
     meta.dataset.base = base;
-    if (msg.model) btnModel.textContent = msg.model + ' ▾';
     if (!busy) setMeta(base, false);
   } else if (msg.type === 'stickyChips') {
     stickyChips = msg.chips || [];

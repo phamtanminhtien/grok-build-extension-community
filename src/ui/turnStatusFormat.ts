@@ -288,3 +288,43 @@ export function processLabelForSessionUpdate(
       return undefined;
   }
 }
+
+/**
+ * TUI `ThinkingBlock::format_time`: `1.2s` under 60s, else `2m5s`.
+ * Used in the collapsed thought header ("Thought for …").
+ */
+export function formatThoughtElapsed(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) {
+    return "0.0s";
+  }
+  const secs = ms / 1000;
+  if (secs < 60) {
+    return `${secs.toFixed(1)}s`;
+  }
+  const mins = Math.floor(secs / 60);
+  const remaining = secs - mins * 60;
+  return `${mins}m${remaining.toFixed(0)}s`;
+}
+
+/**
+ * TUI thinking header labels:
+ * - running → `Thinking…`
+ * - done with elapsed → `Thought for 1.2s`
+ * - done without elapsed → `Thought`
+ */
+export function formatThoughtHeader(opts: {
+  running: boolean;
+  elapsedMs?: number;
+}): string {
+  if (opts.running) {
+    return "Thinking…";
+  }
+  if (
+    opts.elapsedMs != null &&
+    Number.isFinite(opts.elapsedMs) &&
+    opts.elapsedMs > 0
+  ) {
+    return `Thought for ${formatThoughtElapsed(opts.elapsedMs)}`;
+  }
+  return "Thought";
+}

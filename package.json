@@ -166,22 +166,12 @@
     "menus": {
       "view/title": [
         {
-          "command": "grok.newSession",
-          "when": "view == grok.chatView || view == grok.chatView.secondary",
-          "group": "navigation"
-        },
-        {
           "command": "grok.resumeSession",
           "when": "view == grok.chatView || view == grok.chatView.secondary",
           "group": "navigation"
         },
         {
           "command": "grok.reviewEdits",
-          "when": "view == grok.chatView || view == grok.chatView.secondary",
-          "group": "navigation"
-        },
-        {
-          "command": "grok.openOutput",
           "when": "view == grok.chatView || view == grok.chatView.secondary",
           "group": "navigation"
         },

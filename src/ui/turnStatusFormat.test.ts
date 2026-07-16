@@ -7,6 +7,8 @@ import {
   formatContextTokens,
   formatCost,
   formatElapsed,
+  formatThoughtElapsed,
+  formatThoughtHeader,
   formatTokensCompact,
   formatTokensContextBar,
   processLabelForSessionUpdate,
@@ -127,6 +129,28 @@ describe("processLabelForSessionUpdate", () => {
     assert.equal(
       processLabelForSessionUpdate("tool_call", "Read package.json"),
       "Read package.json",
+    );
+  });
+});
+
+describe("formatThoughtElapsed / formatThoughtHeader", () => {
+  it("matches TUI thinking time format", () => {
+    assert.equal(formatThoughtElapsed(1200), "1.2s");
+    assert.equal(formatThoughtElapsed(500), "0.5s");
+    assert.equal(formatThoughtElapsed(65_000), "1m5s");
+    assert.equal(formatThoughtElapsed(125_400), "2m5s");
+  });
+
+  it("matches TUI thinking headers", () => {
+    assert.equal(formatThoughtHeader({ running: true }), "Thinking…");
+    assert.equal(
+      formatThoughtHeader({ running: false, elapsedMs: 1200 }),
+      "Thought for 1.2s",
+    );
+    assert.equal(formatThoughtHeader({ running: false }), "Thought");
+    assert.equal(
+      formatThoughtHeader({ running: false, elapsedMs: 0 }),
+      "Thought",
     );
   });
 });

@@ -171,7 +171,7 @@ describe("timeline: text + tools in stream order", () => {
 });
 
 describe("applyAgentMessageChunk", () => {
-  it("streams into optimistic assistant without creating a second … bubble", () => {
+  it("streams into optimistic assistant without creating a second empty bubble", () => {
     let state = liveStateWithOptimistic("Q?");
     state = applyAgentMessageChunk(state, "Ans", uidSeq(99));
     assert.equal(state.messages.length, 2);
@@ -201,7 +201,7 @@ describe("applyAgentMessageChunk", () => {
     assert.equal(assistantPlainText(asst), "A");
   });
 
-  it("regression: live user echo + agent stream must not duplicate Q and …", () => {
+  it("regression: live user echo + agent stream must not duplicate Q and empty assistant", () => {
     let state = liveStateWithOptimistic("Câu hỏi?");
     const afterUser = applyUserMessageChunk(state, "Câu hỏi?", uidSeq());
     assert.equal(afterUser, null, "live user chunk must be ignored");
