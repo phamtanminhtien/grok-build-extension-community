@@ -67,6 +67,27 @@ export function isHiddenSession(args: {
   return kind.startsWith("subagent");
 }
 
+/**
+ * Empty / never-used sessions — TUI `/resume` drops entries with empty
+ * display title (see pager `effects/helpers.rs` filter on empty summary).
+ * Also treat zero-message shells as empty (just-created `session/new`).
+ */
+export function isEmptyHistorySession(args: {
+  title: string;
+  messageCount: number;
+}): boolean {
+  const title = args.title.trim();
+  const titleEmpty = !title || title === "(no summary)";
+  if (titleEmpty) {
+    return true;
+  }
+  // Shell with a stale title but no turns yet
+  if (args.messageCount <= 0) {
+    return true;
+  }
+  return false;
+}
+
 /** Relative time like TUI picker right_text (`format_time_ago`). */
 export function formatTimeAgo(ms: number, now = Date.now()): string {
   if (!ms || ms <= 0) {

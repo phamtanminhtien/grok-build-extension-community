@@ -23,6 +23,7 @@ import {
 } from "../log/output";
 import {
   displayTitle,
+  isEmptyHistorySession,
   isHiddenSession,
   repoNameFromCwd,
   sortSessionsNewestFirst,
@@ -686,18 +687,24 @@ function summaryWireToGrokSession(
     return undefined;
   }
   const cwd = s.info?.cwd || "";
+  const title = displayTitle({
+    generatedTitle: s.generated_title,
+    sessionSummary: s.session_summary,
+    sessionId,
+  });
+  const messageCount = s.num_chat_messages ?? s.num_messages ?? 0;
+  // Match TUI /resume: drop empty summaries / never-used shells
+  if (isEmptyHistorySession({ title, messageCount })) {
+    return undefined;
+  }
   const sortIso = s.last_active_at || s.updated_at || s.created_at || "";
   return {
     sessionId,
     cwd,
-    title: displayTitle({
-      generatedTitle: s.generated_title,
-      sessionSummary: s.session_summary,
-      sessionId,
-    }),
+    title,
     createdAt: s.created_at ? Date.parse(s.created_at) || 0 : 0,
     updatedAt: sortIso ? Date.parse(sortIso) || 0 : 0,
-    messageCount: s.num_chat_messages ?? s.num_messages ?? 0,
+    messageCount,
     modelId: s.current_model_id,
     agentName: s.agent_name,
     sessionKind: s.session_kind ?? undefined,

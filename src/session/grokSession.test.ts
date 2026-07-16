@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   displayTitle,
   formatTimeAgo,
+  isEmptyHistorySession,
   isHiddenSession,
   repoNameFromCwd,
 } from "./grokSession.ts";
@@ -59,5 +60,27 @@ describe("formatTimeAgo", () => {
   it("formats minutes", () => {
     const now = 1_000_000;
     assert.equal(formatTimeAgo(now - 5 * 60 * 1000, now), "5m ago");
+  });
+});
+
+describe("isEmptyHistorySession", () => {
+  it("hides no-summary placeholders", () => {
+    assert.equal(
+      isEmptyHistorySession({ title: "(no summary)", messageCount: 0 }),
+      true,
+    );
+    assert.equal(isEmptyHistorySession({ title: "", messageCount: 2 }), true);
+  });
+  it("hides zero-message shells", () => {
+    assert.equal(
+      isEmptyHistorySession({ title: "Hi", messageCount: 0 }),
+      true,
+    );
+  });
+  it("keeps real conversations", () => {
+    assert.equal(
+      isEmptyHistorySession({ title: "Hi", messageCount: 3 }),
+      false,
+    );
   });
 });

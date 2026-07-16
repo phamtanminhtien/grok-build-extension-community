@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   displayTitle,
+  isEmptyHistorySession,
   isHiddenSession,
   repoNameFromCwd,
   sortSessionsNewestFirst,
@@ -170,6 +171,10 @@ function readSummary(
       sessionSummary: data.session_summary,
       sessionId,
     });
+    const messageCount = data.num_chat_messages ?? data.num_messages ?? 0;
+    if (isEmptyHistorySession({ title, messageCount })) {
+      return undefined;
+    }
     // Grok sort: last_active_at else updated_at
     const sortIso =
       data.last_active_at || data.updated_at || data.created_at || "";
@@ -181,7 +186,7 @@ function readSummary(
       title,
       createdAt,
       updatedAt,
-      messageCount: data.num_chat_messages ?? data.num_messages ?? 0,
+      messageCount,
       modelId: data.current_model_id,
       agentName: data.agent_name,
       sessionKind: data.session_kind ?? undefined,
