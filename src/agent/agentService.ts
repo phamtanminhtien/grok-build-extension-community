@@ -21,6 +21,13 @@ import {
   logWarn,
   openOutput,
 } from "../log/output";
+import {
+  displayTitle,
+  isHiddenSession,
+  repoNameFromCwd,
+  sortSessionsNewestFirst,
+  type GrokSession,
+} from "../session/grokSession";
 import { BinaryNotFoundError } from "./binaryResolver";
 import { readTextFileHost, writeTextFileHost } from "./hostFs";
 import { PermissionBroker } from "./permissionBroker";
@@ -49,6 +56,22 @@ export interface RemoteSessionInfo {
   cwd: string;
   title?: string;
   updatedAt?: number;
+}
+
+/** Wire shape of Grok `Summary` from `_x.ai/session_summaries/*`. */
+interface GrokSummaryWire {
+  info?: { id?: string; cwd?: string };
+  session_summary?: string;
+  generated_title?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  last_active_at?: string | null;
+  num_messages?: number;
+  num_chat_messages?: number;
+  current_model_id?: string;
+  agent_name?: string;
+  session_kind?: string | null;
+  hidden?: boolean | null;
 }
 
 export class AgentService implements vscode.Disposable {
@@ -207,26 +230,132 @@ export class AgentService implements vscode.Disposable {
   }
 
   /**
-   * List sessions from the agent when sessionCapabilities.list is advertised.
+   * List sessions for a workspace via Grok ext method
+   * `_x.ai/session_summaries/session_list` (same source as TUI `/resume`).
    */
-  async listRemoteSessions(): Promise<RemoteSessionInfo[]> {
+  async listGrokWorkspaceSessions(cwd: string): Promise<GrokSession[]> {
     await this.ensureStarted();
-    if (!this.caps.listSessions || !this.connection) {
+    if (!this.connection) {
       return [];
     }
     try {
-      const res = await this.connection.agent.request(
-        acp.methods.agent.session.list,
-        { cwd: resolveSessionCwd() },
+      const res = await this.connection.agent.request<
+        { session_summaries?: GrokSummaryWire[] },
+        { workspace_directory: string }
+      >("_x.ai/session_summaries/session_list", {
+        workspace_directory: cwd,
+      });
+      return sortSessionsNewestFirst(
+        (res.session_summaries ?? [])
+          .map(summaryWireToGrokSession)
+          .filter((s): s is GrokSession => s != null),
       );
-      return (res.sessions ?? []).map((s) => ({
-        sessionId: s.sessionId,
-        cwd: s.cwd,
-        title: s.title ?? undefined,
-        updatedAt: s.updatedAt ? Date.parse(s.updatedAt) || undefined : undefined,
-      }));
     } catch (err) {
-      logWarn(`session/list failed: ${formatUserError(err)}`);
+      logWarn(
+        `x.ai/session_summaries/session_list failed: ${formatUserError(err)}`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Recent sessions across workspaces — `_x.ai/session_summaries/workspace_list_recent`.
+   */
+  async listGrokRecentSessions(limit = 40): Promise<GrokSession[]> {
+    await this.ensureStarted();
+    if (!this.connection) {
+      return [];
+    }
+    try {
+      const res = await this.connection.agent.request<
+        GrokSummaryWire[] | { session_summaries?: GrokSummaryWire[] },
+        { limit: number }
+      >("_x.ai/session_summaries/workspace_list_recent", {
+        limit: Math.min(limit, 10_000),
+      });
+      const arr = Array.isArray(res)
+        ? res
+        : (res.session_summaries ?? []);
+      return sortSessionsNewestFirst(
+        arr
+          .map(summaryWireToGrokSession)
+          .filter((s): s is GrokSession => s != null),
+      ).slice(0, limit);
+    } catch (err) {
+      logWarn(
+        `x.ai/session_summaries/workspace_list_recent failed: ${formatUserError(err)}`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Full-text session search — `_x.ai/session/search` (TUI content search).
+   */
+  async searchGrokSessions(
+    query: string,
+    options?: { cwd?: string; limit?: number },
+  ): Promise<GrokSession[]> {
+    await this.ensureStarted();
+    if (!this.connection || !query.trim()) {
+      return [];
+    }
+    try {
+      const res = await this.connection.agent.request<
+        {
+          result?: {
+            results?: Array<{
+              sessionId?: string;
+              session_id?: string;
+              cwd?: string;
+              summary?: string;
+              updatedAt?: string;
+              updated_at?: string;
+            }>;
+          };
+          results?: Array<{
+            sessionId?: string;
+            session_id?: string;
+            cwd?: string;
+            summary?: string;
+            updatedAt?: string;
+            updated_at?: string;
+          }>;
+        },
+        {
+          query: string;
+          cwd?: string;
+          limit: number;
+          include_content: boolean;
+        }
+      >("_x.ai/session/search", {
+        query: query.trim(),
+        cwd: options?.cwd,
+        limit: options?.limit ?? 20,
+        include_content: false,
+      });
+      const hits = res.result?.results ?? res.results ?? [];
+      return hits
+        .map((h) => {
+          const sessionId = h.sessionId || h.session_id || "";
+          if (!sessionId) {
+            return undefined;
+          }
+          const cwd = h.cwd || "";
+          const updatedIso = h.updatedAt || h.updated_at || "";
+          return {
+            sessionId,
+            cwd,
+            title: (h.summary || "").trim() || "(no summary)",
+            createdAt: 0,
+            updatedAt: updatedIso ? Date.parse(updatedIso) || 0 : 0,
+            messageCount: 0,
+            repoName: repoNameFromCwd(cwd),
+          } satisfies GrokSession;
+        })
+        .filter((s): s is GrokSession => s != null);
+    } catch (err) {
+      logWarn(`x.ai/session/search failed: ${formatUserError(err)}`);
       return [];
     }
   }
@@ -539,6 +668,41 @@ export class AgentService implements vscode.Disposable {
     }
     this.connection = undefined;
   }
+}
+
+function summaryWireToGrokSession(
+  s: GrokSummaryWire,
+): GrokSession | undefined {
+  if (
+    isHiddenSession({
+      hidden: s.hidden,
+      sessionKind: s.session_kind,
+    })
+  ) {
+    return undefined;
+  }
+  const sessionId = s.info?.id;
+  if (!sessionId) {
+    return undefined;
+  }
+  const cwd = s.info?.cwd || "";
+  const sortIso = s.last_active_at || s.updated_at || s.created_at || "";
+  return {
+    sessionId,
+    cwd,
+    title: displayTitle({
+      generatedTitle: s.generated_title,
+      sessionSummary: s.session_summary,
+      sessionId,
+    }),
+    createdAt: s.created_at ? Date.parse(s.created_at) || 0 : 0,
+    updatedAt: sortIso ? Date.parse(sortIso) || 0 : 0,
+    messageCount: s.num_chat_messages ?? s.num_messages ?? 0,
+    modelId: s.current_model_id,
+    agentName: s.agent_name,
+    sessionKind: s.session_kind ?? undefined,
+    repoName: repoNameFromCwd(cwd),
+  };
 }
 
 function formatUserError(err: unknown): string {

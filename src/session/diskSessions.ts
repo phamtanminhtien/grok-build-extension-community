@@ -1,19 +1,17 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import {
+  displayTitle,
+  isHiddenSession,
+  repoNameFromCwd,
+  sortSessionsNewestFirst,
+  type GrokSession,
+} from "./grokSession";
 
-/** Session metadata from ~/.grok/sessions (same store as the Grok Build TUI). */
-export interface DiskSession {
-  sessionId: string;
-  cwd: string;
-  title: string;
-  updatedAt: number;
-  preview: string;
-  messageCount: number;
-  /** Always on-disk Grok store */
-  source: "disk";
-  modelId?: string;
-}
+export type { GrokSession };
+/** @deprecated use GrokSession */
+export type DiskSession = GrokSession;
 
 /**
  * Resolve Grok home directory (`GROK_HOME` or `~/.grok`).
@@ -35,16 +33,14 @@ export function encodeSessionCwd(cwd: string): string {
 }
 
 /**
- * List sessions from `~/.grok/sessions`, same store the TUI / CLI use.
- *
- * When `cwd` is set, prefer that workspace's folder; also match realpath variants.
- * Results are newest-first.
+ * List sessions by scanning `~/.grok/sessions` (fallback when agent ext methods fail).
+ * Logic mirrors Grok `list_summaries` / Summary::is_hidden / display_title / last_active sort.
  */
 export function listDiskSessions(options?: {
   cwd?: string;
   limit?: number;
   allWorkspaces?: boolean;
-}): DiskSession[] {
+}): GrokSession[] {
   const sessionsRoot = path.join(grokHome(), "sessions");
   if (!fs.existsSync(sessionsRoot)) {
     return [];
@@ -54,7 +50,7 @@ export function listDiskSessions(options?: {
   const all = options?.allWorkspaces ?? !options?.cwd;
   const cwdKeys = options?.cwd ? cwdFolderKeys(options.cwd) : [];
 
-  const found: DiskSession[] = [];
+  const found: GrokSession[] = [];
 
   let groupDirs: string[];
   try {
@@ -69,7 +65,6 @@ export function listDiskSessions(options?: {
   for (const groupDir of groupDirs) {
     const groupName = path.basename(groupDir);
     if (!all && cwdKeys.length > 0 && !cwdKeys.includes(groupName)) {
-      // Also allow scanning when .cwd file matches
       if (!groupMatchesCwd(groupDir, options?.cwd)) {
         continue;
       }
@@ -86,6 +81,7 @@ export function listDiskSessions(options?: {
       if (!ent.isDirectory()) {
         continue;
       }
+      // Session ids are UUIDs; skip non-session dirs (e.g. index files)
       const sessionDir = path.join(groupDir, ent.name);
       const summaryPath = path.join(sessionDir, "summary.json");
       if (!fs.existsSync(summaryPath)) {
@@ -98,15 +94,13 @@ export function listDiskSessions(options?: {
     }
   }
 
-  found.sort((a, b) => b.updatedAt - a.updatedAt);
-  return found.slice(0, limit);
+  return sortSessionsNewestFirst(found).slice(0, limit);
 }
 
 function cwdFolderKeys(cwd: string): string[] {
   const keys = new Set<string>();
   const abs = path.resolve(cwd);
   keys.add(encodeURIComponent(abs));
-  // Trailing slash variants
   keys.add(encodeURIComponent(abs + path.sep));
   try {
     const real = fs.realpathSync(abs);
@@ -142,39 +136,56 @@ function groupMatchesCwd(groupDir: string, cwd?: string): boolean {
 interface SummaryJson {
   info?: { id?: string; cwd?: string };
   session_summary?: string;
-  generated_title?: string;
+  generated_title?: string | null;
   updated_at?: string;
   created_at?: string;
-  last_active_at?: string;
+  last_active_at?: string | null;
   num_messages?: number;
   num_chat_messages?: number;
   current_model_id?: string;
+  agent_name?: string;
+  session_kind?: string | null;
+  hidden?: boolean | null;
 }
 
 function readSummary(
   summaryPath: string,
   fallbackId: string,
-): DiskSession | undefined {
+): GrokSession | undefined {
   try {
     const raw = fs.readFileSync(summaryPath, "utf8");
     const data = JSON.parse(raw) as SummaryJson;
+    if (
+      isHiddenSession({
+        hidden: data.hidden,
+        sessionKind: data.session_kind,
+      })
+    ) {
+      return undefined;
+    }
     const sessionId = data.info?.id || fallbackId;
     const cwd = data.info?.cwd || "";
-    const title =
-      (data.generated_title || data.session_summary || "").trim() ||
-      `Session ${sessionId.slice(0, 8)}`;
-    const updatedIso =
-      data.updated_at || data.last_active_at || data.created_at || "";
-    const updatedAt = updatedIso ? Date.parse(updatedIso) || 0 : 0;
+    const title = displayTitle({
+      generatedTitle: data.generated_title,
+      sessionSummary: data.session_summary,
+      sessionId,
+    });
+    // Grok sort: last_active_at else updated_at
+    const sortIso =
+      data.last_active_at || data.updated_at || data.created_at || "";
+    const updatedAt = sortIso ? Date.parse(sortIso) || 0 : 0;
+    const createdAt = data.created_at ? Date.parse(data.created_at) || 0 : 0;
     return {
       sessionId,
       cwd,
       title,
+      createdAt,
       updatedAt,
-      preview: (data.session_summary || title).slice(0, 200),
       messageCount: data.num_chat_messages ?? data.num_messages ?? 0,
-      source: "disk",
       modelId: data.current_model_id,
+      agentName: data.agent_name,
+      sessionKind: data.session_kind ?? undefined,
+      repoName: repoNameFromCwd(cwd),
     };
   } catch {
     return undefined;

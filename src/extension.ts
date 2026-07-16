@@ -17,8 +17,8 @@ import {
   logInfo,
   openOutput,
 } from "./log/output";
-import { listDiskSessions, type DiskSession } from "./session/diskSessions";
 import { resolveSessionCwd } from "./config/settings";
+import { pickGrokSessionToResume } from "./session/sessionPicker";
 import { ChatViewProvider } from "./ui/chatViewProvider";
 import { GrokStatusBar } from "./ui/statusBar";
 
@@ -239,84 +239,12 @@ export function activate(context: vscode.ExtensionContext): void {
         await chat.openChat();
         const workspaceCwd = resolveSessionCwd();
 
-        // Only ~/.grok/sessions — same source as Grok Build TUI / CLI
-        let items = listDiskSessions({ cwd: workspaceCwd, limit: 40 });
-        let scope: "workspace" | "all" = "workspace";
-        if (items.length === 0) {
-          items = listDiskSessions({ allWorkspaces: true, limit: 40 });
-          scope = "all";
-        }
-        if (items.length === 0) {
-          void vscode.window.showInformationMessage(
-            "No sessions in ~/.grok/sessions. Chat in Grok Build (or this extension) first.",
-          );
-          return;
-        }
-
-        type PickItem = vscode.QuickPickItem & {
-          entry?: DiskSession;
-          action?: "all";
-        };
-        const picks: PickItem[] = [];
-        if (scope === "workspace") {
-          picks.push({
-            label: "$(history) Continue latest for this workspace",
-            description: items[0]!.title,
-            detail: items[0]!.sessionId,
-            entry: items[0],
-          });
-          picks.push({
-            label: "$(folder) Show all workspaces…",
-            alwaysShow: true,
-            action: "all",
-          });
-        }
-        for (const e of items) {
-          const when = e.updatedAt
-            ? new Date(e.updatedAt).toLocaleString()
-            : "";
-          picks.push({
-            label: e.title,
-            description: `${e.sessionId.slice(0, 8)}…${e.modelId ? ` · ${e.modelId}` : ""}`,
-            detail: [when, e.cwd, e.messageCount ? `${e.messageCount} msgs` : ""]
-              .filter(Boolean)
-              .join(" · "),
-            entry: e,
-          });
-        }
-
-        let pick = await vscode.window.showQuickPick(picks, {
-          title:
-            scope === "workspace"
-              ? "Resume Grok session (this workspace)"
-              : "Resume Grok session (all workspaces)",
-          matchOnDescription: true,
-          matchOnDetail: true,
-          placeHolder: "Synced with ~/.grok/sessions (same as TUI)",
-        });
-        if (!pick) {
-          return;
-        }
-        if (pick.action === "all") {
-          const allDisk = listDiskSessions({ allWorkspaces: true, limit: 60 });
-          pick = await vscode.window.showQuickPick(
-            allDisk.map((e) => ({
-              label: e.title,
-              description: `${e.sessionId.slice(0, 8)}…${e.modelId ? ` · ${e.modelId}` : ""}`,
-              detail: `${new Date(e.updatedAt).toLocaleString()} · ${e.cwd}`,
-              entry: e,
-            })),
-            {
-              title: "Resume Grok session (all workspaces)",
-              matchOnDescription: true,
-              matchOnDetail: true,
-            },
-          );
-          if (!pick?.entry) {
-            return;
-          }
-        }
-        if (!pick.entry) {
+        // Same list source + UX as Grok TUI `/resume` and `grok sessions list`
+        const entry = await pickGrokSessionToResume(
+          agentService!,
+          workspaceCwd,
+        );
+        if (!entry) {
           return;
         }
 
@@ -329,16 +257,16 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
-        chat.beginHistoryLoad(pick.entry.sessionId);
+        chat.beginHistoryLoad(entry.sessionId);
         try {
           await agentService!.loadSession(
-            pick.entry.sessionId,
-            pick.entry.cwd || workspaceCwd,
+            entry.sessionId,
+            entry.cwd || workspaceCwd,
           );
           await new Promise((r) => setTimeout(r, 400));
           chat.endHistoryLoad();
           void vscode.window.showInformationMessage(
-            `Resumed ${pick.entry.title || pick.entry.sessionId.slice(0, 8)}`,
+            `Resumed ${entry.title || entry.sessionId.slice(0, 8)}`,
           );
           await chat.refreshState();
         } catch (err) {
