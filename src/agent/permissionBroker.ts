@@ -6,9 +6,21 @@ import type {
 import * as vscode from "vscode";
 import { getSettings } from "../config/settings";
 import { logInfo, logWarn } from "../log/output";
+import {
+  permissionOptionLabel,
+  type PermissionOptionView,
+  type PermissionPromptPayload,
+  type PermissionPromptResult,
+} from "../ui/interactivePrompt";
+
+/** In-webview permission UI (TUI-style popover). */
+export type PermissionPromptHandler = (
+  payload: PermissionPromptPayload,
+) => Promise<PermissionPromptResult>;
 
 /**
- * Resolve ACP permission requests via QuickPick + optional session memory.
+ * Resolve ACP permission requests via in-webview popover + optional session memory.
+ * Falls back to QuickPick when no webview handler is registered or ready.
  */
 export class PermissionBroker {
   /** optionIds auto-selected for allow_always this process/session */
@@ -21,6 +33,12 @@ export class PermissionBroker {
    * `undefined` → fall back to settings.
    */
   private alwaysApproveOverride: boolean | undefined;
+  private promptUi: PermissionPromptHandler | undefined;
+  private nextPromptId = 1;
+
+  setPromptUi(handler: PermissionPromptHandler | undefined): void {
+    this.promptUi = handler;
+  }
 
   resetSessionMemory(): void {
     this.alwaysAllowOptionIds.clear();
@@ -93,42 +111,68 @@ export class PermissionBroker {
     }
 
     const detail = summarizeTool(params);
-    const picks = options.map((o) => ({
-      label: labelFor(o),
-      description: o.kind,
-      option: o,
-    }));
-
+    const viewOptions: PermissionOptionView[] = options.map((o) => {
+      const optionId = String(
+        (o as { optionId?: string; option_id?: string }).optionId ??
+          (o as { option_id?: string }).option_id ??
+          "",
+      );
+      return {
+        optionId,
+        name: o.name,
+        kind: String(o.kind ?? ""),
+        label: permissionOptionLabel(String(o.kind ?? ""), o.name),
+      };
+    }).filter((o) => !!o.optionId);
     const timeoutMs = getSettings().permissionTimeoutMs;
-    const pickPromise = vscode.window.showQuickPick(picks, {
-      title: `Grok Build wants to: ${title}`,
-      placeHolder: detail.slice(0, 200) || "Choose allow or deny",
-      ignoreFocusOut: true,
-    });
+    const promptId = this.nextPromptId++;
 
-    const timedOut = Symbol("timeout");
-    const result = await Promise.race([
-      pickPromise,
-      new Promise<typeof timedOut>((resolve) => {
-        setTimeout(() => resolve(timedOut), timeoutMs);
-      }),
-    ]);
+    let result: PermissionPromptResult | undefined;
+    if (this.promptUi) {
+      try {
+        result = await this.promptUi({
+          promptId,
+          title: String(title),
+          detail,
+          options: viewOptions,
+          timeoutMs,
+        });
+      } catch (err) {
+        logWarn(
+          `[permission] webview prompt failed, falling back to QuickPick: ${err}`,
+        );
+        result = undefined;
+      }
+    }
 
-    if (result === timedOut) {
+    if (!result) {
+      result = await this.quickPickFallback(
+        String(title),
+        detail,
+        options,
+        timeoutMs,
+      );
+    }
+
+    if (result.outcome === "timeout") {
       logWarn(`[permission] timed out after ${timeoutMs}ms → deny`);
       void vscode.window.showWarningMessage(
         "Grok Build: permission timed out — denied",
       );
-      // Dismiss QuickPick by returning deny; user may still have dialog open
       return denyResponse(options);
     }
 
-    if (!result) {
+    if (result.outcome === "cancelled") {
       logWarn("[permission] dismissed → deny");
       return denyResponse(options);
     }
 
-    const opt = result.option as PermissionOption;
+    const opt = options.find((o) => o.optionId === result.optionId);
+    if (!opt) {
+      logWarn("[permission] unknown optionId → deny");
+      return denyResponse(options);
+    }
+
     if (opt.kind === "allow_always") {
       this.alwaysAllowOptionIds.add(opt.optionId);
       this.alwaysAllowOptionIds.add("*");
@@ -139,6 +183,44 @@ export class PermissionBroker {
 
     logInfo(`[permission] selected ${opt.kind} (${opt.name})`);
     return selected(opt.optionId);
+  }
+
+  private async quickPickFallback(
+    title: string,
+    detail: string,
+    options: PermissionOption[],
+    timeoutMs: number,
+  ): Promise<PermissionPromptResult> {
+    const picks = options.map((o) => ({
+      label: quickPickLabel(o),
+      description: o.kind,
+      option: o,
+    }));
+
+    const pickPromise = vscode.window.showQuickPick(picks, {
+      title: `Grok Build wants to: ${title}`,
+      placeHolder: detail.slice(0, 200) || "Choose allow or deny",
+      ignoreFocusOut: true,
+    });
+
+    const timedOut = Symbol("timeout");
+    const race = await Promise.race([
+      pickPromise,
+      new Promise<typeof timedOut>((resolve) => {
+        setTimeout(() => resolve(timedOut), timeoutMs);
+      }),
+    ]);
+
+    if (race === timedOut) {
+      return { outcome: "timeout" };
+    }
+    if (!race) {
+      return { outcome: "cancelled" };
+    }
+    return {
+      outcome: "selected",
+      optionId: (race.option as PermissionOption).optionId,
+    };
   }
 }
 
@@ -157,7 +239,7 @@ function denyResponse(options: PermissionOption[]): RequestPermissionResponse {
   return { outcome: { outcome: "cancelled" } };
 }
 
-function labelFor(o: PermissionOption): string {
+function quickPickLabel(o: PermissionOption): string {
   switch (o.kind) {
     case "allow_once":
       return `$(check) ${o.name || "Allow once"}`;

@@ -52,8 +52,16 @@ import {
 import { toAcpExtWireMethod } from "./acpExtMethod";
 import { BinaryNotFoundError } from "./binaryResolver";
 import { readTextFileHost, writeTextFileHost } from "./hostFs";
-import { PermissionBroker } from "./permissionBroker";
+import {
+  PermissionBroker,
+  type PermissionPromptHandler,
+} from "./permissionBroker";
 import { spawnAgentProcess, type SpawnedAgent } from "./processManager";
+import {
+  parseAskUserQuestionRequest,
+  type AskUserQuestionResponse,
+  type QuestionPromptPayload,
+} from "../ui/interactivePrompt";
 
 export type AgentState =
   | { kind: "idle" }
@@ -105,6 +113,11 @@ export class AgentService implements vscode.Disposable {
   private disposed = false;
   private busy = false;
   private readonly permissions = new PermissionBroker();
+  /** In-webview ask_user_question popover (TUI question view). */
+  private questionUi:
+    | ((payload: QuestionPromptPayload) => Promise<AskUserQuestionResponse>)
+    | undefined;
+  private nextQuestionPromptId = 1;
   private auth: AuthService | undefined;
   private caps: AgentCaps = {
     loadSession: false,
@@ -169,6 +182,24 @@ export class AgentService implements vscode.Disposable {
 
   setAuthService(auth: AuthService): void {
     this.auth = auth;
+  }
+
+  /**
+   * Wire chat webview for permission popovers (prefer over QuickPick).
+   */
+  setPermissionPromptUi(handler: PermissionPromptHandler | undefined): void {
+    this.permissions.setPromptUi(handler);
+  }
+
+  /**
+   * Wire chat webview for `x.ai/ask_user_question` popovers.
+   */
+  setQuestionPromptUi(
+    handler:
+      | ((payload: QuestionPromptPayload) => Promise<AskUserQuestionResponse>)
+      | undefined,
+  ): void {
+    this.questionUi = handler;
   }
 
   getAvailableCommands(): AvailableCommand[] {
@@ -1127,6 +1158,7 @@ export class AgentService implements vscode.Disposable {
     ) as ReadableStream<Uint8Array>;
     const stream = acp.ndJsonStream(input, output);
 
+    const identity = <T,>(p: T): T => p;
     const connection = acp
       .client({ name: "grok-build-community" })
       .onRequest(acp.methods.client.session.requestPermission, (ctx) =>
@@ -1148,6 +1180,17 @@ export class AgentService implements vscode.Disposable {
           throw err;
         }
       })
+      // TUI question overlay — agent reverse-request (ExtMethod / custom method).
+      .onRequest(
+        "_x.ai/ask_user_question",
+        identity,
+        (ctx) => this.handleAskUserQuestion(ctx.params),
+      )
+      .onRequest(
+        "x.ai/ask_user_question",
+        identity,
+        (ctx) => this.handleAskUserQuestion(ctx.params),
+      )
       .onNotification(acp.methods.client.session.update, (ctx) => {
         this.onSessionUpdateNotify(ctx.params);
       })
@@ -1218,6 +1261,96 @@ export class AgentService implements vscode.Disposable {
     });
 
     void this.pumpSessionUpdates(session);
+  }
+
+  /**
+   * Handle agent `x.ai/ask_user_question` (TUI question view).
+   * Params may be the typed payload or wrapped ExtRequest `{ method, params }`.
+   */
+  private async handleAskUserQuestion(
+    raw: unknown,
+  ): Promise<AskUserQuestionResponse> {
+    const unwrapped = unwrapExtParams(raw);
+    const parsed = parseAskUserQuestionRequest(unwrapped);
+    if (!parsed) {
+      logWarn("ask_user_question: invalid params → cancelled");
+      return { outcome: "cancelled" };
+    }
+    logInfo(
+      `[question] tool=${parsed.toolCallId || "?"} mode=${parsed.mode} n=${parsed.questions.length}`,
+    );
+
+    const promptId = this.nextQuestionPromptId++;
+    const timeoutMs = getSettings().permissionTimeoutMs;
+    if (this.questionUi) {
+      try {
+        return await this.questionUi({
+          promptId,
+          toolCallId: parsed.toolCallId,
+          mode: parsed.mode,
+          questions: parsed.questions,
+          timeoutMs,
+        });
+      } catch (err) {
+        logWarn(
+          `ask_user_question webview failed, QuickPick fallback: ${formatUserError(err)}`,
+        );
+      }
+    }
+    return this.askUserQuestionQuickPick(parsed);
+  }
+
+  private async askUserQuestionQuickPick(parsed: {
+    mode: "default" | "plan";
+    questions: import("../ui/interactivePrompt").QuestionView[];
+  }): Promise<AskUserQuestionResponse> {
+    const answers: Record<string, string[]> = {};
+    for (const q of parsed.questions) {
+      if (q.options.length === 0) {
+        continue;
+      }
+      if (q.multiSelect) {
+        const picks = await vscode.window.showQuickPick(
+          q.options.map((o) => ({
+            label: o.label,
+            description: o.description,
+            picked: false,
+          })),
+          {
+            title: q.question,
+            canPickMany: true,
+            ignoreFocusOut: true,
+            placeHolder: "Select one or more (Esc cancel)",
+          },
+        );
+        if (!picks) {
+          return { outcome: "cancelled" };
+        }
+        if (picks.length) {
+          answers[q.question] = picks.map((p) => p.label);
+        }
+      } else {
+        const pick = await vscode.window.showQuickPick(
+          q.options.map((o) => ({
+            label: o.label,
+            description: o.description,
+          })),
+          {
+            title: q.question,
+            ignoreFocusOut: true,
+            placeHolder: "Choose an option (Esc cancel)",
+          },
+        );
+        if (!pick) {
+          return { outcome: "cancelled" };
+        }
+        answers[q.question] = [pick.label];
+      }
+    }
+    if (Object.keys(answers).length === 0) {
+      return { outcome: "cancelled" };
+    }
+    return { outcome: "accepted", answers };
   }
 
   private async pumpSessionUpdates(session: ActiveSession): Promise<void> {
@@ -1476,6 +1609,32 @@ function summaryWireToGrokSession(
     sessionKind: s.session_kind ?? undefined,
     repoName: repoNameFromCwd(cwd),
   };
+}
+
+/**
+ * Ext methods may arrive as the typed payload or nested
+ * `{ method, params }` / `{ request: { params } }` depending on SDK path.
+ */
+function unwrapExtParams(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") {
+    return raw;
+  }
+  const o = raw as Record<string, unknown>;
+  // Already a question payload
+  if (o.questions != null || o.sessionId != null || o.session_id != null) {
+    return raw;
+  }
+  if (o.params != null && typeof o.params === "object") {
+    return o.params;
+  }
+  if (o.request != null && typeof o.request === "object") {
+    const req = o.request as Record<string, unknown>;
+    if (req.params != null) {
+      return req.params;
+    }
+    return req;
+  }
+  return raw;
 }
 
 function formatUserError(err: unknown): string {

@@ -58,6 +58,13 @@ import type { DiffReviewService } from "../diff/diffReviewService";
 import { readTextFileHost } from "../agent/hostFs";
 import { dispatchSlash } from "../slash/dispatch";
 import { slashRegistry } from "../slash/registry";
+import {
+  permissionOptionIcon,
+  type AskUserQuestionResponse,
+  type PermissionPromptPayload,
+  type PermissionPromptResult,
+  type QuestionPromptPayload,
+} from "./interactivePrompt";
 
 type UiMessage =
   | { type: "user"; id: string; text: string; chips?: string[] }
@@ -118,6 +125,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private turnStatusTimer: ReturnType<typeof setInterval> | undefined;
   /** Wall-clock start of the current assistant's thought stream (live only). */
   private thoughtStartedAt: number | undefined;
+  /** Pending permission popover (serialized in PermissionBroker). */
+  private pendingPermission:
+    | {
+        promptId: number;
+        resolve: (r: PermissionPromptResult) => void;
+        timer?: ReturnType<typeof setTimeout>;
+      }
+    | undefined;
+  /** Pending ask_user_question popover. */
+  private pendingQuestion:
+    | {
+        promptId: number;
+        resolve: (r: AskUserQuestionResponse) => void;
+        timer?: ReturnType<typeof setTimeout>;
+      }
+    | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -126,6 +149,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     options?: { supportsSecondarySidebar?: boolean },
   ) {
     this.supportsSecondarySidebar = options?.supportsSecondarySidebar ?? true;
+    this.agent.setPermissionPromptUi((p) => this.showPermissionPrompt(p));
+    this.agent.setQuestionPromptUi((p) => this.showQuestionPrompt(p));
     this.disposables.push(
       this.agent.onSessionUpdate((n) => this.handleSessionUpdate(n)),
       this.agent.onBusyChange((busy) => {
@@ -370,9 +395,113 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       clearTimeout(this.messagesFlushTimer);
     }
     this.endTurnStatusClock();
+    this.agent.setPermissionPromptUi(undefined);
+    this.agent.setQuestionPromptUi(undefined);
+    if (this.pendingPermission) {
+      const p = this.pendingPermission;
+      this.pendingPermission = undefined;
+      if (p.timer) clearTimeout(p.timer);
+      p.resolve({ outcome: "cancelled" });
+    }
+    if (this.pendingQuestion) {
+      const q = this.pendingQuestion;
+      this.pendingQuestion = undefined;
+      if (q.timer) clearTimeout(q.timer);
+      q.resolve({ outcome: "cancelled" });
+    }
     for (const d of this.disposables) {
       d.dispose();
     }
+  }
+
+  /**
+   * Show permission options in the chat popover (TUI permission view).
+   * Opens the chat panel so the user can answer.
+   */
+  private async showPermissionPrompt(
+    payload: PermissionPromptPayload,
+  ): Promise<PermissionPromptResult> {
+    await this.openChat();
+    // Wait a tick so webview can mount if just opened
+    if (this.views.size === 0) {
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    if (this.views.size === 0) {
+      // No webview — signal broker to use QuickPick fallback
+      throw new Error("webview not ready");
+    }
+    return new Promise<PermissionPromptResult>((resolve) => {
+      if (this.pendingPermission) {
+        const prev = this.pendingPermission;
+        this.pendingPermission = undefined;
+        if (prev.timer) clearTimeout(prev.timer);
+        prev.resolve({ outcome: "cancelled" });
+      }
+      const timer = setTimeout(() => {
+        if (this.pendingPermission?.promptId === payload.promptId) {
+          this.pendingPermission = undefined;
+          this.post({ type: "closePermissionPrompt" });
+          resolve({ outcome: "timeout" });
+        }
+      }, payload.timeoutMs);
+      this.pendingPermission = {
+        promptId: payload.promptId,
+        resolve,
+        timer,
+      };
+      this.post({
+        type: "permissionPrompt",
+        promptId: payload.promptId,
+        title: payload.title,
+        detail: payload.detail,
+        options: payload.options.map((o) => ({
+          ...o,
+          icon: permissionOptionIcon(o.kind),
+        })),
+      });
+    });
+  }
+
+  /**
+   * Show structured questions in the chat popover (TUI question view).
+   */
+  private async showQuestionPrompt(
+    payload: QuestionPromptPayload,
+  ): Promise<AskUserQuestionResponse> {
+    await this.openChat();
+    if (this.views.size === 0) {
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    if (this.views.size === 0) {
+      throw new Error("webview not ready");
+    }
+    return new Promise<AskUserQuestionResponse>((resolve) => {
+      if (this.pendingQuestion) {
+        const prev = this.pendingQuestion;
+        this.pendingQuestion = undefined;
+        if (prev.timer) clearTimeout(prev.timer);
+        prev.resolve({ outcome: "cancelled" });
+      }
+      const timer = setTimeout(() => {
+        if (this.pendingQuestion?.promptId === payload.promptId) {
+          this.pendingQuestion = undefined;
+          this.post({ type: "closeQuestionPrompt" });
+          resolve({ outcome: "cancelled" });
+        }
+      }, payload.timeoutMs);
+      this.pendingQuestion = {
+        promptId: payload.promptId,
+        resolve,
+        timer,
+      };
+      this.post({
+        type: "questionPrompt",
+        promptId: payload.promptId,
+        toolCallId: payload.toolCallId,
+        mode: payload.mode,
+        questions: payload.questions,
+      });
+    });
   }
 
   private beginTurnStatus(): void {
@@ -457,6 +586,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     enabled?: boolean;
     modelId?: string;
     effortId?: string;
+    promptId?: number;
+    optionId?: string;
+    outcome?: string;
+    answers?: Record<string, string[]>;
+    annotations?: Record<string, { preview?: string; notes?: string }>;
+    partial_answers?: Record<string, string>;
   }): Promise<void> {
     switch (msg.type) {
       case "ready":
@@ -637,6 +772,53 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           await this.pushFullState();
         } catch (err) {
           this.pushSystem(errMessage(err));
+        }
+        break;
+      }
+      case "permissionResponse": {
+        const promptId = msg.promptId ?? 0;
+        const pending = this.pendingPermission;
+        if (!pending || pending.promptId !== promptId) {
+          break;
+        }
+        this.pendingPermission = undefined;
+        if (pending.timer) clearTimeout(pending.timer);
+        if (msg.outcome === "selected" && msg.optionId) {
+          pending.resolve({ outcome: "selected", optionId: msg.optionId });
+        } else if (msg.outcome === "timeout") {
+          pending.resolve({ outcome: "timeout" });
+        } else {
+          pending.resolve({ outcome: "cancelled" });
+        }
+        break;
+      }
+      case "questionResponse": {
+        const promptId = msg.promptId ?? 0;
+        const pending = this.pendingQuestion;
+        if (!pending || pending.promptId !== promptId) {
+          break;
+        }
+        this.pendingQuestion = undefined;
+        if (pending.timer) clearTimeout(pending.timer);
+        const outcome = msg.outcome ?? "cancelled";
+        if (outcome === "accepted" && msg.answers) {
+          pending.resolve({
+            outcome: "accepted",
+            answers: msg.answers,
+            annotations: msg.annotations,
+          });
+        } else if (outcome === "chat_about_this") {
+          pending.resolve({
+            outcome: "chat_about_this",
+            partial_answers: msg.partial_answers ?? {},
+          });
+        } else if (outcome === "skip_interview") {
+          pending.resolve({
+            outcome: "skip_interview",
+            partial_answers: msg.partial_answers ?? {},
+          });
+        } else {
+          pending.resolve({ outcome: "cancelled" });
         }
         break;
       }
@@ -1750,8 +1932,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     position: relative;
     display: flex; flex-direction: column;
   }
-  /* @ mention + / slash + model/effort popovers — above input, like grok-build dropdowns */
-  #mention-popover, #slash-popover, #model-popover, #effort-popover {
+  /* @ mention + / slash + model/effort + permission/question popovers */
+  #mention-popover, #slash-popover, #model-popover, #effort-popover,
+  #permission-popover, #question-popover {
     position: absolute;
     left: 0; right: 0; bottom: calc(100% + 6px);
     z-index: 20;
@@ -1765,23 +1948,113 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       0 8px 24px color-mix(in srgb, var(--bg) 55%, #000);
     overflow: hidden;
   }
+  #permission-popover, #question-popover {
+    z-index: 30;
+    max-height: min(420px, 58vh);
+  }
   #mention-popover[hidden], #slash-popover[hidden], #model-popover[hidden],
-  #effort-popover[hidden] {
+  #effort-popover[hidden], #permission-popover[hidden], #question-popover[hidden] {
     display: none !important;
   }
-  #mention-head, #slash-head, #model-head, #effort-head {
+  #mention-head, #slash-head, #model-head, #effort-head,
+  #permission-head, #question-head {
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px; padding: 8px 10px 6px;
     font-size: 11px; color: var(--muted); font-weight: 500;
     border-bottom: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
     flex-shrink: 0;
   }
-  #mention-head .hint, #slash-head .hint, #model-head .hint, #effort-head .hint { opacity: 0.85; }
-  #mention-list, #slash-list, #model-list, #effort-list {
+  #mention-head .hint, #slash-head .hint, #model-head .hint, #effort-head .hint,
+  #permission-head .hint, #question-head .hint { opacity: 0.85; }
+  #mention-list, #slash-list, #model-list, #effort-list,
+  #permission-list, #question-list {
     overflow-y: auto; padding: 4px;
     flex: 1; min-height: 0;
   }
-  .mention-item, .slash-item, .model-item, .effort-item {
+  #permission-detail, #question-body {
+    padding: 8px 10px 4px;
+    font-size: 12px;
+    color: var(--fg);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 7em;
+    overflow-y: auto;
+    border-bottom: 1px solid color-mix(in srgb, var(--fg) 6%, transparent);
+    flex-shrink: 0;
+  }
+  #permission-detail:empty, #question-body:empty { display: none; }
+  .permission-item.kind-reject_once .mi-icon,
+  .permission-item.kind-reject_always .mi-icon {
+    color: #f48771;
+    background: color-mix(in srgb, #f48771 16%, transparent);
+  }
+  .permission-item.kind-allow_once .mi-icon,
+  .permission-item.kind-allow_always .mi-icon {
+    color: #89d185;
+    background: color-mix(in srgb, #89d185 18%, transparent);
+  }
+  .permission-item.active.kind-reject_once .mi-icon,
+  .permission-item.active.kind-reject_always .mi-icon {
+    color: #1a1a1a;
+    background: #f48771;
+  }
+  .permission-item.active.kind-allow_once .mi-icon,
+  .permission-item.active.kind-allow_always .mi-icon {
+    color: #1a1a1a;
+    background: #89d185;
+  }
+  #question-tabs {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    padding: 6px 8px 0; flex-shrink: 0;
+  }
+  #question-tabs:empty { display: none; }
+  .q-tab {
+    border: none; background: transparent; color: var(--muted);
+    font: inherit; font-size: 11px; padding: 4px 8px; border-radius: 999px;
+    cursor: pointer;
+  }
+  .q-tab.active {
+    background: color-mix(in srgb, var(--btn-bg) 28%, transparent);
+    color: var(--fg); font-weight: 600;
+  }
+  .question-item.selected {
+    outline: 1px solid color-mix(in srgb, #89d185 55%, transparent);
+    background: color-mix(in srgb, #89d185 10%, transparent);
+  }
+  .question-item .mi-check {
+    width: 18px; flex-shrink: 0; opacity: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #89d185;
+    font-size: 1.05em;
+    font-weight: 700;
+    text-shadow: 0 0 8px color-mix(in srgb, #89d185 45%, transparent);
+  }
+  .question-item.selected .mi-check { opacity: 1; }
+  .question-item.active.selected .mi-check,
+  .question-item:hover.selected .mi-check {
+    color: #b5f0b0;
+  }
+  #question-notes {
+    margin: 4px 8px 0; width: calc(100% - 16px);
+    box-sizing: border-box;
+    border-radius: var(--radius-sm);
+    border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+    background: var(--bg); color: var(--fg);
+    font: inherit; font-size: 12px; padding: 6px 8px;
+    resize: vertical; min-height: 36px; max-height: 80px;
+  }
+  #question-notes[hidden] { display: none !important; }
+  #permission-foot, #question-foot {
+    display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end;
+    padding: 6px 8px 8px;
+    border-top: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
+    flex-shrink: 0;
+  }
+  #permission-foot button, #question-foot button {
+    font-size: 11px; padding: 5px 10px;
+  }
+  .mention-item, .slash-item, .model-item, .effort-item,
+  .permission-item, .question-item {
     display: flex; align-items: center; gap: 8px;
     width: 100%; text-align: left;
     padding: 7px 8px; border: none; border-radius: var(--radius-sm);
@@ -1789,13 +2062,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     font: inherit; font-size: 12px; cursor: pointer;
     min-height: 32px;
   }
-  .mention-item:hover, .slash-item:hover, .model-item:hover, .effort-item:hover {
+  .mention-item:hover, .slash-item:hover, .model-item:hover, .effort-item:hover,
+  .permission-item:hover, .question-item:hover {
     background: var(--list-hover);
   }
-  .mention-item.active, .slash-item.active, .model-item.active, .effort-item.active {
+  .mention-item.active, .slash-item.active, .model-item.active, .effort-item.active,
+  .permission-item.active, .question-item.active {
     background: color-mix(in srgb, var(--btn-bg) 28%, transparent);
   }
-  .mention-item .mi-icon, .slash-item .mi-icon, .model-item .mi-icon, .effort-item .mi-icon {
+  .mention-item .mi-icon, .slash-item .mi-icon, .model-item .mi-icon, .effort-item .mi-icon,
+  .permission-item .mi-icon, .question-item .mi-icon {
     width: 22px; height: 22px; border-radius: 7px;
     display: inline-flex; align-items: center; justify-content: center;
     background: color-mix(in srgb, var(--muted) 14%, transparent);
@@ -1803,25 +2079,30 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     flex-shrink: 0;
   }
   .mention-item.active .mi-icon, .slash-item.active .mi-icon, .model-item.active .mi-icon,
-  .effort-item.active .mi-icon {
+  .effort-item.active .mi-icon, .permission-item.active .mi-icon, .question-item.active .mi-icon {
     color: var(--btn-fg);
     background: var(--btn-bg);
   }
   .mention-item:hover:not(.active) .mi-icon,
   .slash-item:hover:not(.active) .mi-icon,
   .model-item:hover:not(.active) .mi-icon,
-  .effort-item:hover:not(.active) .mi-icon {
+  .effort-item:hover:not(.active) .mi-icon,
+  .permission-item:hover:not(.active) .mi-icon,
+  .question-item:hover:not(.active) .mi-icon {
     color: var(--fg);
     background: color-mix(in srgb, var(--fg) 14%, transparent);
   }
-  .mention-item .mi-body, .slash-item .mi-body, .model-item .mi-body, .effort-item .mi-body {
+  .mention-item .mi-body, .slash-item .mi-body, .model-item .mi-body, .effort-item .mi-body,
+  .permission-item .mi-body, .question-item .mi-body {
     min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px;
   }
-  .mention-item .mi-label, .slash-item .mi-label, .model-item .mi-label, .effort-item .mi-label {
+  .mention-item .mi-label, .slash-item .mi-label, .model-item .mi-label, .effort-item .mi-label,
+  .permission-item .mi-label, .question-item .mi-label {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-weight: 500;
   }
-  .mention-item .mi-desc, .slash-item .mi-desc, .model-item .mi-desc, .effort-item .mi-desc {
+  .mention-item .mi-desc, .slash-item .mi-desc, .model-item .mi-desc, .effort-item .mi-desc,
+  .permission-item .mi-desc, .question-item .mi-desc {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-size: 10px; color: var(--muted);
   }
@@ -1994,9 +2275,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     border-radius: var(--radius-pill);
     padding: 7px 16px;
     box-shadow: 0 1px 2px color-mix(in srgb, var(--btn-bg) 35%, transparent);
+    min-width: 5.5rem;
   }
   #send:hover:not(:disabled) {
     box-shadow: 0 2px 6px color-mix(in srgb, var(--btn-bg) 40%, transparent);
+  }
+  /* Busy + empty composer → Stop (TUI-like) */
+  #send.is-stop {
+    background: color-mix(in srgb, #f48771 88%, var(--btn-bg));
+    color: #1a1a1a;
+    box-shadow: 0 1px 2px color-mix(in srgb, #f48771 40%, transparent);
+  }
+  #send.is-stop:hover:not(:disabled) {
+    background: #f48771;
+    box-shadow: 0 2px 6px color-mix(in srgb, #f48771 45%, transparent);
   }
   .vspacer { flex-shrink: 0; width: 100%; pointer-events: none; }
 </style>
@@ -2063,6 +2355,33 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         </div>
         <div id="effort-list"></div>
         <div id="effort-empty" hidden>Not supported on this model</div>
+      </div>
+      <div id="permission-popover" hidden role="dialog" aria-label="Permission request" aria-modal="true">
+        <div id="permission-head">
+          <span id="permission-title">Permission</span>
+          <span class="hint">↑↓ · Enter · Esc</span>
+        </div>
+        <div id="permission-detail"></div>
+        <div id="permission-list" role="listbox"></div>
+        <div id="permission-foot">
+          <button type="button" class="secondary" id="permission-cancel">Deny</button>
+        </div>
+      </div>
+      <div id="question-popover" hidden role="dialog" aria-label="Agent question" aria-modal="true">
+        <div id="question-head">
+          <span id="question-title">Question</span>
+          <span class="hint">↑↓ · Space · Enter · Esc</span>
+        </div>
+        <div id="question-tabs"></div>
+        <div id="question-body"></div>
+        <div id="question-list" role="listbox"></div>
+        <textarea id="question-notes" hidden rows="2" placeholder="Optional notes…"></textarea>
+        <div id="question-foot">
+          <button type="button" class="secondary" id="question-cancel">Cancel</button>
+          <button type="button" class="secondary" id="question-chat" hidden>Chat about this</button>
+          <button type="button" class="secondary" id="question-skip" hidden>Skip interview</button>
+          <button type="button" id="question-accept">Accept</button>
+        </div>
       </div>
       <div id="turn-status" hidden aria-live="polite">
         <span class="ts-left">
@@ -2139,6 +2458,21 @@ const btnEffort = document.getElementById('btn-effort');
 const effortBtnLabel = document.getElementById('effort-btn-label');
 const btnMode = document.getElementById('btn-mode');
 const modeBtnLabel = document.getElementById('mode-btn-label');
+const permissionPopover = document.getElementById('permission-popover');
+const permissionTitle = document.getElementById('permission-title');
+const permissionDetail = document.getElementById('permission-detail');
+const permissionList = document.getElementById('permission-list');
+const permissionCancel = document.getElementById('permission-cancel');
+const questionPopover = document.getElementById('question-popover');
+const questionTitle = document.getElementById('question-title');
+const questionTabs = document.getElementById('question-tabs');
+const questionBody = document.getElementById('question-body');
+const questionList = document.getElementById('question-list');
+const questionNotes = document.getElementById('question-notes');
+const questionCancel = document.getElementById('question-cancel');
+const questionChat = document.getElementById('question-chat');
+const questionSkip = document.getElementById('question-skip');
+const questionAccept = document.getElementById('question-accept');
 let busy = false;
 let currentMode = 'normal';
 let allMessages = [];
@@ -2245,6 +2579,340 @@ function closeEffortPopover() {
   effortList.innerHTML = '';
   effortEmpty.hidden = true;
 }
+
+/* ── permission + question popovers (TUI overlays) ── */
+let permissionOpen = false;
+let permissionPromptId = 0;
+let permissionItems = [];
+let permissionIndex = 0;
+let questionOpen = false;
+let questionPromptId = 0;
+let questionMode = 'default';
+let questionItems = []; // full questions array
+let questionTab = 0;
+let questionSelections = []; // per-tab: number | Set
+let questionIndex = 0;
+let questionNotesByTab = [];
+
+function closeOtherDropdowns() {
+  if (typeof closeModelPopover === 'function') closeModelPopover();
+  if (typeof closeEffortPopover === 'function') closeEffortPopover();
+  if (typeof closeSlash === 'function') closeSlash();
+  if (typeof closeMention === 'function') closeMention();
+}
+
+function closePermissionPopover(send) {
+  if (!permissionOpen && permissionPopover.hidden) return;
+  const id = permissionPromptId;
+  permissionOpen = false;
+  permissionPopover.hidden = true;
+  permissionList.innerHTML = '';
+  permissionItems = [];
+  if (send) {
+    vscode.postMessage({
+      type: 'permissionResponse',
+      promptId: id,
+      outcome: send.outcome,
+      optionId: send.optionId,
+    });
+  }
+}
+
+function openPermissionPrompt(msg) {
+  closeOtherDropdowns();
+  closeQuestionPopover(null);
+  permissionOpen = true;
+  permissionPromptId = msg.promptId || 0;
+  permissionItems = msg.options || [];
+  permissionIndex = 0;
+  permissionTitle.textContent = msg.title ? String(msg.title) : 'Permission';
+  permissionDetail.textContent = msg.detail ? String(msg.detail) : '';
+  permissionPopover.hidden = false;
+  renderPermissionList();
+  // Focus list so keyboard works even if composer isn't focused
+  const first = permissionList.querySelector('.permission-item');
+  if (first) first.focus();
+}
+
+function renderPermissionList() {
+  if (!permissionOpen) return;
+  permissionList.innerHTML = permissionItems.map((o, i) => {
+    const icon = o.icon || 'ti-circle-dot';
+    const kind = o.kind || '';
+    const label = o.label || o.name || o.optionId || '';
+    const desc = o.kind || '';
+    return '<button type="button" class="permission-item kind-' + esc(kind) +
+      (i === permissionIndex ? ' active' : '') +
+      '" data-i="' + i + '" role="option" tabindex="0" aria-selected="' +
+      (i === permissionIndex ? 'true' : 'false') + '">' +
+      '<span class="mi-icon"><i class="ti ' + esc(icon) + '"></i></span>' +
+      '<span class="mi-body"><span class="mi-label">' + esc(label) + '</span>' +
+      '<span class="mi-desc">' + esc(desc) + '</span></span>' +
+      '</button>';
+  }).join('');
+  highlightPermissionIndex(false);
+}
+
+/** Update active row without rebuilding DOM (avoids killing click on mouseenter). */
+function highlightPermissionIndex(scroll) {
+  const buttons = permissionList.querySelectorAll('.permission-item');
+  buttons.forEach((btn, i) => {
+    const on = i === permissionIndex;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    if (on && scroll) btn.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+function movePermission(delta) {
+  if (!permissionItems.length) return;
+  permissionIndex = (permissionIndex + delta + permissionItems.length) % permissionItems.length;
+  highlightPermissionIndex(true);
+}
+
+function acceptPermission(i) {
+  const idx = typeof i === 'number' ? i : permissionIndex;
+  const o = permissionItems[idx];
+  if (!o || !o.optionId) return;
+  closePermissionPopover({ outcome: 'selected', optionId: o.optionId });
+}
+
+// Event delegation — stable handlers (re-render must not re-bind)
+permissionList.addEventListener('click', (e) => {
+  const btn = e.target && e.target.closest ? e.target.closest('.permission-item') : null;
+  if (!btn || !permissionOpen) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const i = Number(btn.getAttribute('data-i'));
+  if (Number.isFinite(i)) acceptPermission(i);
+});
+permissionList.addEventListener('mouseover', (e) => {
+  const btn = e.target && e.target.closest ? e.target.closest('.permission-item') : null;
+  if (!btn || !permissionOpen) return;
+  const i = Number(btn.getAttribute('data-i'));
+  if (!Number.isFinite(i) || i === permissionIndex) return;
+  permissionIndex = i;
+  highlightPermissionIndex(false);
+});
+
+function closeQuestionPopover(send) {
+  if (!questionOpen && questionPopover.hidden) return;
+  const id = questionPromptId;
+  questionOpen = false;
+  questionPopover.hidden = true;
+  questionList.innerHTML = '';
+  questionTabs.innerHTML = '';
+  questionBody.textContent = '';
+  questionNotes.value = '';
+  questionNotes.hidden = true;
+  questionItems = [];
+  questionSelections = [];
+  questionNotesByTab = [];
+  if (send) {
+    vscode.postMessage(Object.assign({ type: 'questionResponse', promptId: id }, send));
+  }
+}
+
+function openQuestionPrompt(msg) {
+  closeOtherDropdowns();
+  closePermissionPopover(null);
+  questionOpen = true;
+  questionPromptId = msg.promptId || 0;
+  questionMode = msg.mode === 'plan' ? 'plan' : 'default';
+  questionItems = msg.questions || [];
+  questionTab = 0;
+  questionIndex = 0;
+  questionSelections = questionItems.map((q) =>
+    q.multiSelect ? new Set() : null
+  );
+  questionNotesByTab = questionItems.map(() => '');
+  questionTitle.textContent = questionItems.length > 1
+    ? 'Questions (' + questionItems.length + ')'
+    : 'Question';
+  questionChat.hidden = questionMode !== 'plan';
+  questionSkip.hidden = questionMode !== 'plan';
+  questionPopover.hidden = false;
+  renderQuestionView();
+  const first = questionList.querySelector('.question-item');
+  if (first) first.focus();
+}
+
+function saveQuestionNotes() {
+  if (questionTab >= 0 && questionTab < questionNotesByTab.length) {
+    questionNotesByTab[questionTab] = questionNotes.value || '';
+  }
+}
+
+function renderQuestionView() {
+  if (!questionOpen) return;
+  const q = questionItems[questionTab];
+  if (!q) return;
+  // tabs
+  if (questionItems.length > 1) {
+    questionTabs.innerHTML = questionItems.map((qq, i) =>
+      '<button type="button" class="q-tab' + (i === questionTab ? ' active' : '') +
+      '" data-i="' + i + '">Q' + (i + 1) + '</button>'
+    ).join('');
+  } else {
+    questionTabs.innerHTML = '';
+  }
+  questionBody.textContent = q.question || '';
+  questionNotes.hidden = false;
+  questionNotes.value = questionNotesByTab[questionTab] || '';
+  const opts = q.options || [];
+  const sel = questionSelections[questionTab];
+  questionList.innerHTML = opts.map((o, i) => {
+    const selected = q.multiSelect
+      ? !!(sel && sel.has(i))
+      : sel === i;
+    return '<button type="button" class="question-item' +
+      (i === questionIndex ? ' active' : '') +
+      (selected ? ' selected' : '') +
+      '" data-i="' + i + '" role="option" tabindex="0">' +
+      '<span class="mi-check"><i class="ti ti-check"></i></span>' +
+      '<span class="mi-body"><span class="mi-label">' + esc(o.label || '') + '</span>' +
+      '<span class="mi-desc">' + esc(o.description || '') + '</span></span>' +
+      '</button>';
+  }).join('');
+  highlightQuestionIndex(false);
+}
+
+function highlightQuestionIndex(scroll) {
+  const q = questionItems[questionTab];
+  const sel = questionSelections[questionTab];
+  const buttons = questionList.querySelectorAll('.question-item');
+  buttons.forEach((btn, i) => {
+    const on = i === questionIndex;
+    btn.classList.toggle('active', on);
+    const selected = q && q.multiSelect
+      ? !!(sel && sel.has(i))
+      : sel === i;
+    btn.classList.toggle('selected', selected);
+    if (on && scroll) btn.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+function toggleQuestionOption(i) {
+  const q = questionItems[questionTab];
+  if (!q) return;
+  if (q.multiSelect) {
+    const set = questionSelections[questionTab] || new Set();
+    if (set.has(i)) set.delete(i);
+    else set.add(i);
+    questionSelections[questionTab] = set;
+  } else {
+    questionSelections[questionTab] = i;
+  }
+  questionIndex = i;
+  highlightQuestionIndex(false);
+}
+
+function moveQuestion(delta) {
+  const q = questionItems[questionTab];
+  if (!q || !(q.options || []).length) return;
+  const n = q.options.length;
+  questionIndex = (questionIndex + delta + n) % n;
+  highlightQuestionIndex(true);
+}
+
+questionTabs.addEventListener('click', (e) => {
+  const btn = e.target && e.target.closest ? e.target.closest('.q-tab') : null;
+  if (!btn || !questionOpen) return;
+  e.preventDefault();
+  saveQuestionNotes();
+  questionTab = Number(btn.getAttribute('data-i')) || 0;
+  questionIndex = 0;
+  renderQuestionView();
+});
+questionList.addEventListener('click', (e) => {
+  const btn = e.target && e.target.closest ? e.target.closest('.question-item') : null;
+  if (!btn || !questionOpen) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const i = Number(btn.getAttribute('data-i'));
+  if (Number.isFinite(i)) toggleQuestionOption(i);
+});
+questionList.addEventListener('mouseover', (e) => {
+  const btn = e.target && e.target.closest ? e.target.closest('.question-item') : null;
+  if (!btn || !questionOpen) return;
+  const i = Number(btn.getAttribute('data-i'));
+  if (!Number.isFinite(i) || i === questionIndex) return;
+  questionIndex = i;
+  highlightQuestionIndex(false);
+});
+
+function buildQuestionAnswers() {
+  saveQuestionNotes();
+  const answers = {};
+  const annotations = {};
+  let any = false;
+  questionItems.forEach((q, ti) => {
+    const sel = questionSelections[ti];
+    const labels = [];
+    let preview;
+    if (q.multiSelect && sel && sel.size) {
+      Array.from(sel).sort((a, b) => a - b).forEach((i) => {
+        const o = q.options[i];
+        if (o) labels.push(o.label);
+      });
+    } else if (typeof sel === 'number' && q.options[sel]) {
+      labels.push(q.options[sel].label);
+      if (q.options[sel].preview) preview = q.options[sel].preview;
+    }
+    const notes = (questionNotesByTab[ti] || '').trim();
+    // Freeform-only (TUI): no option picked but notes → answer "Other"
+    if (!labels.length && notes) {
+      labels.push('Other');
+    }
+    if (labels.length) {
+      answers[q.question] = labels;
+      any = true;
+    }
+    if (preview || notes) {
+      annotations[q.question] = {};
+      if (preview) annotations[q.question].preview = preview;
+      if (notes) annotations[q.question].notes = notes;
+    }
+  });
+  return { answers, annotations, any };
+}
+
+function acceptQuestion() {
+  const { answers, annotations, any } = buildQuestionAnswers();
+  if (!any) return;
+  const payload = { outcome: 'accepted', answers };
+  if (Object.keys(annotations).length) payload.annotations = annotations;
+  closeQuestionPopover(payload);
+}
+
+function partialAnswersFromSelections() {
+  const { answers } = buildQuestionAnswers();
+  const partial = {};
+  Object.keys(answers).forEach((k) => {
+    partial[k] = answers[k].join(', ');
+  });
+  return partial;
+}
+
+permissionCancel.addEventListener('click', () => {
+  closePermissionPopover({ outcome: 'cancelled' });
+});
+questionCancel.addEventListener('click', () => {
+  closeQuestionPopover({ outcome: 'cancelled' });
+});
+questionAccept.addEventListener('click', () => acceptQuestion());
+questionChat.addEventListener('click', () => {
+  closeQuestionPopover({
+    outcome: 'chat_about_this',
+    partial_answers: partialAnswersFromSelections(),
+  });
+});
+questionSkip.addEventListener('click', () => {
+  closeQuestionPopover({
+    outcome: 'skip_interview',
+    partial_answers: partialAnswersFromSelections(),
+  });
+});
 
 function renderModelList() {
   if (!modelOpen) return;
@@ -3150,10 +3818,30 @@ function renderTurnStatus(s) {
 
 function setBusy(b) {
   busy = b;
-  sendBtn.disabled = b;
   composer.disabled = false;
   if (b) setMeta('working…', true);
   else setMeta(meta.dataset.base || 'idle', false);
+  updateSendStopButton();
+}
+
+/**
+ * While a turn is running and the composer is empty, the primary action is Stop.
+ * Typing into the composer switches back to Send (still blocked until idle).
+ */
+function updateSendStopButton() {
+  const empty = !composer.value.trim();
+  const asStop = busy && empty;
+  sendBtn.classList.toggle('is-stop', asStop);
+  sendBtn.disabled = busy && !empty; // only disable when busy with draft text
+  if (asStop) {
+    sendBtn.innerHTML = '<i class="ti ti-player-stop-filled"></i> Stop';
+    sendBtn.title = 'Stop current turn (Esc)';
+    sendBtn.setAttribute('aria-label', 'Stop');
+  } else {
+    sendBtn.innerHTML = '<i class="ti ti-send"></i> Send';
+    sendBtn.title = 'Send';
+    sendBtn.setAttribute('aria-label', 'Send');
+  }
 }
 
 function setReview(count) {
@@ -3206,10 +3894,16 @@ sendBtn.addEventListener('click', () => {
   if (slashOpen) closeSlash();
   if (modelOpen) closeModelPopover();
   if (effortOpen) closeEffortPopover();
+  // Busy + empty → Stop; otherwise Send
+  if (busy && !composer.value.trim()) {
+    vscode.postMessage({ type: 'cancel' });
+    return;
+  }
   const text = composer.value.trim();
   if (!text || busy) return;
   vscode.postMessage({ type: 'send', text });
   composer.value = '';
+  updateSendStopButton();
 });
 
 btnModel.addEventListener('click', () => {
@@ -3261,7 +3955,10 @@ effortList.addEventListener('click', (e) => {
   acceptEffort(Number(btn.getAttribute('data-effort-idx')));
 });
 
-composer.addEventListener('input', () => syncComposerMenus());
+composer.addEventListener('input', () => {
+  syncComposerMenus();
+  updateSendStopButton();
+});
 composer.addEventListener('click', () => syncComposerMenus());
 composer.addEventListener('keyup', (e) => {
   if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
@@ -3273,6 +3970,62 @@ btnMode.addEventListener('click', () => {
   vscode.postMessage({ type: 'cycleMode' });
 });
 
+// Global key handling for permission/question so select works without composer focus
+window.addEventListener('keydown', (e) => {
+  if (permissionOpen) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      movePermission(1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      movePermission(-1);
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      if (permissionItems.length) {
+        e.preventDefault();
+        acceptPermission(permissionIndex);
+        return;
+      }
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closePermissionPopover({ outcome: 'cancelled' });
+      return;
+    }
+  }
+  if (questionOpen) {
+    const inNotes = document.activeElement === questionNotes;
+    if (!inNotes && e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveQuestion(1);
+      return;
+    }
+    if (!inNotes && e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveQuestion(-1);
+      return;
+    }
+    if (!inNotes && (e.key === ' ' || e.key === 'Spacebar')) {
+      e.preventDefault();
+      toggleQuestionOption(questionIndex);
+      return;
+    }
+    if (!inNotes && e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      acceptQuestion();
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeQuestionPopover({ outcome: 'cancelled' });
+      return;
+    }
+  }
+}, true);
+
 composer.addEventListener('keydown', (e) => {
   // TUI Shift+Tab: cycle Normal → Plan → Always-Approve (even with draft text).
   if (e.key === 'Tab' && e.shiftKey) {
@@ -3280,6 +4033,8 @@ composer.addEventListener('keydown', (e) => {
     vscode.postMessage({ type: 'cycleMode' });
     return;
   }
+  // permission/question handled on window capture above
+  if (permissionOpen || questionOpen) return;
   if (modelOpen) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -3378,12 +4133,16 @@ composer.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
+    // Enter with empty input while busy → stop; else send
     sendBtn.click();
   }
   if (e.key === 'Escape' && busy) {
     vscode.postMessage({ type: 'cancel' });
   }
 });
+
+// Keep Send/Stop in sync on first paint
+updateSendStopButton();
 
 window.addEventListener('message', (event) => {
   const msg = event.data;
@@ -3460,6 +4219,14 @@ window.addEventListener('message', (event) => {
       slashOpen = true;
     }
     renderSlashList();
+  } else if (msg.type === 'permissionPrompt') {
+    openPermissionPrompt(msg);
+  } else if (msg.type === 'closePermissionPrompt') {
+    closePermissionPopover(null);
+  } else if (msg.type === 'questionPrompt') {
+    openQuestionPrompt(msg);
+  } else if (msg.type === 'closeQuestionPrompt') {
+    closeQuestionPopover(null);
   }
 });
 
