@@ -6,6 +6,7 @@ import type {
   SessionNotification,
   ContentBlock,
   PromptResponse,
+  AvailableCommand,
 } from "@agentclientprotocol/sdk";
 import * as vscode from "vscode";
 import type { AuthService } from "../auth/authService";
@@ -104,8 +105,18 @@ export class AgentService implements vscode.Disposable {
   private readonly _onTurnEnd = new vscode.EventEmitter<PromptResponse>();
   readonly onTurnEnd = this._onTurnEnd.event;
 
+  /** ACP-advertised slash commands (skills + shell builtins). */
+  private availableCommands: AvailableCommand[] = [];
+  private readonly _onAvailableCommands =
+    new vscode.EventEmitter<AvailableCommand[]>();
+  readonly onAvailableCommands = this._onAvailableCommands.event;
+
   setAuthService(auth: AuthService): void {
     this.auth = auth;
+  }
+
+  getAvailableCommands(): AvailableCommand[] {
+    return this.availableCommands.slice();
   }
 
   getState(): AgentState {
@@ -216,6 +227,8 @@ export class AgentService implements vscode.Disposable {
     }
     this.session = undefined;
     this.permissions.resetSessionMemory();
+    this.availableCommands = [];
+    this._onAvailableCommands.fire([]);
 
     const cwd = resolveSessionCwd();
     logInfo(`session/new cwd=${cwd}`);
@@ -445,6 +458,7 @@ export class AgentService implements vscode.Disposable {
     this._onSessionUpdate.dispose();
     this._onBusyChange.dispose();
     this._onTurnEnd.dispose();
+    this._onAvailableCommands.dispose();
   }
 
   private setState(state: AgentState): void {
@@ -601,8 +615,23 @@ export class AgentService implements vscode.Disposable {
   }
 
   private onSessionUpdateNotify(params: SessionNotification): void {
+    this.captureAvailableCommands(params);
     this._onSessionUpdate.fire(params);
     this.logUpdate(params);
+  }
+
+  private captureAvailableCommands(params: SessionNotification): void {
+    const update = params.update as {
+      sessionUpdate?: string;
+      availableCommands?: AvailableCommand[];
+    };
+    if (update.sessionUpdate !== "available_commands_update") {
+      return;
+    }
+    const list = update.availableCommands ?? [];
+    this.availableCommands = list;
+    this._onAvailableCommands.fire(list);
+    logInfo(`available_commands_update count=${list.length}`);
   }
 
   private logUpdate(params: SessionNotification): void {
@@ -633,6 +662,13 @@ export class AgentService implements vscode.Disposable {
       case "tool_call_update": {
         logSessionUpdate(
           `[tool_call_update] ${update.toolCallId} status=${update.status ?? "?"}`,
+        );
+        break;
+      }
+      case "available_commands_update": {
+        const u = update as { availableCommands?: AvailableCommand[] };
+        logSessionUpdate(
+          `[available_commands_update] ${(u.availableCommands ?? []).length} commands`,
         );
         break;
       }

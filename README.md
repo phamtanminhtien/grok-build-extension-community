@@ -65,6 +65,18 @@ Full checklist: [docs/L0-manual-test.md](docs/L0-manual-test.md)
 | `Grok Build: Resume Session…` | Same as TUI: `_x.ai/session_summaries/*` + FTS search; disk fallback; `session/load` |
 | `Grok Build: Review Edits…` | Multi-file diff review |
 | `Grok Build: Login / Set API Key` | SecretStorage API key |
+
+### Slash commands (chat composer)
+
+Type `/` in the chat (same names as [Grok Build TUI](../grok-build/)):
+
+| Layer | Examples | Behavior |
+|-------|----------|----------|
+| **Host** | `/new`, `/resume`, `/model`, `/help`, `/settings`, `/copy`, `/export`, `/always-approve`, `/login`… | Run in the extension |
+| **Agent** | `/compact`, `/loop`, `/plan`, skills, hooks/plugins… | Pass-through as prompt (shell resolves) |
+| **TUI-only** | `/vim-mode`, `/theme`, `/dashboard`, `/minimal`… | Listed for parity; not available in VS Code |
+
+Autocomplete dropdown matches the TUI: ↑↓ Enter Esc. ACP `available_commands_update` merges skills into the list (host wins on name collision).
 | `Grok Build: Smoke Test (L0)` | Headless-style prompt via agent |
 | `Grok Build: Restart / Stop Agent` | Process lifecycle |
 

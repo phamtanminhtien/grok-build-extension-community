@@ -19,6 +19,8 @@ import { logError } from "../log/output";
 import { renderMarkdownToSafeHtml } from "./markdown";
 import type { DiffReviewService } from "../diff/diffReviewService";
 import { readTextFileHost } from "../agent/hostFs";
+import { dispatchSlash } from "../slash/dispatch";
+import { slashRegistry } from "../slash/registry";
 
 type UiMessage =
   | { type: "user"; id: string; text: string; chips?: string[] }
@@ -93,6 +95,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           model: getSettings().model || "default",
         }),
       ),
+      this.agent.onAvailableCommands((cmds) => {
+        slashRegistry.setAcpCommands(cmds);
+      }),
       this.agent.onTurnEnd(() => {
         this.currentAssistantId = undefined;
         this.post({ type: "busy", busy: false });
@@ -351,6 +356,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         }
         break;
       }
+      case "searchSlash": {
+        const requestId = msg.requestId ?? 0;
+        const query = msg.query ?? "";
+        // Refresh ACP list if agent already has one
+        slashRegistry.setAcpCommands(this.agent.getAvailableCommands());
+        const items = slashRegistry.suggest(query, 48);
+        this.post({
+          type: "slashResults",
+          requestId,
+          query,
+          items,
+        });
+        break;
+      }
       case "pickMention":
         if (msg.chip) {
           this.addStickyChips([msg.chip]);
@@ -393,6 +412,43 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (this.agent.isBusy()) {
       this.pushSystem("Wait for the current turn or press Stop.");
       return;
+    }
+
+    // Slash commands (host / pass-through / unsupported) — like TUI pager.
+    slashRegistry.setAcpCommands(this.agent.getAvailableCommands());
+    const outcome = await dispatchSlash(text, {
+      agent: this.agent,
+      auth: this.auth,
+      registry: slashRegistry,
+      getTranscript: () =>
+        this.messages
+          .filter((m) => m.type === "user" || m.type === "assistant")
+          .map((m) => ({
+            role: m.type,
+            text: m.type === "assistant" ? m.text : m.text,
+          })),
+      clearUi: () => {
+        this.messages = [];
+        this.currentAssistantId = undefined;
+        this.scheduleMessagesPost(true);
+      },
+      newSession: async () => {
+        await this.handleNewSession();
+      },
+    });
+
+    if (outcome.kind === "handled") {
+      if (outcome.message) {
+        this.pushSystem(outcome.message);
+      }
+      return;
+    }
+    if (outcome.kind === "error") {
+      this.pushSystem(outcome.message);
+      return;
+    }
+    if (outcome.kind === "passthrough") {
+      text = outcome.text;
     }
 
     const { blocks, chips } = buildPromptBlocks(text, {
@@ -1116,8 +1172,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     position: relative;
     display: flex; flex-direction: column;
   }
-  /* @ mention popover — above input, like grok-build file_search dropdown */
-  #mention-popover {
+  /* @ mention + / slash popovers — above input, like grok-build dropdowns */
+  #mention-popover, #slash-popover {
     position: absolute;
     left: 0; right: 0; bottom: calc(100% + 6px);
     z-index: 20;
@@ -1131,20 +1187,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       0 8px 24px color-mix(in srgb, var(--bg) 55%, #000);
     overflow: hidden;
   }
-  #mention-popover[hidden] { display: none !important; }
-  #mention-head {
+  #mention-popover[hidden], #slash-popover[hidden] { display: none !important; }
+  #mention-head, #slash-head {
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px; padding: 8px 10px 6px;
     font-size: 11px; color: var(--muted); font-weight: 500;
     border-bottom: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
     flex-shrink: 0;
   }
-  #mention-head .hint { opacity: 0.85; }
-  #mention-list {
+  #mention-head .hint, #slash-head .hint { opacity: 0.85; }
+  #mention-list, #slash-list {
     overflow-y: auto; padding: 4px;
     flex: 1; min-height: 0;
   }
-  .mention-item {
+  .mention-item, .slash-item {
     display: flex; align-items: center; gap: 8px;
     width: 100%; text-align: left;
     padding: 7px 8px; border: none; border-radius: var(--radius-sm);
@@ -1152,40 +1208,45 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     font: inherit; font-size: 12px; cursor: pointer;
     min-height: 32px;
   }
-  .mention-item:hover {
+  .mention-item:hover, .slash-item:hover {
     background: var(--list-hover);
   }
-  .mention-item.active {
+  .mention-item.active, .slash-item.active {
     background: color-mix(in srgb, var(--btn-bg) 28%, transparent);
   }
-  .mention-item .mi-icon {
+  .mention-item .mi-icon, .slash-item .mi-icon {
     width: 22px; height: 22px; border-radius: 7px;
     display: inline-flex; align-items: center; justify-content: center;
     background: color-mix(in srgb, var(--muted) 14%, transparent);
     color: color-mix(in srgb, var(--fg) 72%, var(--muted));
     flex-shrink: 0;
   }
-  .mention-item.active .mi-icon {
+  .mention-item.active .mi-icon, .slash-item.active .mi-icon {
     color: var(--btn-fg);
     background: var(--btn-bg);
   }
-  .mention-item:hover:not(.active) .mi-icon {
+  .mention-item:hover:not(.active) .mi-icon,
+  .slash-item:hover:not(.active) .mi-icon {
     color: var(--fg);
     background: color-mix(in srgb, var(--fg) 14%, transparent);
   }
-  .mention-item .mi-body {
+  .mention-item .mi-body, .slash-item .mi-body {
     min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px;
   }
-  .mention-item .mi-label {
+  .mention-item .mi-label, .slash-item .mi-label {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-weight: 500;
   }
-  .mention-item .mi-desc {
+  .mention-item .mi-desc, .slash-item .mi-desc {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-size: 10px; color: var(--muted);
   }
-  #mention-empty {
+  #mention-empty, #slash-empty {
     padding: 14px 12px; color: var(--muted); font-size: 12px; text-align: center;
+  }
+  .slash-item .mi-badge {
+    font-size: 9px; color: var(--muted); flex-shrink: 0;
+    text-transform: uppercase; letter-spacing: 0.03em;
   }
   .composer-shell {
     display: flex; flex-direction: column; gap: 8px;
@@ -1281,7 +1342,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   <div id="empty" hidden>
     <div class="hero-icon" aria-hidden="true"><i class="ti ti-message-chatbot"></i></div>
     <h2>Grok Build - Community</h2>
-    <p>Ask about this workspace. Use @ to attach files. The focused file can auto-attach (toggle on the chip).</p>
+    <p>Ask about this workspace. Use / for commands, @ for files. The focused file can auto-attach (toggle on the chip).</p>
     <p id="empty-hint"></p>
     <div class="empty-actions">
       <button id="empty-start" type="button"><i class="ti ti-player-play"></i> Start agent</button>
@@ -1291,6 +1352,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   <footer>
     <div id="sticky"></div>
     <div class="composer-wrap">
+      <div id="slash-popover" hidden role="listbox" aria-label="Slash commands">
+        <div id="slash-head">
+          <span id="slash-title">/ commands</span>
+          <span class="hint">↑↓ · Enter · Esc</span>
+        </div>
+        <div id="slash-list"></div>
+        <div id="slash-empty" hidden>No matches</div>
+      </div>
       <div id="mention-popover" hidden role="listbox" aria-label="Mention context">
         <div id="mention-head">
           <span id="mention-title">@ context</span>
@@ -1300,8 +1369,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         <div id="mention-empty" hidden>No matches</div>
       </div>
       <div class="composer-shell">
-        <textarea id="composer" placeholder="Message Grok… (@ files, Enter send, Shift+Enter newline)" rows="3"></textarea>
+        <textarea id="composer" placeholder="Message Grok… (/ commands, @ files, Enter send)" rows="3"></textarea>
         <div class="actions">
+          <button id="slash" class="secondary icon-btn" type="button" title="Slash commands (/)" aria-label="Slash commands"><i class="ti ti-slash"></i></button>
           <button id="at" class="secondary icon-btn" type="button" title="Add context (@)" aria-label="Add context"><i class="ti ti-at"></i></button>
           <button id="stop" class="secondary" type="button" disabled title="Stop"><i class="ti ti-player-stop"></i> Stop</button>
           <button id="new" class="secondary" type="button" title="New session"><i class="ti ti-plus"></i> New</button>
@@ -1329,6 +1399,10 @@ const mentionPopover = document.getElementById('mention-popover');
 const mentionList = document.getElementById('mention-list');
 const mentionEmpty = document.getElementById('mention-empty');
 const mentionTitle = document.getElementById('mention-title');
+const slashPopover = document.getElementById('slash-popover');
+const slashList = document.getElementById('slash-list');
+const slashEmpty = document.getElementById('slash-empty');
+const slashTitle = document.getElementById('slash-title');
 let busy = false;
 let allMessages = [];
 let stickyChips = [];
@@ -1336,6 +1410,163 @@ let autoAttachEnabled = true;
 let autoChip = null; // { id, label, kind, fsPath } | null
 const EST_ROW = 96;
 const VIRT_THRESHOLD = 40;
+
+/* ── / slash popover (synced with grok-build slash dropdown) ── */
+let slashOpen = false;
+let slashItems = [];
+let slashIndex = 0;
+let slashRequestId = 0;
+let slashCtx = null; // { start, end, query, inCommand }
+let slashSearchTimer = null;
+
+function detectSlashContext(text, cursor) {
+  if (cursor < 0 || cursor > text.length) return null;
+  let i = 0;
+  while (i < text.length && /\\s/.test(text[i])) i++;
+  if (i >= text.length || text[i] !== '/') return null;
+  const slashStart = i;
+  let nameEnd = slashStart + 1;
+  while (nameEnd < text.length && !/\\s/.test(text[nameEnd])) {
+    if (nameEnd > slashStart + 1 && text[nameEnd] === '/') return null;
+    nameEnd++;
+  }
+  const inCommand = cursor >= slashStart && cursor <= nameEnd;
+  if (!inCommand && cursor < nameEnd) return null;
+  let argsStart = nameEnd;
+  while (argsStart < text.length && /\\s/.test(text[argsStart])) argsStart++;
+  return {
+    start: slashStart,
+    end: nameEnd,
+    query: inCommand ? text.slice(slashStart + 1, cursor) : text.slice(slashStart + 1, nameEnd),
+    inCommand,
+    args: text.slice(argsStart),
+  };
+}
+
+function closeSlash() {
+  slashOpen = false;
+  slashItems = [];
+  slashIndex = 0;
+  slashCtx = null;
+  slashPopover.hidden = true;
+  slashList.innerHTML = '';
+  slashEmpty.hidden = true;
+  if (slashSearchTimer) {
+    clearTimeout(slashSearchTimer);
+    slashSearchTimer = null;
+  }
+}
+
+function slashIconName(layer) {
+  if (layer === 'host') return 'device-desktop';
+  if (layer === 'unsupported') return 'device-desktop-off';
+  return 'robot';
+}
+
+function renderSlashList() {
+  if (!slashOpen) return;
+  slashPopover.hidden = false;
+  slashTitle.textContent = slashCtx
+    ? ('/' + (slashCtx.query || '…'))
+    : '/ commands';
+  if (!slashItems.length) {
+    slashList.innerHTML = '';
+    slashEmpty.hidden = false;
+    slashEmpty.textContent = 'No matches';
+    return;
+  }
+  slashEmpty.hidden = true;
+  slashList.innerHTML = slashItems.map((it, i) =>
+    '<button type="button" class="slash-item' + (i === slashIndex ? ' active' : '') +
+    '" role="option" data-slash-idx="' + i + '" aria-selected="' + (i === slashIndex) + '">' +
+      '<span class="mi-icon">' + icon(slashIconName(it.layer)) + '</span>' +
+      '<span class="mi-body">' +
+        '<span class="mi-label">' + esc(it.display) + '</span>' +
+        (it.description
+          ? '<span class="mi-desc">' + esc(it.description) + '</span>'
+          : '') +
+      '</span>' +
+      '<span class="mi-badge">' + esc(it.layer === 'passthrough' ? 'agent' : it.layer) + '</span>' +
+    '</button>'
+  ).join('');
+  const active = slashList.querySelector('.slash-item.active');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+function requestSlashSearch(query) {
+  const requestId = ++slashRequestId;
+  vscode.postMessage({ type: 'searchSlash', query: query || '', requestId });
+}
+
+function openSlashFromContext(ctx) {
+  if (mentionOpen) closeMention();
+  slashOpen = true;
+  slashCtx = ctx;
+  slashIndex = 0;
+  slashPopover.hidden = false;
+  slashEmpty.hidden = false;
+  slashEmpty.textContent = 'Loading…';
+  slashList.innerHTML = '';
+  slashTitle.textContent = '/' + (ctx.query || '…');
+  if (slashSearchTimer) clearTimeout(slashSearchTimer);
+  slashSearchTimer = setTimeout(() => {
+    requestSlashSearch(ctx.query || '');
+  }, 20);
+}
+
+function syncSlashFromComposer() {
+  const text = composer.value;
+  const cursor = composer.selectionStart || 0;
+  const ctx = detectSlashContext(text, cursor);
+  // Only show dropdown while editing the command name (TUI parity).
+  if (!ctx || !ctx.inCommand) {
+    if (slashOpen) closeSlash();
+    return;
+  }
+  const same =
+    slashCtx &&
+    slashCtx.start === ctx.start &&
+    slashCtx.query === ctx.query;
+  slashCtx = ctx;
+  if (!slashOpen) {
+    openSlashFromContext(ctx);
+    return;
+  }
+  if (!same) {
+    slashIndex = 0;
+    if (slashSearchTimer) clearTimeout(slashSearchTimer);
+    slashSearchTimer = setTimeout(() => {
+      requestSlashSearch(ctx.query || '');
+    }, 40);
+    slashTitle.textContent = '/' + (ctx.query || '…');
+  }
+}
+
+function acceptSlash(idx) {
+  const item = slashItems[idx];
+  if (!item) return;
+  const text = composer.value;
+  const ctx = slashCtx || detectSlashContext(text, composer.selectionStart || 0);
+  if (ctx) {
+    const after = text.slice(ctx.end);
+    const next = text.slice(0, ctx.start) + item.insertText + after;
+    composer.value = next;
+    const pos = ctx.start + item.insertText.length;
+    composer.setSelectionRange(pos, pos);
+  }
+  closeSlash();
+  composer.focus();
+  // If command takes no args, send immediately (TUI-like).
+  if (!item.takesArgs) {
+    sendBtn.click();
+  }
+}
+
+function moveSlash(delta) {
+  if (!slashItems.length) return;
+  slashIndex = (slashIndex + delta + slashItems.length) % slashItems.length;
+  renderSlashList();
+}
 
 /* ── @ mention popover (synced with grok-build file_search UX) ── */
 let mentionOpen = false;
@@ -1384,6 +1615,19 @@ function closeMention() {
   }
 }
 
+function syncComposerMenus() {
+  // Prefer @ when inside @-token; else slash when leading /.
+  const text = composer.value;
+  const cursor = composer.selectionStart || 0;
+  if (detectAtContext(text, cursor)) {
+    if (slashOpen) closeSlash();
+    syncMentionFromComposer();
+    return;
+  }
+  if (mentionOpen) closeMention();
+  syncSlashFromComposer();
+}
+
 function mentionIconName(icon) {
   if (icon === 'folder') return 'folder';
   if (icon === 'selection') return 'highlight';
@@ -1427,6 +1671,7 @@ function requestMentionSearch(query) {
 }
 
 function openMentionFromContext(ctx) {
+  if (slashOpen) closeSlash();
   mentionOpen = true;
   mentionAtCtx = ctx;
   mentionIndex = 0;
@@ -1767,6 +2012,7 @@ stickyEl.addEventListener('click', (e) => {
 
 sendBtn.addEventListener('click', () => {
   if (mentionOpen) closeMention();
+  if (slashOpen) closeSlash();
   const text = composer.value.trim();
   if (!text || busy) return;
   vscode.postMessage({ type: 'send', text });
@@ -1775,6 +2021,22 @@ sendBtn.addEventListener('click', () => {
 
 stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
 newBtn.addEventListener('click', () => vscode.postMessage({ type: 'newSession' }));
+document.getElementById('slash').addEventListener('click', () => {
+  composer.focus();
+  const pos = composer.selectionStart || 0;
+  const v = composer.value;
+  if (!detectSlashContext(v, pos)) {
+    // Leading slash only (TUI-style); replace empty/non-slash input with /.
+    if (v.trim() === '' || pos === 0) {
+      composer.value = '/' + v.replace(/^\\s*/, '');
+      composer.setSelectionRange(1, 1);
+    } else {
+      composer.value = '/';
+      composer.setSelectionRange(1, 1);
+    }
+  }
+  syncSlashFromComposer();
+});
 document.getElementById('at').addEventListener('click', () => {
   composer.focus();
   const pos = composer.selectionStart || 0;
@@ -1807,16 +2069,48 @@ mentionList.addEventListener('click', (e) => {
   if (!btn) return;
   acceptMention(Number(btn.getAttribute('data-idx')));
 });
+slashList.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+});
+slashList.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-slash-idx]');
+  if (!btn) return;
+  acceptSlash(Number(btn.getAttribute('data-slash-idx')));
+});
 
-composer.addEventListener('input', () => syncMentionFromComposer());
-composer.addEventListener('click', () => syncMentionFromComposer());
+composer.addEventListener('input', () => syncComposerMenus());
+composer.addEventListener('click', () => syncComposerMenus());
 composer.addEventListener('keyup', (e) => {
   if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
-    syncMentionFromComposer();
+    syncComposerMenus();
   }
 });
 
 composer.addEventListener('keydown', (e) => {
+  if (slashOpen) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveSlash(1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveSlash(-1);
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      if (slashItems.length) {
+        e.preventDefault();
+        acceptSlash(slashIndex);
+        return;
+      }
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeSlash();
+      return;
+    }
+  }
   if (mentionOpen) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -1908,6 +2202,14 @@ window.addEventListener('message', (event) => {
       mentionOpen = true;
     }
     renderMentionList();
+  } else if (msg.type === 'slashResults') {
+    if (msg.requestId !== slashRequestId) return;
+    slashItems = msg.items || [];
+    slashIndex = 0;
+    if (!slashOpen) {
+      slashOpen = true;
+    }
+    renderSlashList();
   }
 });
 
