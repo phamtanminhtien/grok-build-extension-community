@@ -17,7 +17,7 @@ function copyTablerWebfont() {
   const destRoot = join(__dirname, "media", "tabler");
   if (!existsSync(srcRoot)) {
     console.warn(
-      "[esbuild] @tabler/icons-webfont not found — run npm install",
+      "[esbuild] @tabler/icons-webfont not found — run yarn install",
     );
     return;
   }

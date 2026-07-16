@@ -30,8 +30,8 @@ The VSIX does **not** bundle the `grok` binary. Install the CLI first on the mac
 ```bash
 # In this repo
 cd grok-vscode-extension
-npm install
-npm run package   # → grok-build-community-0.3.1.vsix
+yarn install
+yarn package   # → grok-build-community-0.3.1.vsix
 ```
 
 Then in VS Code: **Extensions → ⋯ → Install from VSIX…** and pick the `.vsix`.
@@ -66,16 +66,16 @@ The extension host runs **on the remote**. Install `grok` **on the remote**, not
 
 ```bash
 cd grok-vscode-extension
-npm install
-npm run build
-npm run typecheck
-npm test
+yarn install
+yarn build
+yarn typecheck
+yarn test
 ```
 
 ### Headless L0 smoke (no VS Code)
 
 ```bash
-npm run smoke:cli   # requires `grok` on PATH
+yarn smoke:cli   # requires `grok` on PATH
 ```
 
 ### Extension Development Host
@@ -90,8 +90,8 @@ Full checklist: `docs/L0-manual-test.md`
 ### Package / publish
 
 ```bash
-npm run package          # local .vsix (grok-build-community-<version>.vsix)
-# npm run publish:vsce   # VS Code Marketplace (needs VSCE_PAT / vsce login)
+yarn package          # local .vsix (grok-build-community-<version>.vsix)
+# yarn publish:vsce   # VS Code Marketplace (needs VSCE_PAT / vsce login)
 # npx ovsx publish grok-build-community-<version>.vsix   # Open VSX (needs OVSX_PAT)
 ```
 
@@ -184,7 +184,7 @@ scripts/smoke-cli.mjs
 docs/
 ```
 
-Chat UI uses **[@tabler/icons-webfont](https://tabler.io/icons)** (`npm run build` copies CSS/fonts into `media/tabler/`).
+Chat UI uses **[@tabler/icons-webfont](https://tabler.io/icons)** (`yarn build` copies CSS/fonts into `media/tabler/`).
 
 ---
 

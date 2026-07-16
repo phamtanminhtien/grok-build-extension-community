@@ -10,15 +10,15 @@
 
 ```bash
 cd grok-vscode-extension
-npm install
-npm run build
-npm run typecheck
+yarn install
+yarn build
+yarn typecheck
 ```
 
 ## Headless smoke (no VS Code)
 
 ```bash
-npm run smoke:cli
+yarn smoke:cli
 ```
 
 Expect: `initialize` + `sessionId` + streamed text + `PASS`.

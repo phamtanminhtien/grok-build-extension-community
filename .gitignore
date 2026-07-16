@@ -7,8 +7,17 @@ dist/
 *.vsix
 *.tsbuildinfo
 
-# Generated from @tabler/icons-webfont on npm run build
+# Generated from @tabler/icons-webfont on yarn build
 media/tabler/
+
+# Yarn
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.pnp.*
 
 # Test / coverage
 coverage/

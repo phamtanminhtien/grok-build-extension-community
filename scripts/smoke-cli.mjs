@@ -3,7 +3,7 @@
  * Headless L0 smoke: spawn `grok agent stdio`, initialize, session/new,
  * prompt, print session/update text. Does not need VS Code.
  *
- * Usage: npm run smoke:cli
+ * Usage: yarn smoke:cli
  * Env:
  *   GROK_BINARY   path to grok
  *   GROK_CWD      session cwd (default: process.cwd())
