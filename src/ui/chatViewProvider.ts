@@ -676,176 +676,359 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     --input-border: var(--vscode-input-border, var(--border));
     --btn-bg: var(--vscode-button-background);
     --btn-fg: var(--vscode-button-foreground);
+    --btn-hover: var(--vscode-button-hoverBackground, var(--btn-bg));
     --btn-sec: var(--vscode-button-secondaryBackground);
     --btn-sec-fg: var(--vscode-button-secondaryForeground);
+    --btn-sec-hover: var(--vscode-button-secondaryHoverBackground, var(--btn-sec));
     --bubble-user: var(--vscode-button-background);
     --bubble-user-fg: var(--vscode-button-foreground);
     --bubble-asst: var(--vscode-editor-inactiveSelectionBackground, rgba(127,127,127,0.15));
     --link: var(--vscode-textLink-foreground);
     --error: var(--vscode-errorForeground);
+    --focus: var(--vscode-focusBorder, var(--link));
+    --list-hover: var(--vscode-list-hoverBackground, rgba(127,127,127,0.12));
     --font: var(--vscode-font-family);
     --font-size: var(--vscode-font-size, 13px);
     --code-bg: var(--vscode-textCodeBlock-background, rgba(127,127,127,0.12));
+    --radius-xs: 8px;
+    --radius-sm: 10px;
+    --radius-md: 14px;
+    --radius-lg: 18px;
+    --radius-pill: 999px;
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --shadow-soft: 0 1px 2px rgba(0,0,0,0.06);
+    --ease: 140ms ease;
   }
   * { box-sizing: border-box; }
   html, body {
     height: 100%; margin: 0; padding: 0;
     background: var(--bg); color: var(--fg);
     font-family: var(--font); font-size: var(--font-size);
+    -webkit-font-smoothing: antialiased;
   }
   .ti { font-size: 1.05em; vertical-align: -0.1em; line-height: 1; }
   .ti-spin { display: inline-block; animation: ti-spin 1s linear infinite; }
   @keyframes ti-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) {
     .ti-spin { animation: none; }
+    button, .chip, .tool, #composer, header button.linkish {
+      transition: none !important;
+    }
   }
   #app { display: flex; flex-direction: column; height: 100%; }
+
+  /* ── Header ── */
   header {
-    display: flex; align-items: center; gap: 6px;
-    padding: 8px 10px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: var(--space-2);
+    padding: 10px 12px;
     flex-shrink: 0; flex-wrap: wrap;
   }
   header .brand {
-    display: flex; align-items: center; gap: 6px;
+    display: flex; align-items: center; gap: 8px;
     font-weight: 600; flex: 1; min-width: 0;
+  }
+  header .brand .brand-mark {
+    width: 26px; height: 26px; border-radius: var(--radius-sm);
+    display: inline-flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--btn-bg) 18%, transparent);
+    color: var(--btn-bg); flex-shrink: 0;
   }
   header .brand .title {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    letter-spacing: -0.01em;
   }
   header .meta {
     color: var(--muted); font-size: 11px;
-    display: flex; align-items: center; gap: 4px;
+    display: flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--muted) 10%, transparent);
+    max-width: 100%;
+  }
+  header .meta span {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   header button.linkish {
-    background: transparent; color: var(--link); padding: 2px 6px;
-    font-size: 11px; border: 1px solid transparent; border-radius: 4px;
+    background: color-mix(in srgb, var(--muted) 10%, transparent);
+    color: var(--muted);
+    padding: 5px 10px; font-size: 11px; font-weight: 500;
+    border: none; border-radius: var(--radius-pill);
+    transition: background var(--ease), color var(--ease);
   }
-  header button.linkish:hover { border-color: var(--border); }
+  header button.linkish:hover {
+    background: var(--list-hover); color: var(--fg);
+  }
+  header button.linkish:focus-visible {
+    outline: 1px solid var(--focus); outline-offset: 1px;
+  }
+
+  /* ── Review bar ── */
   #review-bar {
-    display: none; padding: 6px 10px; border-bottom: 1px solid var(--border);
+    display: none; padding: 8px 12px;
     font-size: 12px; align-items: center; gap: 8px; flex-shrink: 0;
+    background: color-mix(in srgb, var(--btn-bg) 8%, transparent);
   }
   #review-bar.visible { display: flex; }
-  #messages {
-    flex: 1; overflow-y: auto; padding: 10px;
-    display: flex; flex-direction: column; gap: 10px;
+  #review-bar #btn-review {
+    margin-left: auto; padding: 4px 12px; font-size: 11px; min-height: 26px;
   }
-  .msg { max-width: 100%; }
-  .msg.user { align-self: flex-end; }
+
+  /* ── Messages ── */
+  #messages {
+    flex: 1; overflow-y: auto; padding: 14px 12px;
+    display: flex; flex-direction: column; gap: 12px;
+    scroll-behavior: smooth;
+  }
+  .msg { max-width: 100%; animation: msg-in 160ms ease; }
+  @keyframes msg-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .msg { animation: none; }
+  }
+  .msg.user { align-self: flex-end; max-width: 92%; }
   .msg.assistant, .msg.system { align-self: stretch; }
   .bubble {
-    padding: 8px 10px; border-radius: 8px;
-    word-break: break-word; line-height: 1.45;
+    padding: 10px 14px; border-radius: var(--radius-md);
+    word-break: break-word; line-height: 1.5; border: none;
   }
   .msg.user .bubble {
     background: var(--bubble-user); color: var(--bubble-user-fg);
     white-space: pre-wrap;
+    border-radius: var(--radius-md) var(--radius-md) var(--radius-xs) var(--radius-md);
+    box-shadow: var(--shadow-soft);
   }
-  .msg.assistant .bubble { background: var(--bubble-asst); }
-  .msg.assistant .bubble.md p { margin: 0 0 0.6em; }
+  .msg.assistant .bubble {
+    background: var(--bubble-asst);
+    border-radius: var(--radius-md) var(--radius-md) var(--radius-md) var(--radius-xs);
+  }
+  .msg.assistant .bubble.md p { margin: 0 0 0.65em; }
   .msg.assistant .bubble.md p:last-child { margin-bottom: 0; }
   .msg.assistant .bubble.md pre {
-    position: relative; background: var(--code-bg); padding: 8px 10px;
-    border-radius: 6px; overflow: auto; margin: 0.5em 0;
+    position: relative; background: var(--code-bg); padding: 12px 14px;
+    border-radius: var(--radius-sm); overflow: auto; margin: 0.55em 0;
+    border: none;
   }
   .msg.assistant .bubble.md code {
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: 0.92em;
   }
   .msg.assistant .bubble.md :not(pre) > code {
-    background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px;
+    background: var(--code-bg); padding: 0.15em 0.45em; border-radius: 6px;
   }
   .msg.assistant .bubble.md table {
-    border-collapse: collapse; width: 100%; margin: 0.5em 0; font-size: 0.92em;
+    border-collapse: separate; border-spacing: 0;
+    width: 100%; margin: 0.55em 0; font-size: 0.92em;
+    border: none; border-radius: var(--radius-sm); overflow: hidden;
+    background: color-mix(in srgb, var(--muted) 6%, transparent);
   }
   .msg.assistant .bubble.md th,
   .msg.assistant .bubble.md td {
-    border: 1px solid var(--border); padding: 4px 6px;
+    border: none; padding: 6px 10px;
+  }
+  .msg.assistant .bubble.md th {
+    background: color-mix(in srgb, var(--muted) 10%, transparent);
+    text-align: left;
   }
   .copy-code {
-    position: absolute; top: 4px; right: 4px;
+    position: absolute; top: 8px; right: 8px;
     background: var(--btn-sec); color: var(--btn-sec-fg);
-    border: none; border-radius: 3px; padding: 2px 6px;
-    font-size: 10px; cursor: pointer;
+    border: none; border-radius: var(--radius-xs); padding: 3px 8px;
+    font-size: 10px; font-weight: 500; cursor: pointer;
+    opacity: 0.85; transition: opacity var(--ease), background var(--ease);
   }
+  .copy-code:hover { opacity: 1; background: var(--btn-sec-hover); }
   .msg.system .bubble {
-    color: var(--muted); font-size: 12px; padding: 4px 0; background: transparent;
-    display: flex; align-items: flex-start; gap: 6px; white-space: pre-wrap;
+    color: var(--muted); font-size: 12px; padding: 6px 2px; background: transparent;
+    display: flex; align-items: flex-start; gap: 8px; white-space: pre-wrap;
+    border: none; border-radius: 0; box-shadow: none;
   }
-  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+
+  /* ── Chips ── */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
   .msg.user .chips { justify-content: flex-end; }
   .chip {
-    font-size: 11px; padding: 2px 8px; border-radius: 999px;
-    border: 1px solid var(--border); color: var(--muted);
-    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; padding: 4px 10px; border-radius: var(--radius-pill);
+    border: none;
+    color: var(--muted);
+    background: color-mix(in srgb, var(--fg) 8%, transparent);
+    display: inline-flex; align-items: center; gap: 5px;
+    max-width: 100%; line-height: 1.3;
+    transition: background var(--ease), color var(--ease);
+  }
+  .chip:hover {
+    color: var(--fg);
+    background: var(--list-hover);
   }
   .chip button {
-    background: transparent; border: none; color: var(--muted);
-    cursor: pointer; padding: 0 2px; font-size: 12px; line-height: 1;
+    background: transparent; border: none; color: inherit;
+    cursor: pointer; padding: 0; width: 16px; height: 16px;
+    border-radius: var(--radius-pill); font-size: 13px; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center;
+    opacity: 0.7; transition: opacity var(--ease), background var(--ease);
   }
+  .chip button:hover {
+    opacity: 1; background: color-mix(in srgb, var(--fg) 12%, transparent);
+  }
+
+  /* ── Thoughts & tools ── */
   .thought {
-    margin-bottom: 6px; font-size: 12px; color: var(--muted);
+    margin-bottom: 8px; font-size: 12px; color: var(--muted);
+    border: none;
+    border-radius: var(--radius-sm); padding: 8px 10px;
+    background: color-mix(in srgb, var(--muted) 8%, transparent);
   }
   .thought summary {
     cursor: pointer; user-select: none;
     display: flex; align-items: center; gap: 6px; list-style: none;
+    font-weight: 500;
   }
   .thought summary::-webkit-details-marker { display: none; }
   .thought .thought-body {
-    margin: 4px 0 0; max-height: 160px; overflow: auto; opacity: 0.9;
+    margin: 8px 0 0; max-height: 160px; overflow: auto; opacity: 0.9;
+    padding-top: 6px;
   }
-  .tools { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .tools { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
   .tool {
-    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+    border: none;
+    border-radius: var(--radius-sm); padding: 8px 10px;
     font-size: 12px;
+    background: color-mix(in srgb, var(--fg) 6%, var(--input-bg));
+    transition: background var(--ease);
   }
-  .tool .row { display: flex; gap: 6px; align-items: center; }
+  .tool:hover {
+    background: color-mix(in srgb, var(--list-hover) 70%, transparent);
+  }
+  .tool .row { display: flex; gap: 8px; align-items: center; }
+  .tool .tool-icon {
+    width: 22px; height: 22px; border-radius: 7px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--muted) 12%, transparent);
+    flex-shrink: 0;
+  }
   .tool .status {
     color: var(--muted); margin-left: auto; text-transform: uppercase;
-    font-size: 10px; display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.03em;
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--muted) 10%, transparent);
   }
   .tool .paths a, .tool .paths button.link {
     color: var(--link); cursor: pointer; text-decoration: none;
-    display: inline-flex; align-items: center; gap: 4px; margin-top: 4px;
-    margin-right: 8px; background: none; border: none; padding: 0; font: inherit;
+    display: inline-flex; align-items: center; gap: 4px; margin-top: 6px;
+    margin-right: 10px; background: none; border: none; padding: 2px 0;
+    font: inherit; border-radius: 4px;
   }
   .tool .paths a:hover, .tool .paths button.link:hover { text-decoration: underline; }
+
+  /* ── Empty state ── */
   #empty {
-    margin: auto; text-align: center; color: var(--muted); padding: 24px 16px;
-    max-width: 280px; line-height: 1.5;
+    margin: auto; text-align: center; color: var(--muted); padding: 28px 18px;
+    max-width: 300px; line-height: 1.55;
   }
   #empty .hero-icon {
-    font-size: 36px; margin-bottom: 8px; display: block; color: var(--fg);
+    width: 52px; height: 52px; margin: 0 auto 12px;
+    border-radius: var(--radius-md);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; color: var(--btn-bg);
+    background: color-mix(in srgb, var(--btn-bg) 14%, transparent);
   }
-  #empty h2 { color: var(--fg); font-size: 14px; margin: 0 0 8px; }
+  #empty h2 {
+    color: var(--fg); font-size: 15px; font-weight: 600;
+    margin: 0 0 8px; letter-spacing: -0.01em;
+  }
+  #empty p { margin: 0 0 6px; }
   #empty .empty-actions {
-    display: flex; flex-direction: column; gap: 8px; margin-top: 12px;
+    display: flex; flex-direction: column; gap: 8px; margin-top: 16px;
   }
+  #empty .empty-actions button {
+    width: 100%; justify-content: center; min-height: 36px;
+    border-radius: var(--radius-sm);
+  }
+
+  /* ── Footer / composer ── */
   footer {
-    border-top: 1px solid var(--border); padding: 8px; flex-shrink: 0;
-    display: flex; flex-direction: column; gap: 6px;
+    padding: 10px 12px 12px; flex-shrink: 0;
+    display: flex; flex-direction: column; gap: 8px;
+    background: color-mix(in srgb, var(--bg) 92%, var(--input-bg));
   }
   #sticky {
-    display: flex; flex-wrap: wrap; gap: 4px; min-height: 0;
+    display: flex; flex-wrap: wrap; gap: 6px; min-height: 0;
+  }
+  .composer-shell {
+    display: flex; flex-direction: column; gap: 8px;
+    background: var(--input-bg);
+    border: none;
+    border-radius: var(--radius-md);
+    padding: 10px 10px 8px;
+    box-shadow: var(--shadow-soft);
+    transition: box-shadow var(--ease), background var(--ease);
+  }
+  .composer-shell:focus-within {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 40%, transparent), var(--shadow-soft);
   }
   #composer {
-    width: 100%; min-height: 56px; max-height: 160px; resize: vertical;
-    background: var(--input-bg); color: var(--input-fg);
-    border: 1px solid var(--input-border); border-radius: 6px;
-    padding: 8px; font-family: inherit; font-size: inherit;
+    width: 100%; min-height: 60px; max-height: 180px; resize: vertical;
+    background: transparent; color: var(--input-fg);
+    border: none; border-radius: 0; outline: none;
+    padding: 2px 4px; font-family: inherit; font-size: inherit;
+    line-height: 1.45;
   }
-  #composer:focus { outline: 1px solid var(--vscode-focusBorder, var(--link)); }
-  .actions { display: flex; gap: 6px; align-items: center; }
+  #composer:focus { outline: none; }
+  #composer::placeholder { color: var(--muted); opacity: 0.85; }
+  .actions {
+    display: flex; gap: 6px; align-items: center;
+    padding-top: 2px;
+  }
+
+  /* ── Buttons ── */
   button {
-    border: none; border-radius: 4px; padding: 6px 10px; cursor: pointer;
-    background: var(--btn-bg); color: var(--btn-fg); font: inherit;
-    display: inline-flex; align-items: center; gap: 5px;
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 7px 12px; min-height: 32px;
+    cursor: pointer;
+    background: var(--btn-bg); color: var(--btn-fg);
+    font: inherit; font-weight: 500;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    transition: background var(--ease), opacity var(--ease),
+      transform 80ms ease, box-shadow var(--ease);
+  }
+  button:hover:not(:disabled) {
+    background: var(--btn-hover);
+  }
+  button:active:not(:disabled) {
+    transform: translateY(0.5px);
+  }
+  button:focus-visible {
+    outline: 1px solid var(--focus); outline-offset: 2px;
   }
   button.secondary {
-    background: var(--btn-sec); color: var(--btn-sec-fg);
+    background: color-mix(in srgb, var(--fg) 8%, transparent);
+    color: var(--fg);
   }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  #send { margin-left: auto; }
+  button.secondary:hover:not(:disabled) {
+    background: var(--list-hover);
+    color: var(--fg);
+  }
+  button.icon-btn {
+    width: 32px; min-width: 32px; padding: 0;
+    border-radius: var(--radius-sm);
+  }
+  button:disabled {
+    opacity: 0.45; cursor: not-allowed;
+  }
+  #send {
+    margin-left: auto;
+    border-radius: var(--radius-pill);
+    padding: 7px 16px;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--btn-bg) 35%, transparent);
+  }
+  #send:hover:not(:disabled) {
+    box-shadow: 0 2px 6px color-mix(in srgb, var(--btn-bg) 40%, transparent);
+  }
   .vspacer { flex-shrink: 0; width: 100%; pointer-events: none; }
 </style>
 </head>
@@ -853,7 +1036,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 <div id="app">
   <header>
     <div class="brand">
-      <i class="ti ti-message-chatbot" aria-hidden="true"></i>
+      <span class="brand-mark" aria-hidden="true"><i class="ti ti-message-chatbot"></i></span>
       <span class="title">Grok Build</span>
     </div>
     <button type="button" class="linkish" id="btn-model" title="Select model">model ▾</button>
@@ -863,11 +1046,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   <div id="review-bar">
     <i class="ti ti-file-diff" aria-hidden="true"></i>
     <span id="review-label">Review edits</span>
-    <button type="button" class="secondary" id="btn-review" style="margin-left:auto;padding:3px 8px;font-size:11px">Open</button>
+    <button type="button" class="secondary" id="btn-review">Open</button>
   </div>
   <div id="messages"></div>
   <div id="empty" hidden>
-    <i class="ti ti-message-chatbot hero-icon" aria-hidden="true"></i>
+    <div class="hero-icon" aria-hidden="true"><i class="ti ti-message-chatbot"></i></div>
     <h2>Grok Build - Community</h2>
     <p>Ask about this workspace. Use @ to attach files. Active selection attaches automatically.</p>
     <p id="empty-hint"></p>
@@ -878,12 +1061,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   </div>
   <footer>
     <div id="sticky"></div>
-    <textarea id="composer" placeholder="Message Grok… (@ context, Enter send, Shift+Enter newline)" rows="3"></textarea>
-    <div class="actions">
-      <button id="at" class="secondary" type="button" title="Add context"><i class="ti ti-at"></i></button>
-      <button id="stop" class="secondary" type="button" disabled title="Stop"><i class="ti ti-player-stop"></i> Stop</button>
-      <button id="new" class="secondary" type="button" title="New session"><i class="ti ti-plus"></i> New</button>
-      <button id="send" type="button" title="Send"><i class="ti ti-send"></i> Send</button>
+    <div class="composer-shell">
+      <textarea id="composer" placeholder="Message Grok… (@ context, Enter send, Shift+Enter newline)" rows="3"></textarea>
+      <div class="actions">
+        <button id="at" class="secondary icon-btn" type="button" title="Add context" aria-label="Add context"><i class="ti ti-at"></i></button>
+        <button id="stop" class="secondary" type="button" disabled title="Stop"><i class="ti ti-player-stop"></i> Stop</button>
+        <button id="new" class="secondary" type="button" title="New session"><i class="ti ti-plus"></i> New</button>
+        <button id="send" type="button" title="Send"><i class="ti ti-send"></i> Send</button>
+      </div>
     </div>
   </footer>
 </div>
