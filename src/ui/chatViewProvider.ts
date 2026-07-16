@@ -2435,8 +2435,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     color: var(--fg); font-weight: 500;
   }
+  /* Busy: use link/focus accent — not button bg (often too dark as text). */
   #turn-status.busy .ts-process {
-    color: var(--btn-bg);
+    color: var(--link);
+    font-weight: 500;
   }
   #turn-status .ts-right {
     display: inline-flex; align-items: center; gap: 8px;
@@ -2444,17 +2446,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     opacity: 0.95;
   }
   #turn-status .ts-tokens {
-    color: var(--fg);
+    color: color-mix(in srgb, var(--fg) 82%, var(--muted));
     font-weight: 500;
     letter-spacing: 0.01em;
   }
   #turn-status .ts-sep { opacity: 0.4; }
-  #turn-status .ts-cost { color: var(--fg); opacity: 0.75; }
+  #turn-status .ts-cost {
+    color: color-mix(in srgb, var(--fg) 70%, var(--muted));
+  }
+  #turn-status .ts-time {
+    color: var(--muted);
+  }
   #turn-status .ts-spin {
     display: none; width: 12px; height: 12px; flex-shrink: 0;
+    color: var(--link);
+    opacity: 0.9;
   }
   #turn-status.busy .ts-spin { display: inline-flex; }
-  #turn-status .ts-spin .ti { font-size: 12px; }
+  #turn-status .ts-spin .ti { font-size: 12px; color: inherit; }
 
   .composer-shell {
     display: flex; flex-direction: column; gap: 10px;
@@ -4326,18 +4335,54 @@ function collectOpenGroupIds(wrap) {
   return ids;
 }
 
+/**
+ * Plain text for copy. Prefer live allMessages entry — streaming patches the
+ * DOM/timeline without remounting actions, so the closed-over m is often the
+ * empty optimistic assistant from first paint.
+ */
 function messageCopyPlain(m) {
   if (!m) return '';
-  if (m.type === 'user' || m.type === 'system') return m.text || '';
+  if (m.type === 'user' || m.type === 'system') return (m.text || '').trim();
   if (m.type === 'assistant') {
-    if (m.text) return m.text;
+    if (m.text && String(m.text).trim()) return String(m.text);
     const items = Array.isArray(m.items) ? m.items : [];
-    return items
-      .filter((it) => it && it.kind === 'text')
-      .map((it) => it.text || '')
-      .join('');
+    const parts = [];
+    for (const it of items) {
+      if (it && it.kind === 'text' && it.text) parts.push(it.text);
+    }
+    return parts.join('\\n\\n').trim();
   }
   return '';
+}
+
+/** Visible text from rendered assistant bubbles (fallback when model data is stale). */
+function messageCopyFromDom(wrap) {
+  if (!wrap) return '';
+  if (wrap.classList.contains('user') || wrap.classList.contains('system')) {
+    const b = wrap.querySelector(':scope > .bubble');
+    return ((b && (b.innerText || b.textContent)) || '').trim();
+  }
+  // Assistant: text bubbles only (skip tools / thoughts).
+  const bubbles = wrap.querySelectorAll(
+    ':scope > .assistant-timeline > .bubble.md, :scope > .bubble.md',
+  );
+  const parts = [];
+  bubbles.forEach((b) => {
+    let t = (b.innerText || b.textContent || '').trim();
+    // Drop code-block "Copy" button label if present at start of pre text.
+    t = t.replace(/^Copy\\n?/gm, '').trim();
+    if (t) parts.push(t);
+  });
+  return parts.join('\\n\\n').trim();
+}
+
+function flashCopyBtn(copyBtn) {
+  copyBtn.classList.add('copied');
+  copyBtn.innerHTML = icon('check');
+  setTimeout(() => {
+    copyBtn.classList.remove('copied');
+    copyBtn.innerHTML = icon('copy');
+  }, 1200);
 }
 
 function renderMsgActions(m) {
@@ -4355,19 +4400,18 @@ function renderMsgActions(m) {
   copyBtn.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
-    const text = messageCopyPlain(m);
+    const wrap = copyBtn.closest('.msg');
+    const live =
+      (m && m.id && allMessages.find((x) => x && x.id === m.id)) || m;
+    let text = messageCopyPlain(live);
+    if (!text) text = messageCopyFromDom(wrap);
     if (!text) return;
-    navigator.clipboard.writeText(text).then(() => {
-      copyBtn.classList.add('copied');
-      copyBtn.innerHTML = icon('check');
-      setTimeout(() => {
-        copyBtn.classList.remove('copied');
-        copyBtn.innerHTML = icon('copy');
-      }, 1200);
-    }).catch(() => {
-      // Fallback via host if clipboard API blocked
-      vscode.postMessage({ type: 'copyText', text });
-    });
+    // Host clipboard is reliable in VS Code webviews; navigator is best-effort.
+    vscode.postMessage({ type: 'copyText', text: text });
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(function () { /* host already has it */ });
+    }
+    flashCopyBtn(copyBtn);
   });
   bar.appendChild(copyBtn);
 
