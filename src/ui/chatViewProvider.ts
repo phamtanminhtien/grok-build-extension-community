@@ -15,6 +15,13 @@ import {
   searchContextSuggestions,
 } from "../context/contextPicker";
 import { getSettings } from "../config/settings";
+import {
+  effortDisplayLabel,
+  fallbackModels,
+  modelDisplayLabel,
+  type GrokEffortOption,
+  type GrokModelOption,
+} from "../config/modelService";
 import { logError } from "../log/output";
 import { renderMarkdownToSafeHtml } from "./markdown";
 import {
@@ -140,6 +147,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.agent.onAvailableCommands((cmds) => {
         slashRegistry.setAcpCommands(cmds);
       }),
+      this.agent.onModelsChange((m) => {
+        this.post({
+          type: "models",
+          models: m.models,
+          currentModelId: m.currentModelId,
+          currentLabel:
+            m.currentLabel || modelDisplayLabel(m.models, m.currentModelId),
+          efforts: m.efforts,
+          currentEffortId: m.currentEffortId,
+          currentEffortLabel:
+            m.currentEffortLabel ||
+            effortDisplayLabel(m.efforts, m.currentEffortId),
+        });
+      }),
       this.agent.onTurnEnd((response) => {
         this.currentAssistantId = undefined;
         if (response.usage) {
@@ -217,7 +238,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
     });
 
+    // Seed UI immediately, then start agent so model catalog matches TUI
+    // without waiting for another server-touching action (send, resume, …).
     void this.pushFullState();
+    void this.ensureModelsLoaded();
   }
 
   async openChat(): Promise<void> {
@@ -416,10 +440,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     requestId?: number;
     chip?: ContextChip;
     enabled?: boolean;
+    modelId?: string;
+    effortId?: string;
   }): Promise<void> {
     switch (msg.type) {
       case "ready":
         await this.pushFullState();
+        await this.ensureModelsLoaded();
+        break;
+      case "ensureModels":
+        await this.ensureModelsLoaded();
         break;
       case "send":
         if (msg.text?.trim()) {
@@ -530,6 +560,58 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           vscode.ConfigurationTarget.Global,
         );
         this.postAutoContext();
+        break;
+      }
+      case "selectModel":
+        // Ensure live catalog first (same list as TUI /model), then QuickPick.
+        await this.ensureModelsLoaded();
+        await vscode.commands.executeCommand("grok.selectModel");
+        break;
+      case "setModel": {
+        const modelId = (msg.modelId ?? "").trim();
+        if (!modelId) {
+          break;
+        }
+        try {
+          if (this.agent.isBusy()) {
+            this.pushSystem(
+              "Wait for the current turn or press Stop before switching model.",
+            );
+            break;
+          }
+          await this.agent.setSessionModel(modelId);
+          const cat = this.agent.getModels();
+          this.pushSystem(
+            `Model set to ${modelDisplayLabel(cat.models, modelId)}`,
+          );
+          await this.pushFullState();
+        } catch (err) {
+          this.pushSystem(errMessage(err));
+          await vscode.commands.executeCommand("grok.selectModel");
+        }
+        break;
+      }
+      case "setEffort": {
+        const effortId = (msg.effortId ?? "").trim();
+        if (!effortId) {
+          break;
+        }
+        try {
+          if (this.agent.isBusy()) {
+            this.pushSystem(
+              "Wait for the current turn or press Stop before changing effort.",
+            );
+            break;
+          }
+          await this.agent.setReasoningEffort(effortId);
+          const cat = this.agent.getModels();
+          this.pushSystem(
+            `Reasoning effort set to ${effortDisplayLabel(cat.efforts, effortId) || effortId}`,
+          );
+          await this.pushFullState();
+        } catch (err) {
+          this.pushSystem(errMessage(err));
+        }
         break;
       }
       default:
@@ -1001,6 +1083,32 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  /**
+   * Start the agent (when auth exists) so session/new + models catalog load
+   * without requiring a later server action. Safe to call repeatedly.
+   */
+  private async ensureModelsLoaded(): Promise<void> {
+    const catalog = this.agent.getModels();
+    if (
+      this.agent.getState().kind === "ready" &&
+      catalog.models.length > 0
+    ) {
+      await this.pushFullState();
+      return;
+    }
+    try {
+      const hasAuth = await this.auth.hasAnyAuth();
+      if (!hasAuth) {
+        await this.pushFullState();
+        return;
+      }
+      await this.agent.ensureStarted();
+    } catch (err) {
+      logError("Auto-start agent for model catalog failed", err);
+    }
+    await this.pushFullState();
+  }
+
   private async pushFullState(): Promise<void> {
     const hasAuth = await this.auth.hasAnyAuth();
     const state = this.agent.getState();
@@ -1014,6 +1122,28 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       elapsedMs,
       usage: this.sessionUsage,
     });
+    const catalog = this.agent.getModels();
+    // Only use bundled fallback for the button label when the agent has not
+    // produced a catalog yet — never pretend it is the full TUI list.
+    const models: GrokModelOption[] =
+      catalog.models.length > 0
+        ? catalog.models
+        : fallbackModels().map((m) => ({
+            ...m,
+            selected: m.id === (catalog.currentModelId || settings.model),
+          }));
+    const currentModelId =
+      catalog.currentModelId || settings.model || models[0]?.id || "";
+    const currentLabel =
+      catalog.currentLabel ||
+      modelDisplayLabel(models, currentModelId) ||
+      currentModelId ||
+      "model";
+    const efforts: GrokEffortOption[] = catalog.efforts;
+    const currentEffortId = catalog.currentEffortId;
+    const currentEffortLabel =
+      catalog.currentEffortLabel ||
+      effortDisplayLabel(efforts, currentEffortId);
     this.post({
       type: "init",
       messages: this.serializeMessages(this.messages),
@@ -1026,7 +1156,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           : state.kind === "error"
             ? state.message
             : "",
-      model: settings.model || "default",
+      model: currentModelId || settings.model || "default",
+      models,
+      currentModelId,
+      currentLabel,
+      efforts,
+      currentEffortId,
+      currentEffortLabel,
       stickyChips: this.stickyChips.map((c) => ({
         id: c.id,
         label: c.label,
@@ -1519,8 +1655,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     position: relative;
     display: flex; flex-direction: column;
   }
-  /* @ mention + / slash popovers — above input, like grok-build dropdowns */
-  #mention-popover, #slash-popover {
+  /* @ mention + / slash + model/effort popovers — above input, like grok-build dropdowns */
+  #mention-popover, #slash-popover, #model-popover, #effort-popover {
     position: absolute;
     left: 0; right: 0; bottom: calc(100% + 6px);
     z-index: 20;
@@ -1534,20 +1670,23 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       0 8px 24px color-mix(in srgb, var(--bg) 55%, #000);
     overflow: hidden;
   }
-  #mention-popover[hidden], #slash-popover[hidden] { display: none !important; }
-  #mention-head, #slash-head {
+  #mention-popover[hidden], #slash-popover[hidden], #model-popover[hidden],
+  #effort-popover[hidden] {
+    display: none !important;
+  }
+  #mention-head, #slash-head, #model-head, #effort-head {
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px; padding: 8px 10px 6px;
     font-size: 11px; color: var(--muted); font-weight: 500;
     border-bottom: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
     flex-shrink: 0;
   }
-  #mention-head .hint, #slash-head .hint { opacity: 0.85; }
-  #mention-list, #slash-list {
+  #mention-head .hint, #slash-head .hint, #model-head .hint, #effort-head .hint { opacity: 0.85; }
+  #mention-list, #slash-list, #model-list, #effort-list {
     overflow-y: auto; padding: 4px;
     flex: 1; min-height: 0;
   }
-  .mention-item, .slash-item {
+  .mention-item, .slash-item, .model-item, .effort-item {
     display: flex; align-items: center; gap: 8px;
     width: 100%; text-align: left;
     padding: 7px 8px; border: none; border-radius: var(--radius-sm);
@@ -1555,43 +1694,59 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     font: inherit; font-size: 12px; cursor: pointer;
     min-height: 32px;
   }
-  .mention-item:hover, .slash-item:hover {
+  .mention-item:hover, .slash-item:hover, .model-item:hover, .effort-item:hover {
     background: var(--list-hover);
   }
-  .mention-item.active, .slash-item.active {
+  .mention-item.active, .slash-item.active, .model-item.active, .effort-item.active {
     background: color-mix(in srgb, var(--btn-bg) 28%, transparent);
   }
-  .mention-item .mi-icon, .slash-item .mi-icon {
+  .mention-item .mi-icon, .slash-item .mi-icon, .model-item .mi-icon, .effort-item .mi-icon {
     width: 22px; height: 22px; border-radius: 7px;
     display: inline-flex; align-items: center; justify-content: center;
     background: color-mix(in srgb, var(--muted) 14%, transparent);
     color: color-mix(in srgb, var(--fg) 72%, var(--muted));
     flex-shrink: 0;
   }
-  .mention-item.active .mi-icon, .slash-item.active .mi-icon {
+  .mention-item.active .mi-icon, .slash-item.active .mi-icon, .model-item.active .mi-icon,
+  .effort-item.active .mi-icon {
     color: var(--btn-fg);
     background: var(--btn-bg);
   }
   .mention-item:hover:not(.active) .mi-icon,
-  .slash-item:hover:not(.active) .mi-icon {
+  .slash-item:hover:not(.active) .mi-icon,
+  .model-item:hover:not(.active) .mi-icon,
+  .effort-item:hover:not(.active) .mi-icon {
     color: var(--fg);
     background: color-mix(in srgb, var(--fg) 14%, transparent);
   }
-  .mention-item .mi-body, .slash-item .mi-body {
+  .mention-item .mi-body, .slash-item .mi-body, .model-item .mi-body, .effort-item .mi-body {
     min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px;
   }
-  .mention-item .mi-label, .slash-item .mi-label {
+  .mention-item .mi-label, .slash-item .mi-label, .model-item .mi-label, .effort-item .mi-label {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-weight: 500;
   }
-  .mention-item .mi-desc, .slash-item .mi-desc {
+  .mention-item .mi-desc, .slash-item .mi-desc, .model-item .mi-desc, .effort-item .mi-desc {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-size: 10px; color: var(--muted);
   }
-  #mention-empty, #slash-empty {
+  .model-item.current .mi-label, .effort-item.current .mi-label { font-weight: 600; }
+  #btn-model, #btn-effort {
+    max-width: min(140px, 36%);
+    border-radius: var(--radius-pill);
+    padding: 7px 10px;
+    font-weight: 500;
+  }
+  #btn-model { margin-left: auto; }
+  #btn-effort[hidden] { display: none !important; }
+  #btn-model .model-btn-label, #btn-effort .effort-btn-label {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0; max-width: 90px;
+  }
+  #mention-empty, #slash-empty, #model-empty, #effort-empty {
     padding: 14px 12px; color: var(--muted); font-size: 12px; text-align: center;
   }
-  .slash-item .mi-badge {
+  .slash-item .mi-badge, .model-item .mi-badge {
     font-size: 9px; color: var(--muted); flex-shrink: 0;
     text-transform: uppercase; letter-spacing: 0.03em;
   }
@@ -1697,7 +1852,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     opacity: 0.45; cursor: not-allowed;
   }
   #send {
-    margin-left: auto;
     border-radius: var(--radius-pill);
     padding: 7px 16px;
     box-shadow: 0 1px 2px color-mix(in srgb, var(--btn-bg) 35%, transparent);
@@ -1755,6 +1909,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         <div id="mention-list"></div>
         <div id="mention-empty" hidden>No matches</div>
       </div>
+      <div id="model-popover" hidden role="listbox" aria-label="Select model">
+        <div id="model-head">
+          <span id="model-title">Models</span>
+          <span class="hint">↑↓ · Enter · Esc</span>
+        </div>
+        <div id="model-list"></div>
+        <div id="model-empty" hidden>No models from agent</div>
+      </div>
+      <div id="effort-popover" hidden role="listbox" aria-label="Reasoning effort">
+        <div id="effort-head">
+          <span id="effort-title">Reasoning</span>
+          <span class="hint">↑↓ · Enter · Esc</span>
+        </div>
+        <div id="effort-list"></div>
+        <div id="effort-empty" hidden>Not supported on this model</div>
+      </div>
       <div id="turn-status" hidden aria-live="polite">
         <span class="ts-left">
           <span class="ts-spin" aria-hidden="true"><i class="ti ti-loader ti-spin"></i></span>
@@ -1769,8 +1939,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       <div class="composer-shell">
         <textarea id="composer" placeholder="Message Grok… (/ commands, @ files, Enter send)" rows="3"></textarea>
         <div class="actions">
-          <button id="stop" class="secondary" type="button" disabled title="Stop"><i class="ti ti-player-stop"></i> Stop</button>
-          <button id="new" class="secondary" type="button" title="New session"><i class="ti ti-plus"></i> New</button>
+          <button id="btn-model" class="secondary" type="button" title="Select model (same catalog as TUI)" aria-label="Select model" aria-haspopup="listbox">
+            <i class="ti ti-cpu" aria-hidden="true"></i>
+            <span class="model-btn-label" id="model-btn-label">model</span>
+            <i class="ti ti-chevron-up" aria-hidden="true"></i>
+          </button>
+          <button id="btn-effort" class="secondary" type="button" hidden title="Reasoning effort" aria-label="Reasoning effort" aria-haspopup="listbox">
+            <i class="ti ti-brain" aria-hidden="true"></i>
+            <span class="effort-btn-label" id="effort-btn-label">effort</span>
+            <i class="ti ti-chevron-up" aria-hidden="true"></i>
+          </button>
           <button id="send" type="button" title="Send"><i class="ti ti-send"></i> Send</button>
         </div>
       </div>
@@ -1785,8 +1963,6 @@ const emptyHint = document.getElementById('empty-hint');
 const meta = document.getElementById('meta');
 const composer = document.getElementById('composer');
 const sendBtn = document.getElementById('send');
-const stopBtn = document.getElementById('stop');
-const newBtn = document.getElementById('new');
 const stickyEl = document.getElementById('sticky');
 const reviewBar = document.getElementById('review-bar');
 const reviewLabel = document.getElementById('review-label');
@@ -1804,13 +1980,207 @@ const slashPopover = document.getElementById('slash-popover');
 const slashList = document.getElementById('slash-list');
 const slashEmpty = document.getElementById('slash-empty');
 const slashTitle = document.getElementById('slash-title');
+const modelPopover = document.getElementById('model-popover');
+const modelList = document.getElementById('model-list');
+const modelEmpty = document.getElementById('model-empty');
+const modelTitle = document.getElementById('model-title');
+const btnModel = document.getElementById('btn-model');
+const modelBtnLabel = document.getElementById('model-btn-label');
+const effortPopover = document.getElementById('effort-popover');
+const effortList = document.getElementById('effort-list');
+const effortEmpty = document.getElementById('effort-empty');
+const effortTitle = document.getElementById('effort-title');
+const btnEffort = document.getElementById('btn-effort');
+const effortBtnLabel = document.getElementById('effort-btn-label');
 let busy = false;
 let allMessages = [];
 let stickyChips = [];
 let autoAttachEnabled = true;
 let autoChip = null; // { id, label, kind, fsPath } | null
+/** Agent catalog — same source as TUI ModelsManager.available(). */
+let modelItems = [];
+let currentModelId = '';
+let currentModelLabel = 'model';
+let modelOpen = false;
+let modelIndex = 0;
+/** Reasoning effort menu for current model (TUI sessionConfig category mode). */
+let effortItems = [];
+let currentEffortId = '';
+let currentEffortLabel = '';
+let effortOpen = false;
+let effortIndex = 0;
 const EST_ROW = 96;
 const VIRT_THRESHOLD = 40;
+
+/* ── model + effort popovers (TUI /model + /effort) ── */
+function setModelButtonLabel(label) {
+  currentModelLabel = label || currentModelId || 'model';
+  modelBtnLabel.textContent = currentModelLabel;
+  btnModel.title = 'Model: ' + currentModelLabel + ' (same catalog as TUI)';
+}
+
+function setEffortButtonLabel(label) {
+  currentEffortLabel = label || currentEffortId || '';
+  if (!effortItems.length) {
+    btnEffort.hidden = true;
+    return;
+  }
+  btnEffort.hidden = false;
+  effortBtnLabel.textContent = currentEffortLabel || 'effort';
+  btnEffort.title = 'Reasoning effort: ' + (currentEffortLabel || currentEffortId || '—');
+}
+
+function applyModelsState(s) {
+  if (!s) return;
+  if (Array.isArray(s.models)) {
+    modelItems = s.models.slice();
+  }
+  if (s.currentModelId != null) currentModelId = String(s.currentModelId || '');
+  if (s.currentLabel) setModelButtonLabel(s.currentLabel);
+  else if (currentModelId) {
+    const hit = modelItems.find((m) => m.id === currentModelId);
+    setModelButtonLabel(hit ? hit.label : currentModelId);
+  }
+  if (Array.isArray(s.efforts)) {
+    effortItems = s.efforts.slice();
+  }
+  if (s.currentEffortId != null) currentEffortId = String(s.currentEffortId || '');
+  if (s.currentEffortLabel) setEffortButtonLabel(s.currentEffortLabel);
+  else setEffortButtonLabel(
+    (effortItems.find((e) => e.id === currentEffortId) || {}).label || currentEffortId
+  );
+  if (modelOpen) renderModelList();
+  if (effortOpen) renderEffortList();
+}
+
+function closeModelPopover() {
+  modelOpen = false;
+  modelPopover.hidden = true;
+  modelList.innerHTML = '';
+  modelEmpty.hidden = true;
+}
+
+function closeEffortPopover() {
+  effortOpen = false;
+  effortPopover.hidden = true;
+  effortList.innerHTML = '';
+  effortEmpty.hidden = true;
+}
+
+function renderModelList() {
+  if (!modelOpen) return;
+  modelPopover.hidden = false;
+  modelTitle.textContent = 'Models' + (modelItems.length ? ' (' + modelItems.length + ')' : '');
+  if (!modelItems.length) {
+    modelList.innerHTML = '';
+    modelEmpty.hidden = false;
+    modelEmpty.textContent = 'Waiting for agent catalog…';
+    return;
+  }
+  modelEmpty.hidden = true;
+  modelList.innerHTML = modelItems.map((m, i) => {
+    const cur = m.id === currentModelId || m.selected;
+    return '<button type="button" class="model-item' +
+      (i === modelIndex ? ' active' : '') +
+      (cur ? ' current' : '') +
+      '" role="option" data-model-idx="' + i + '" aria-selected="' + (i === modelIndex) + '">' +
+      '<span class="mi-icon">' + icon(cur ? 'check' : 'cpu') + '</span>' +
+      '<span class="mi-body">' +
+        '<span class="mi-label">' + esc(m.label || m.id) + '</span>' +
+        (m.id && m.id !== m.label
+          ? '<span class="mi-desc">' + esc(m.id) + '</span>'
+          : (m.description ? '<span class="mi-desc">' + esc(m.description) + '</span>' : '')) +
+      '</span>' +
+      (cur ? '<span class="mi-badge">current</span>' : '') +
+    '</button>';
+  }).join('');
+  const active = modelList.querySelector('.model-item.active');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+function renderEffortList() {
+  if (!effortOpen) return;
+  effortPopover.hidden = false;
+  effortTitle.textContent = 'Reasoning';
+  if (!effortItems.length) {
+    effortList.innerHTML = '';
+    effortEmpty.hidden = false;
+    return;
+  }
+  effortEmpty.hidden = true;
+  effortList.innerHTML = effortItems.map((e, i) => {
+    const cur = e.id === currentEffortId || e.selected;
+    return '<button type="button" class="effort-item' +
+      (i === effortIndex ? ' active' : '') +
+      (cur ? ' current' : '') +
+      '" role="option" data-effort-idx="' + i + '" aria-selected="' + (i === effortIndex) + '">' +
+      '<span class="mi-icon">' + icon(cur ? 'check' : 'brain') + '</span>' +
+      '<span class="mi-body">' +
+        '<span class="mi-label">' + esc(e.label || e.id) + '</span>' +
+        (e.description ? '<span class="mi-desc">' + esc(e.description) + '</span>' : '') +
+      '</span>' +
+      (cur ? '<span class="mi-badge">current</span>' : '') +
+    '</button>';
+  }).join('');
+  const active = effortList.querySelector('.effort-item.active');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+function openModelPopover() {
+  if (slashOpen) closeSlash();
+  if (mentionOpen) closeMention();
+  if (effortOpen) closeEffortPopover();
+  // Always re-fetch catalog from agent so we don't stick on bundled fallback
+  // until some other server action happens to start the agent.
+  vscode.postMessage({ type: 'ensureModels' });
+  modelOpen = true;
+  modelIndex = Math.max(0, modelItems.findIndex((m) => m.id === currentModelId));
+  if (modelIndex < 0) modelIndex = 0;
+  renderModelList();
+  if (!modelItems.length) {
+    vscode.postMessage({ type: 'selectModel' });
+    closeModelPopover();
+  }
+}
+
+function openEffortPopover() {
+  if (slashOpen) closeSlash();
+  if (mentionOpen) closeMention();
+  if (modelOpen) closeModelPopover();
+  if (!effortItems.length) return;
+  effortOpen = true;
+  effortIndex = Math.max(0, effortItems.findIndex((e) => e.id === currentEffortId));
+  if (effortIndex < 0) effortIndex = 0;
+  renderEffortList();
+}
+
+function acceptModel(idx) {
+  const m = modelItems[idx];
+  if (!m || !m.id) return;
+  closeModelPopover();
+  if (m.id === currentModelId) return;
+  vscode.postMessage({ type: 'setModel', modelId: m.id });
+}
+
+function acceptEffort(idx) {
+  const e = effortItems[idx];
+  if (!e || !e.id) return;
+  closeEffortPopover();
+  if (e.id === currentEffortId) return;
+  vscode.postMessage({ type: 'setEffort', effortId: e.id });
+}
+
+function moveModel(delta) {
+  if (!modelItems.length) return;
+  modelIndex = (modelIndex + delta + modelItems.length) % modelItems.length;
+  renderModelList();
+}
+
+function moveEffort(delta) {
+  if (!effortItems.length) return;
+  effortIndex = (effortIndex + delta + effortItems.length) % effortItems.length;
+  renderEffortList();
+}
 
 /* ── / slash popover (synced with grok-build slash dropdown) ── */
 let slashOpen = false;
@@ -1901,6 +2271,8 @@ function requestSlashSearch(query) {
 
 function openSlashFromContext(ctx) {
   if (mentionOpen) closeMention();
+  if (modelOpen) closeModelPopover();
+  if (effortOpen) closeEffortPopover();
   slashOpen = true;
   slashCtx = ctx;
   slashIndex = 0;
@@ -2073,6 +2445,8 @@ function requestMentionSearch(query) {
 
 function openMentionFromContext(ctx) {
   if (slashOpen) closeSlash();
+  if (modelOpen) closeModelPopover();
+  if (effortOpen) closeEffortPopover();
   mentionOpen = true;
   mentionAtCtx = ctx;
   mentionIndex = 0;
@@ -2564,7 +2938,6 @@ function renderTurnStatus(s) {
 function setBusy(b) {
   busy = b;
   sendBtn.disabled = b;
-  stopBtn.disabled = !b;
   composer.disabled = false;
   if (b) setMeta('working…', true);
   else setMeta(meta.dataset.base || 'idle', false);
@@ -2618,14 +2991,22 @@ stickyEl.addEventListener('click', (e) => {
 sendBtn.addEventListener('click', () => {
   if (mentionOpen) closeMention();
   if (slashOpen) closeSlash();
+  if (modelOpen) closeModelPopover();
+  if (effortOpen) closeEffortPopover();
   const text = composer.value.trim();
   if (!text || busy) return;
   vscode.postMessage({ type: 'send', text });
   composer.value = '';
 });
 
-stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
-newBtn.addEventListener('click', () => vscode.postMessage({ type: 'newSession' }));
+btnModel.addEventListener('click', () => {
+  if (modelOpen) closeModelPopover();
+  else openModelPopover();
+});
+btnEffort.addEventListener('click', () => {
+  if (effortOpen) closeEffortPopover();
+  else openEffortPopover();
+});
 document.getElementById('empty-start').addEventListener('click', () =>
   vscode.postMessage({ type: 'startAgent' }));
 document.getElementById('empty-login').addEventListener('click', () =>
@@ -2650,6 +3031,22 @@ slashList.addEventListener('click', (e) => {
   if (!btn) return;
   acceptSlash(Number(btn.getAttribute('data-slash-idx')));
 });
+modelList.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+});
+modelList.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-model-idx]');
+  if (!btn) return;
+  acceptModel(Number(btn.getAttribute('data-model-idx')));
+});
+effortList.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+});
+effortList.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-effort-idx]');
+  if (!btn) return;
+  acceptEffort(Number(btn.getAttribute('data-effort-idx')));
+});
 
 composer.addEventListener('input', () => syncComposerMenus());
 composer.addEventListener('click', () => syncComposerMenus());
@@ -2660,6 +3057,54 @@ composer.addEventListener('keyup', (e) => {
 });
 
 composer.addEventListener('keydown', (e) => {
+  if (modelOpen) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveModel(1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveModel(-1);
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      if (modelItems.length) {
+        e.preventDefault();
+        acceptModel(modelIndex);
+        return;
+      }
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeModelPopover();
+      return;
+    }
+  }
+  if (effortOpen) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveEffort(1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveEffort(-1);
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      if (effortItems.length) {
+        e.preventDefault();
+        acceptEffort(effortIndex);
+        return;
+      }
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeEffortPopover();
+      return;
+    }
+  }
   if (slashOpen) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -2727,6 +3172,7 @@ window.addEventListener('message', (event) => {
     autoChip = msg.autoChip || null;
     renderSticky();
     setReview(msg.reviewCount || 0);
+    applyModelsState(msg);
     const base = (msg.agentState || 'idle') +
       (msg.agentDetail ? ' · ' + String(msg.agentDetail).slice(0, 12) : '');
     meta.dataset.base = base;
@@ -2745,6 +3191,8 @@ window.addEventListener('message', (event) => {
     renderTurnStatus(msg);
   } else if (msg.type === 'contextBar') {
     renderContextBar(msg);
+  } else if (msg.type === 'models') {
+    applyModelsState(msg);
   } else if (msg.type === 'agentState') {
     const base = (msg.state || 'idle') +
       (msg.detail ? ' · ' + String(msg.detail).slice(0, 12) : '');

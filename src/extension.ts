@@ -7,6 +7,7 @@ import {
 } from "./agent/hostFs";
 import { AuthService, promptAndStoreApiKey } from "./auth/authService";
 import {
+  modelDisplayLabel,
   selectModelQuickPick,
   setModelSetting,
 } from "./config/modelService";
@@ -208,30 +209,51 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand("grok.selectModel", async () => {
-      const model = await selectModelQuickPick();
+      try {
+        // Ensure catalog is loaded from the agent (same list as TUI /model).
+        if (agentService!.getState().kind !== "ready") {
+          await agentService!.ensureStarted();
+        }
+      } catch {
+        /* catalog may still be empty; QuickPick falls back */
+      }
+      const catalog = agentService!.getModels();
+      const model = await selectModelQuickPick(
+        catalog.models,
+        catalog.currentModelId,
+      );
       if (model === undefined) {
         return;
       }
       if (agentService!.isBusy()) {
         const ok = await vscode.window.showWarningMessage(
-          "A turn is in progress. Cancel and restart agent with the new model?",
-          "Restart",
-          "Cancel",
+          "A turn is in progress. Cancel it before switching model?",
+          "Cancel turn",
+          "Keep waiting",
         );
-        if (ok !== "Restart") {
+        if (ok !== "Cancel turn") {
           return;
         }
         await agentService!.cancelTurn();
       }
-      await setModelSetting(model);
       try {
-        await agentService!.restart();
+        await agentService!.setSessionModel(model);
         void vscode.window.showInformationMessage(
-          `Grok model set to ${model || "default"}`,
+          `Model set to ${modelDisplayLabel(catalog.models, model) || model}`,
         );
         await chat.refreshState();
       } catch (err) {
-        await showStartError(err);
+        // Fall back: persist + restart agent with --model (spawn path).
+        try {
+          await setModelSetting(model);
+          await agentService!.restart();
+          void vscode.window.showInformationMessage(
+            `Model set to ${model} (agent restarted)`,
+          );
+          await chat.refreshState();
+        } catch (err2) {
+          await showStartError(err2);
+        }
       }
     }),
 

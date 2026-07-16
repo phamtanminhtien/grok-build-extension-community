@@ -16,6 +16,15 @@ import {
   type GrokSettings,
 } from "../config/settings";
 import {
+  effortDisplayLabel,
+  modelDisplayLabel,
+  parseModelsFromSessionMeta,
+  parseSessionModelState,
+  setModelSetting,
+  type GrokEffortOption,
+  type GrokModelOption,
+} from "../config/modelService";
+import {
   logError,
   logInfo,
   logSessionUpdate,
@@ -112,12 +121,52 @@ export class AgentService implements vscode.Disposable {
     new vscode.EventEmitter<AvailableCommand[]>();
   readonly onAvailableCommands = this._onAvailableCommands.event;
 
+  /**
+   * Live model catalog from the agent (same source as TUI `/model` dropdown:
+   * `ModelsManager.available()` via session `_meta` + live `x.ai/models/update`).
+   */
+  private models: GrokModelOption[] = [];
+  private currentModelId = "";
+  private efforts: GrokEffortOption[] = [];
+  private currentEffortId = "";
+  private readonly _onModelsChange = new vscode.EventEmitter<{
+    models: GrokModelOption[];
+    currentModelId: string;
+    currentLabel: string;
+    efforts: GrokEffortOption[];
+    currentEffortId: string;
+    currentEffortLabel: string;
+  }>();
+  readonly onModelsChange = this._onModelsChange.event;
+
   setAuthService(auth: AuthService): void {
     this.auth = auth;
   }
 
   getAvailableCommands(): AvailableCommand[] {
     return this.availableCommands.slice();
+  }
+
+  /** Current agent model catalog + reasoning efforts (TUI-aligned). */
+  getModels(): {
+    models: GrokModelOption[];
+    currentModelId: string;
+    currentLabel: string;
+    efforts: GrokEffortOption[];
+    currentEffortId: string;
+    currentEffortLabel: string;
+  } {
+    return {
+      models: this.models.map((m) => ({ ...m })),
+      currentModelId: this.currentModelId,
+      currentLabel: modelDisplayLabel(this.models, this.currentModelId),
+      efforts: this.efforts.map((e) => ({ ...e })),
+      currentEffortId: this.currentEffortId,
+      currentEffortLabel: effortDisplayLabel(
+        this.efforts,
+        this.currentEffortId,
+      ),
+    };
   }
 
   getState(): AgentState {
@@ -235,6 +284,7 @@ export class AgentService implements vscode.Disposable {
     logInfo(`session/new cwd=${cwd}`);
     const session = await this.connection.agent.buildSession(cwd).start();
     this.session = session;
+    this.ingestSessionModels(session);
     void this.pumpSessionUpdates(session);
 
     if (this.state.kind === "ready") {
@@ -242,6 +292,110 @@ export class AgentService implements vscode.Disposable {
     }
     logInfo(`session/new ok sessionId=${session.sessionId}`);
     return session.sessionId;
+  }
+
+  /**
+   * Switch model on the active session via ACP `session/set_model`
+   * (same path as TUI `/model`). Also persists `grok.model` for restarts.
+   * Optional effort is sent in `_meta.reasoningEffort` like the TUI.
+   */
+  async setSessionModel(
+    modelId: string,
+    options?: { effortId?: string },
+  ): Promise<void> {
+    const id = modelId.trim();
+    if (!id) {
+      throw new Error("Model id is empty");
+    }
+    await this.ensureStarted();
+    if (!this.connection || !this.session) {
+      throw new Error("No active session");
+    }
+    if (this.busy) {
+      throw new Error("Cannot switch model while a turn is in progress");
+    }
+
+    const sessionId = this.session.sessionId;
+    const effortId = options?.effortId?.trim();
+    logInfo(
+      `session/set_model sessionId=${sessionId} modelId=${id}` +
+        (effortId ? ` effort=${effortId}` : ""),
+    );
+    const meta =
+      effortId != null && effortId !== ""
+        ? { reasoningEffort: effortId }
+        : undefined;
+    await this.requestSetSessionModel(sessionId, id, meta);
+
+    await setModelSetting(id);
+    this.currentModelId = id;
+    for (const m of this.models) {
+      m.selected = m.id === id;
+    }
+    if (!this.models.some((m) => m.id === id)) {
+      this.models.push({ id, label: id, selected: true });
+    }
+    // Refresh effort menu for the newly selected model.
+    this.syncEffortsFromCurrentModel(effortId);
+    this.fireModelsChange();
+    logInfo(`session/set_model ok modelId=${id}`);
+  }
+
+  /**
+   * Set reasoning effort for the current model (TUI `/effort`).
+   * Uses `session/set_model` with same model id + `_meta.reasoningEffort`.
+   */
+  async setReasoningEffort(effortId: string): Promise<void> {
+    const id = effortId.trim();
+    if (!id) {
+      throw new Error("Effort id is empty");
+    }
+    const modelId = this.currentModelId || getSettings().model;
+    if (!modelId) {
+      throw new Error("No current model to apply effort to");
+    }
+    await this.setSessionModel(modelId, { effortId: id });
+    this.currentEffortId = id;
+    for (const e of this.efforts) {
+      e.selected = e.id === id;
+    }
+    this.fireModelsChange();
+  }
+
+  private async requestSetSessionModel(
+    sessionId: string,
+    modelId: string,
+    meta?: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.connection) {
+      throw new Error("No connection");
+    }
+    const camel = {
+      sessionId,
+      modelId,
+      ...(meta ? { _meta: meta } : {}),
+    };
+    try {
+      await this.connection.agent.request<unknown, typeof camel>(
+        "session/set_model",
+        camel,
+      );
+      return;
+    } catch (err) {
+      const snake = {
+        session_id: sessionId,
+        model_id: modelId,
+        ...(meta ? { _meta: meta } : {}),
+      };
+      try {
+        await this.connection.agent.request<unknown, typeof snake>(
+          "session/set_model",
+          snake,
+        );
+      } catch {
+        throw err;
+      }
+    }
   }
 
   /**
@@ -423,6 +577,8 @@ export class AgentService implements vscode.Disposable {
       ...loadRes,
     });
     this.session = session;
+    // load response may carry config in result; merge meta when present.
+    this.ingestSessionModels(session, loadRes as { _meta?: unknown; models?: unknown });
     void this.pumpSessionUpdates(session);
 
     if (this.state.kind === "ready") {
@@ -483,6 +639,190 @@ export class AgentService implements vscode.Disposable {
     this._onBusyChange.dispose();
     this._onTurnEnd.dispose();
     this._onAvailableCommands.dispose();
+    this._onModelsChange.dispose();
+  }
+
+  /**
+   * Read model catalog from session meta (TUI source of truth at session open).
+   * Full remote catalog usually arrives later via `x.ai/models/update`.
+   */
+  private ingestSessionModels(
+    session: ActiveSession,
+    extra?: { _meta?: unknown; models?: unknown; meta?: unknown },
+  ): void {
+    const meta = {
+      ...((session.meta as Record<string, unknown> | null | undefined) ?? {}),
+      ...((extra?._meta as Record<string, unknown> | null | undefined) ?? {}),
+      ...((extra?.meta as Record<string, unknown> | null | undefined) ?? {}),
+    };
+    const nsr = session.newSessionResponse as {
+      models?: unknown;
+      _meta?: unknown;
+    };
+    // ACP TS SDK zod schema strips top-level `models` from NewSessionResponse;
+    // prefer `_meta` sessionConfig, then raw models if the client keeps them.
+    const legacyModels =
+      extra?.models ??
+      nsr?.models ??
+      (nsr as { modelState?: unknown } | undefined)?.modelState;
+    const parsed = parseModelsFromSessionMeta(
+      Object.keys(meta).length ? meta : undefined,
+      legacyModels,
+    );
+    this.applyCatalogSnapshot(parsed, { preferLarger: true });
+  }
+
+  /**
+   * Initialize response `_meta.modelState` is the earliest catalog snapshot
+   * (same field the agent puts in InitializeResponse meta).
+   */
+  private ingestInitializeModelState(initResult: unknown): void {
+    const r = initResult as {
+      _meta?: Record<string, unknown> | null;
+      meta?: Record<string, unknown> | null;
+    };
+    const meta = r._meta ?? r.meta;
+    if (!meta || typeof meta !== "object") {
+      return;
+    }
+    const modelState = meta.modelState ?? meta.model_state;
+    if (modelState) {
+      const parsed = parseSessionModelState(modelState);
+      this.applyCatalogSnapshot(parsed, { preferLarger: true });
+      return;
+    }
+    // Some builds only put sessionConfig-shaped options on initialize.
+    const parsed = parseModelsFromSessionMeta(meta as Record<string, unknown>);
+    this.applyCatalogSnapshot(parsed, { preferLarger: true });
+  }
+
+  /**
+   * Handle live catalog push from the agent (after remote /v1/models fetch).
+   * Wire: `_x.ai/models/update` / `x.ai/models/update` with SessionModelState.
+   */
+  private handleModelsUpdateNotification(params: unknown): void {
+    const parsed = parseSessionModelState(params);
+    if (parsed.models.length === 0 && !parsed.currentModelId) {
+      logWarn("x.ai/models/update: empty catalog payload");
+      return;
+    }
+    // Preserve the user's current model when still available in the new catalog.
+    if (
+      this.currentModelId &&
+      parsed.models.some((m) => m.id === this.currentModelId)
+    ) {
+      parsed.currentModelId = this.currentModelId;
+      for (const m of parsed.models) {
+        m.selected = m.id === this.currentModelId;
+      }
+      const cur = parsed.models.find((m) => m.id === this.currentModelId);
+      if (cur?.reasoningEfforts?.length) {
+        // Keep session effort if still valid; else catalog default.
+        const keep =
+          this.currentEffortId &&
+          cur.reasoningEfforts.some((e) => e.id === this.currentEffortId)
+            ? this.currentEffortId
+            : cur.reasoningEffort || "";
+        parsed.currentEffortId = keep;
+        parsed.efforts = cur.reasoningEfforts.map((e) => ({
+          ...e,
+          selected: e.id === keep,
+        }));
+      }
+    }
+    this.applyCatalogSnapshot(parsed, { preferLarger: true });
+    logInfo(
+      `x.ai/models/update size=${this.models.length} current=${this.currentModelId}`,
+    );
+  }
+
+  private applyCatalogSnapshot(
+    parsed: {
+      models: GrokModelOption[];
+      currentModelId: string;
+      efforts: GrokEffortOption[];
+      currentEffortId: string;
+    },
+    opts?: { preferLarger?: boolean },
+  ): void {
+    if (parsed.models.length === 0 && !parsed.currentModelId) {
+      if (this.models.length === 0) {
+        const setting = getSettings().model;
+        if (setting) {
+          this.currentModelId = setting;
+          this.models = [{ id: setting, label: setting, selected: true }];
+          this.fireModelsChange();
+        }
+      }
+      return;
+    }
+
+    // Don't shrink a richer live catalog with a stale smaller snapshot
+    // (session/new often has only the default before remote fetch completes).
+    if (
+      opts?.preferLarger &&
+      this.models.length > parsed.models.length &&
+      parsed.models.length > 0 &&
+      parsed.models.every((m) => this.models.some((x) => x.id === m.id))
+    ) {
+      // Still update current + efforts if provided.
+      if (parsed.currentModelId) {
+        this.currentModelId = parsed.currentModelId;
+        for (const m of this.models) {
+          m.selected = m.id === this.currentModelId;
+        }
+      }
+      if (parsed.efforts.length > 0) {
+        this.efforts = parsed.efforts;
+        this.currentEffortId = parsed.currentEffortId;
+      } else {
+        this.syncEffortsFromCurrentModel();
+      }
+      this.fireModelsChange();
+      return;
+    }
+
+    this.models = parsed.models;
+    this.currentModelId =
+      parsed.currentModelId || this.currentModelId || getSettings().model;
+    for (const m of this.models) {
+      m.selected = m.id === this.currentModelId;
+    }
+    if (parsed.efforts.length > 0) {
+      this.efforts = parsed.efforts;
+      this.currentEffortId = parsed.currentEffortId;
+    } else {
+      this.syncEffortsFromCurrentModel(parsed.currentEffortId);
+    }
+    this.fireModelsChange();
+    logInfo(
+      `models catalog size=${this.models.length} current=${this.currentModelId || "(none)"} efforts=${this.efforts.length}`,
+    );
+  }
+
+  private syncEffortsFromCurrentModel(preferredEffort?: string): void {
+    const cur = this.models.find((m) => m.id === this.currentModelId);
+    if (!cur) {
+      this.efforts = [];
+      this.currentEffortId = "";
+      return;
+    }
+    const list = cur.reasoningEfforts ?? [];
+    const effortId =
+      preferredEffort ||
+      this.currentEffortId ||
+      cur.reasoningEffort ||
+      list.find((e) => e.selected)?.id ||
+      "";
+    this.efforts = list.map((e) => ({
+      ...e,
+      selected: e.id === effortId,
+    }));
+    this.currentEffortId = effortId;
+  }
+
+  private fireModelsChange(): void {
+    this._onModelsChange.fire(this.getModels());
   }
 
   private setState(state: AgentState): void {
@@ -572,6 +912,22 @@ export class AgentService implements vscode.Disposable {
       .onNotification(acp.methods.client.session.update, (ctx) => {
         this.onSessionUpdateNotify(ctx.params);
       })
+      // Live catalog refresh after remote /v1/models fetch (TUI listens too).
+      // Wire methods arrive `_`-prefixed from the leader; bare form also seen.
+      .onNotification(
+        "_x.ai/models/update",
+        (p: unknown) => p,
+        (ctx) => {
+          this.handleModelsUpdateNotification(ctx.params);
+        },
+      )
+      .onNotification(
+        "x.ai/models/update",
+        (p: unknown) => p,
+        (ctx) => {
+          this.handleModelsUpdateNotification(ctx.params);
+        },
+      )
       .connect(stream);
 
     this.connection = connection;
@@ -602,11 +958,16 @@ export class AgentService implements vscode.Disposable {
       `agent caps loadSession=${this.caps.loadSession} list=${this.caps.listSessions} resume=${this.caps.resumeSession}`,
     );
 
+    // Seed catalog from initialize `_meta.modelState` (TUI does the same)
+    // so the model picker is not empty while session/new is in flight.
+    this.ingestInitializeModelState(initResult);
+
     const cwd = resolveSessionCwd(settings);
     logInfo(`session/new cwd=${cwd}`);
     const session = await connection.agent.buildSession(cwd).start();
     this.session = session;
     this.permissions.resetSessionMemory();
+    this.ingestSessionModels(session);
     logInfo(`session/new ok sessionId=${session.sessionId}`);
 
     this.setState({
@@ -640,6 +1001,7 @@ export class AgentService implements vscode.Disposable {
 
   private onSessionUpdateNotify(params: SessionNotification): void {
     this.captureAvailableCommands(params);
+    this.captureConfigOptionUpdate(params);
     this._onSessionUpdate.fire(params);
     this.logUpdate(params);
   }
@@ -656,6 +1018,71 @@ export class AgentService implements vscode.Disposable {
     this.availableCommands = list;
     this._onAvailableCommands.fire(list);
     logInfo(`available_commands_update count=${list.length}`);
+  }
+
+  /** ACP standard config_option_update (if agent sends it). */
+  private captureConfigOptionUpdate(params: SessionNotification): void {
+    const update = params.update as {
+      sessionUpdate?: string;
+      configOptions?: Array<{
+        id?: string;
+        category?: string;
+        name?: string;
+        type?: string;
+        currentValue?: string | boolean;
+        options?: unknown;
+      }>;
+    };
+    if (update.sessionUpdate !== "config_option_update") {
+      return;
+    }
+    // Grok primarily uses custom sessionConfig shape; best-effort map.
+    const opts = update.configOptions ?? [];
+    const asSessionConfig = {
+      options: opts.flatMap((o) => {
+        if (o.category === "model" && o.type === "select") {
+          const select = o as {
+            currentValue?: string;
+            options?: Array<{ value?: string; name?: string } | { group?: string; options?: Array<{ value?: string; name?: string }> }>;
+          };
+          const rows: Array<{
+            id: string;
+            category: string;
+            label: string;
+            selected: boolean;
+          }> = [];
+          const pushOpt = (value?: string, name?: string) => {
+            if (!value) {
+              return;
+            }
+            rows.push({
+              id: value,
+              category: "model",
+              label: name || value,
+              selected: value === select.currentValue,
+            });
+          };
+          for (const item of select.options ?? []) {
+            if ("group" in item && item.options) {
+              for (const sub of item.options) {
+                pushOpt(sub.value, sub.name);
+              }
+            } else if ("value" in item) {
+              pushOpt(item.value, item.name);
+            }
+          }
+          return rows;
+        }
+        return [];
+      }),
+    };
+    if (asSessionConfig.options.length === 0) {
+      return;
+    }
+    const parsed = parseModelsFromSessionMeta({
+      "x.ai/sessionConfig": asSessionConfig,
+    });
+    this.applyCatalogSnapshot(parsed, { preferLarger: true });
   }
 
   private logUpdate(params: SessionNotification): void {
