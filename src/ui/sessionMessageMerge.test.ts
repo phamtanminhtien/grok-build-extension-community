@@ -1,11 +1,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  appendAssistantText,
   applyAgentMessageChunk,
+  applyToolEvent,
   applyUserMessageChunk,
+  assistantPlainText,
+  emptyAssistant,
   isStreamingTailUpdate,
   shouldApplyUserMessageChunk,
   shouldCloseAssistantOnUserChunk,
+  upsertAssistantTool,
   type MergeState,
 } from "./sessionMessageMerge.ts";
 
@@ -21,13 +26,7 @@ function liveStateWithOptimistic(question: string): MergeState {
     currentAssistantId: "asst-opt",
     messages: [
       { type: "user", id: "user-opt", text: question, chips: [] },
-      {
-        type: "assistant",
-        id: "asst-opt",
-        text: "",
-        thought: "",
-        tools: [],
-      },
+      emptyAssistant("asst-opt"),
     ],
   };
 }
@@ -57,7 +56,6 @@ describe("applyUserMessageChunk", () => {
     const state = liveStateWithOptimistic("Hello?");
     const next = applyUserMessageChunk(state, "Hello?", uidSeq());
     assert.equal(next, null);
-    // Original state untouched
     assert.equal(state.messages.length, 2);
     assert.equal(state.messages.filter((m) => m.type === "user").length, 1);
   });
@@ -83,15 +81,7 @@ describe("applyUserMessageChunk", () => {
       loadingHistory: true,
       currentUserId: undefined,
       currentAssistantId: "old-asst",
-      messages: [
-        {
-          type: "assistant",
-          id: "old-asst",
-          text: "prev",
-          thought: "",
-          tools: [],
-        },
-      ],
+      messages: [emptyAssistant("old-asst")],
     };
     state = applyUserMessageChunk(state, "Hel", uid)!;
     state = applyUserMessageChunk(state, "lo", uid)!;
@@ -103,6 +93,83 @@ describe("applyUserMessageChunk", () => {
   });
 });
 
+describe("timeline: text + tools in stream order", () => {
+  it("appends text into one segment until a tool splits the timeline", () => {
+    const msg = emptyAssistant("a1");
+    appendAssistantText(msg, "Hello ");
+    appendAssistantText(msg, "world");
+    assert.deepEqual(msg.items, [{ kind: "text", text: "Hello world" }]);
+
+    upsertAssistantTool(msg, {
+      id: "t1",
+      title: "Read file",
+      status: "pending",
+      kind: "read",
+      paths: ["/a.ts"],
+    });
+    appendAssistantText(msg, "Done.");
+
+    assert.equal(msg.items.length, 3);
+    assert.equal(msg.items[0]?.kind, "text");
+    assert.equal(msg.items[0]?.kind === "text" && msg.items[0].text, "Hello world");
+    assert.equal(msg.items[1]?.kind, "tool");
+    assert.equal(
+      msg.items[1]?.kind === "tool" && msg.items[1].tool.title,
+      "Read file",
+    );
+    assert.equal(msg.items[2]?.kind, "text");
+    assert.equal(msg.items[2]?.kind === "text" && msg.items[2].text, "Done.");
+    assert.equal(assistantPlainText(msg), "Hello worldDone.");
+  });
+
+  it("tool updates merge in place without moving timeline position", () => {
+    const msg = emptyAssistant("a1");
+    appendAssistantText(msg, "Before");
+    upsertAssistantTool(msg, {
+      id: "t1",
+      title: "Edit",
+      status: "in_progress",
+      paths: [],
+    });
+    appendAssistantText(msg, "After");
+    upsertAssistantTool(msg, {
+      id: "t1",
+      status: "completed",
+      paths: ["/x.ts"],
+    });
+
+    assert.equal(msg.items.length, 3);
+    assert.equal(msg.items[1]?.kind, "tool");
+    if (msg.items[1]?.kind === "tool") {
+      assert.equal(msg.items[1].tool.status, "completed");
+      assert.deepEqual(msg.items[1].tool.paths, ["/x.ts"]);
+      assert.equal(msg.items[1].tool.title, "Edit");
+    }
+    // Still between the two text segments
+    assert.equal(msg.items[0]?.kind, "text");
+    assert.equal(msg.items[2]?.kind, "text");
+  });
+
+  it("applyAgentMessageChunk + applyToolEvent preserve order", () => {
+    let state = liveStateWithOptimistic("Q?");
+    state = applyAgentMessageChunk(state, "Looking…", uidSeq(99));
+    state = applyToolEvent(
+      state,
+      { id: "tc1", title: "grep", status: "pending", kind: "search" },
+      uidSeq(100),
+    );
+    state = applyAgentMessageChunk(state, " Found it.", uidSeq(101));
+
+    const asst = state.messages.find((m) => m.type === "assistant");
+    assert.ok(asst && asst.type === "assistant");
+    assert.equal(asst.items.length, 3);
+    assert.equal(asst.items[0]?.kind, "text");
+    assert.equal(asst.items[1]?.kind, "tool");
+    assert.equal(asst.items[2]?.kind, "text");
+    assert.equal(assistantPlainText(asst), "Looking… Found it.");
+  });
+});
+
 describe("applyAgentMessageChunk", () => {
   it("streams into optimistic assistant without creating a second … bubble", () => {
     let state = liveStateWithOptimistic("Q?");
@@ -111,8 +178,7 @@ describe("applyAgentMessageChunk", () => {
     assert.equal(state.currentAssistantId, "asst-opt");
     const asst = state.messages[1];
     assert.ok(asst && asst.type === "assistant");
-    assert.equal(asst.text, "Ans");
-    // No second assistant
+    assert.equal(assistantPlainText(asst), "Ans");
     assert.equal(state.messages.filter((m) => m.type === "assistant").length, 1);
   });
 
@@ -132,14 +198,10 @@ describe("applyAgentMessageChunk", () => {
     assert.equal(state.currentUserId, undefined);
     const asst = state.messages[1];
     assert.ok(asst && asst.type === "assistant");
-    assert.equal(asst.text, "A");
+    assert.equal(assistantPlainText(asst), "A");
   });
 
   it("regression: live user echo + agent stream must not duplicate Q and …", () => {
-    // Reproduce the bug sequence before the fix:
-    // 1) optimistic user + empty assistant
-    // 2) user_message_chunk (must NOT create second user / clear assistant)
-    // 3) agent_message_chunk appends to same assistant
     let state = liveStateWithOptimistic("Câu hỏi?");
     const afterUser = applyUserMessageChunk(state, "Câu hỏi?", uidSeq());
     assert.equal(afterUser, null, "live user chunk must be ignored");
@@ -151,7 +213,7 @@ describe("applyAgentMessageChunk", () => {
     assert.equal(assistants.length, 1);
     assert.equal(users[0]?.type === "user" && users[0].text, "Câu hỏi?");
     assert.equal(
-      assistants[0]?.type === "assistant" && assistants[0].text,
+      assistants[0]?.type === "assistant" && assistantPlainText(assistants[0]),
       "Trả lời",
     );
   });

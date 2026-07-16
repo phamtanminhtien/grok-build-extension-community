@@ -19,7 +19,12 @@ import { logError } from "../log/output";
 import { renderMarkdownToSafeHtml } from "./markdown";
 import {
   applyAgentMessageChunk,
+  applyToolEvent,
   applyUserMessageChunk,
+  assistantPlainText,
+  emptyAssistant,
+  type AssistantItem,
+  type ToolCard,
 } from "./sessionMessageMerge";
 import type { DiffReviewService } from "../diff/diffReviewService";
 import { readTextFileHost } from "../agent/hostFs";
@@ -31,18 +36,16 @@ type UiMessage =
   | {
       type: "assistant";
       id: string;
-      text: string;
       thought: string;
-      tools: ToolCard[];
+      items: AssistantItem[];
     }
   | { type: "system"; id: string; text: string };
 
-interface ToolCard {
-  id: string;
-  title: string;
-  status: string;
-  kind?: string;
-  paths: string[];
+interface SerializedTimelineItem {
+  kind: "text" | "tool";
+  text?: string;
+  html?: string;
+  tool?: ToolCard;
 }
 
 interface SerializedMessage {
@@ -53,7 +56,8 @@ interface SerializedMessage {
   thought?: string;
   thoughtHtml?: string;
   chips?: string[];
-  tools?: ToolCard[];
+  /** Ordered timeline: text segments interleaved with tool calls. */
+  items?: SerializedTimelineItem[];
 }
 
 /**
@@ -433,7 +437,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           .filter((m) => m.type === "user" || m.type === "assistant")
           .map((m) => ({
             role: m.type,
-            text: m.type === "assistant" ? m.text : m.text,
+            text:
+              m.type === "assistant" ? assistantPlainText(m) : m.text,
           })),
       clearUi: () => {
         this.messages = [];
@@ -473,13 +478,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     const asstId = uid();
     this.currentAssistantId = asstId;
-    this.messages.push({
-      type: "assistant",
-      id: asstId,
-      text: "",
-      thought: "",
-      tools: [],
-    });
+    this.messages.push(emptyAssistant(asstId));
     this.scheduleMessagesPost(true);
     this.post({ type: "busy", busy: true });
 
@@ -580,91 +579,77 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     // Thought / tool updates still need an open assistant bubble.
-    this.currentUserId = undefined;
+    if (kind === "tool_call" || kind === "tool_call_update") {
+      const paths =
+        update.locations?.map((l) => l.path).filter(Boolean) ?? [];
+      const next = applyToolEvent(
+        {
+          messages: this.messages,
+          currentUserId: this.currentUserId,
+          currentAssistantId: this.currentAssistantId,
+          loadingHistory: this.loadingHistory,
+        },
+        {
+          id: update.toolCallId,
+          title: update.title ?? undefined,
+          status: update.status ?? undefined,
+          kind: update.kind ?? undefined,
+          paths,
+        },
+        uid,
+      );
+      this.messages = next.messages as UiMessage[];
+      this.currentUserId = next.currentUserId;
+      this.currentAssistantId = next.currentAssistantId;
 
+      if (!this.loadingHistory) {
+        const title =
+          update.title ??
+          (kind === "tool_call_update"
+            ? (this.findToolCard(update.toolCallId)?.title ?? "")
+            : "");
+        void this.maybeSnapshotToolPaths(
+          update.toolCallId,
+          title,
+          update.kind ?? this.findToolCard(update.toolCallId)?.kind,
+          paths,
+        );
+      }
+      this.scheduleMessagesPost();
+      return;
+    }
+
+    // agent_thought_chunk
+    this.currentUserId = undefined;
     if (!this.currentAssistantId) {
       const asstId = uid();
       this.currentAssistantId = asstId;
-      this.messages.push({
-        type: "assistant",
-        id: asstId,
-        text: "",
-        thought: "",
-        tools: [],
-      });
+      this.messages.push(emptyAssistant(asstId));
     }
-
     const msg = this.messages.find(
       (m) => m.type === "assistant" && m.id === this.currentAssistantId,
     );
     if (!msg || msg.type !== "assistant") {
       return;
     }
-
-    switch (kind) {
-      case "agent_thought_chunk":
-        if (showThoughts && update.content.type === "text") {
-          msg.thought += update.content.text;
-        }
-        break;
-      case "tool_call": {
-        const paths =
-          update.locations?.map((l) => l.path).filter(Boolean) ?? [];
-        msg.tools.push({
-          id: update.toolCallId,
-          title: update.title ?? update.toolCallId,
-          status: update.status ?? "pending",
-          kind: update.kind ?? undefined,
-          paths,
-        });
-        if (!this.loadingHistory) {
-          void this.maybeSnapshotToolPaths(
-            update.toolCallId,
-            update.title ?? "",
-            update.kind,
-            paths,
-          );
-        }
-        break;
-      }
-      case "tool_call_update": {
-        const t = msg.tools.find((x) => x.id === update.toolCallId);
-        const paths =
-          update.locations?.map((l) => l.path).filter(Boolean) ?? [];
-        if (t) {
-          if (update.status) {
-            t.status = update.status;
-          }
-          if (update.title) {
-            t.title = update.title;
-          }
-          if (paths.length) {
-            t.paths = paths;
-          }
-        } else {
-          msg.tools.push({
-            id: update.toolCallId,
-            title: update.title ?? update.toolCallId,
-            status: update.status ?? "pending",
-            kind: update.kind ?? undefined,
-            paths,
-          });
-        }
-        if (paths.length && !this.loadingHistory) {
-          void this.maybeSnapshotToolPaths(
-            update.toolCallId,
-            update.title ?? t?.title ?? "",
-            update.kind ?? t?.kind,
-            paths,
-          );
-        }
-        break;
-      }
-      default:
-        break;
+    if (showThoughts && update.content.type === "text") {
+      msg.thought += update.content.text;
     }
-
     this.scheduleMessagesPost();
+  }
+
+  private findToolCard(toolCallId: string): ToolCard | undefined {
+    for (const m of this.messages) {
+      if (m.type !== "assistant") {
+        continue;
+      }
+      for (const item of m.items) {
+        if (item.kind === "tool" && item.tool.id === toolCallId) {
+          return item.tool;
+        }
+      }
+    }
+    return undefined;
   }
 
   private async maybeSnapshotToolPaths(
@@ -711,8 +696,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private serializeMessages(messages: UiMessage[]): SerializedMessage[] {
     const liveIds = new Set(messages.map((m) => m.id));
     for (const id of this.mdCache.keys()) {
-      // cacheId is either message id or `${id}:thought`
-      const base = id.endsWith(":thought") ? id.slice(0, -":thought".length) : id;
+      // cacheId is message id, `${id}:thought`, or `${id}:tN`
+      const base = id.includes(":") ? id.slice(0, id.indexOf(":")) : id;
       if (!liveIds.has(base)) {
         this.mdCache.delete(id);
       }
@@ -720,16 +705,31 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     return messages.map((m) => {
       if (m.type === "assistant") {
+        const items: SerializedTimelineItem[] = m.items.map((item, i) => {
+          if (item.kind === "text") {
+            return {
+              kind: "text",
+              text: item.text,
+              html: this.cachedMarkdown(`${m.id}:t${i}`, item.text || ""),
+            };
+          }
+          return { kind: "tool", tool: item.tool };
+        });
+        const plain = assistantPlainText(m);
         return {
           type: m.type,
           id: m.id,
-          text: m.text,
-          html: this.cachedMarkdown(m.id, m.text || ""),
+          text: plain,
+          // Legacy single-bubble fields kept empty when timeline has tools;
+          // webview prefers `items` when present.
+          html: items.some((it) => it.kind === "tool")
+            ? ""
+            : this.cachedMarkdown(`${m.id}:t0`, plain || ""),
           thought: m.thought,
           thoughtHtml: m.thought
             ? this.cachedMarkdown(`${m.id}:thought`, m.thought)
             : "",
-          tools: m.tools,
+          items,
         };
       }
       if (m.type === "user") {
@@ -1154,38 +1154,93 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     margin: 8px 0 0; max-height: 160px; overflow: auto; opacity: 0.9;
     padding-top: 6px;
   }
-  .tools { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-  .tool {
+  /* Assistant timeline: text bubbles + tool rows in stream order */
+  .assistant-timeline {
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  /* Single-line tool row — no card background; expand on click */
+  .tool-row {
+    margin: 0;
     border: none;
-    border-radius: var(--radius-sm); padding: 8px 10px;
+    background: transparent;
+    padding: 0;
     font-size: 12px;
-    background: color-mix(in srgb, var(--fg) 6%, var(--input-bg));
-    transition: background var(--ease);
+    color: var(--muted);
   }
-  .tool:hover {
-    background: color-mix(in srgb, var(--list-hover) 70%, transparent);
+  .tool-row > summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 0;
+    min-height: 20px;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
   }
-  .tool .row { display: flex; gap: 8px; align-items: center; }
-  .tool .tool-icon {
-    width: 22px; height: 22px; border-radius: 7px;
-    display: inline-flex; align-items: center; justify-content: center;
-    background: color-mix(in srgb, var(--muted) 12%, transparent);
+  .tool-row > summary::-webkit-details-marker { display: none; }
+  .tool-row .tool-chevron {
     flex-shrink: 0;
+    opacity: 0.45;
+    font-size: 12px;
+    transition: transform 0.12s ease;
   }
-  .tool .status {
-    color: var(--muted); margin-left: auto; text-transform: uppercase;
-    font-size: 10px; font-weight: 600; letter-spacing: 0.03em;
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 2px 8px; border-radius: var(--radius-pill);
-    background: color-mix(in srgb, var(--muted) 10%, transparent);
+  .tool-row[open] > summary .tool-chevron {
+    transform: rotate(90deg);
   }
-  .tool .paths a, .tool .paths button.link {
+  .tool-row .tool-ico {
+    flex-shrink: 0;
+    opacity: 0.75;
+    display: inline-flex;
+  }
+  .tool-row .tool-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+  }
+  .tool-row .tool-status {
+    flex-shrink: 0;
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    opacity: 0.8;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .tool-row .tool-detail {
+    padding: 2px 0 4px 22px;
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .tool-row .tool-detail .paths {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    align-items: center;
+  }
+  .tool-row .tool-detail a,
+  .tool-row .tool-detail button.link {
     color: var(--link); cursor: pointer; text-decoration: none;
-    display: inline-flex; align-items: center; gap: 4px; margin-top: 6px;
-    margin-right: 10px; background: none; border: none; padding: 2px 0;
-    font: inherit; border-radius: 4px;
+    display: inline-flex; align-items: center; gap: 4px;
+    background: none; border: none; padding: 0;
+    font: inherit;
   }
-  .tool .paths a:hover, .tool .paths button.link:hover { text-decoration: underline; }
+  .tool-row .tool-detail a:hover,
+  .tool-row .tool-detail button.link:hover { text-decoration: underline; }
+  .tool-row .tool-meta {
+    opacity: 0.75;
+  }
 
   /* ── Empty state ── */
   #empty {
@@ -1858,43 +1913,119 @@ function attachCopyButtons(root) {
   });
 }
 
-function fillAssistantBubble(b, m) {
-  if (m.html) {
-    b.innerHTML = m.html || (m.tools && m.tools.length ? '' : '…');
+function fillTextBubble(b, text, html) {
+  if (html) {
+    b.innerHTML = html;
     attachCopyButtons(b);
+  } else if (text) {
+    b.textContent = text;
   } else {
-    b.textContent = m.text || (m.tools && m.tools.length ? '' : '…');
+    b.textContent = '…';
   }
 }
 
-function renderToolsEl(m) {
-  if (!m.tools || !m.tools.length) return null;
-  const tools = document.createElement('div');
-  tools.className = 'tools';
-  for (const t of m.tools) {
-    const card = document.createElement('div');
-    card.className = 'tool';
-    let paths = '';
-    if (t.paths && t.paths.length) {
-      paths = '<div class="paths">' + t.paths.map(p => {
-        const isEdit = /edit|write|patch|replace|create.?file|search_replace|apply/i.test(
-          (t.kind || '') + ' ' + (t.title || '')
-        );
-        return '<a data-path="' + esc(p) + '" href="#">' + icon('file') + esc(p) + '</a>' +
-          (isEdit
-            ? '<button type="button" class="link" data-diff="' + esc(p) + '">' + icon('file-diff') + ' Diff</button>'
-            : '');
-      }).join('') + '</div>';
-    }
-    card.innerHTML =
-      '<div class="row">' +
-        '<span class="tool-icon">' + icon(toolIconName(t)) + '</span>' +
-        '<span>' + esc(t.title) + '</span>' +
-        '<span class="status">' + statusIcon(t.status) + esc(t.status) + '</span>' +
-      '</div>' + paths;
-    tools.appendChild(card);
+function renderToolRow(t, open) {
+  const d = document.createElement('details');
+  d.className = 'tool-row';
+  d.dataset.toolId = t.id || '';
+  if (open) d.open = true;
+  const summary = document.createElement('summary');
+  summary.innerHTML =
+    '<span class="tool-chevron">' + icon('chevron-right') + '</span>' +
+    '<span class="tool-ico">' + icon(toolIconName(t)) + '</span>' +
+    '<span class="tool-title">' + esc(t.title || t.id || 'tool') + '</span>' +
+    '<span class="tool-status">' + statusIcon(t.status) + esc(t.status || '') + '</span>';
+  d.appendChild(summary);
+
+  const detail = document.createElement('div');
+  detail.className = 'tool-detail';
+  const metaBits = [];
+  if (t.kind) metaBits.push(esc(t.kind));
+  if (t.id) metaBits.push('<span class="tool-meta">' + esc(t.id) + '</span>');
+  if (metaBits.length) {
+    const meta = document.createElement('div');
+    meta.innerHTML = metaBits.join(' · ');
+    detail.appendChild(meta);
   }
-  return tools;
+  if (t.paths && t.paths.length) {
+    const paths = document.createElement('div');
+    paths.className = 'paths';
+    paths.innerHTML = t.paths.map(p => {
+      const isEdit = /edit|write|patch|replace|create.?file|search_replace|apply/i.test(
+        (t.kind || '') + ' ' + (t.title || '')
+      );
+      return '<a data-path="' + esc(p) + '" href="#">' + icon('file') + esc(p) + '</a>' +
+        (isEdit
+          ? '<button type="button" class="link" data-diff="' + esc(p) + '">' + icon('file-diff') + ' Diff</button>'
+          : '');
+    }).join('');
+    detail.appendChild(paths);
+  } else if (!metaBits.length) {
+    const empty = document.createElement('div');
+    empty.className = 'tool-meta';
+    empty.textContent = 'No extra details';
+    detail.appendChild(empty);
+  }
+  d.appendChild(detail);
+  return d;
+}
+
+/** Build timeline nodes (text bubbles + tool rows) in stream order. */
+function renderAssistantTimeline(m, openToolIds) {
+  const timeline = document.createElement('div');
+  timeline.className = 'assistant-timeline';
+  const items = Array.isArray(m.items) ? m.items : null;
+
+  if (items && items.length) {
+    let hasVisible = false;
+    for (const item of items) {
+      if (item.kind === 'text') {
+        const text = item.text || '';
+        const html = item.html || '';
+        if (!text && !html) continue;
+        hasVisible = true;
+        const b = document.createElement('div');
+        b.className = 'bubble md';
+        fillTextBubble(b, text, html);
+        timeline.appendChild(b);
+      } else if (item.kind === 'tool' && item.tool) {
+        hasVisible = true;
+        const open = openToolIds && openToolIds.has(item.tool.id);
+        timeline.appendChild(renderToolRow(item.tool, open));
+      }
+    }
+    if (!hasVisible) {
+      const b = document.createElement('div');
+      b.className = 'bubble md';
+      b.textContent = '…';
+      timeline.appendChild(b);
+    }
+    return timeline;
+  }
+
+  // Legacy fallback (no items[]): single bubble + tools at end
+  const hasTools = m.tools && m.tools.length;
+  const b = document.createElement('div');
+  b.className = 'bubble md';
+  if (m.html || m.text) fillTextBubble(b, m.text, m.html);
+  else if (!hasTools) b.textContent = '…';
+  if (m.html || m.text || !hasTools) timeline.appendChild(b);
+  if (hasTools) {
+    for (const t of m.tools) {
+      const open = openToolIds && openToolIds.has(t.id);
+      timeline.appendChild(renderToolRow(t, open));
+    }
+  }
+  return timeline;
+}
+
+function collectOpenToolIds(wrap) {
+  const ids = new Set();
+  wrap.querySelectorAll('details.tool-row[open]').forEach((el) => {
+    const id = el.dataset.toolId;
+    if (id) ids.add(id);
+  });
+  return ids;
 }
 
 function renderOneMessage(m) {
@@ -1929,12 +2060,7 @@ function renderOneMessage(m) {
       d.appendChild(body);
       wrap.appendChild(d);
     }
-    const b = document.createElement('div');
-    b.className = 'bubble md';
-    fillAssistantBubble(b, m);
-    wrap.appendChild(b);
-    const tools = renderToolsEl(m);
-    if (tools) wrap.appendChild(tools);
+    wrap.appendChild(renderAssistantTimeline(m, null));
   } else {
     const b = document.createElement('div');
     b.className = 'bubble';
@@ -1969,6 +2095,8 @@ function patchLastAssistant(m) {
   }
   if (!wrap) return false;
 
+  const openIds = collectOpenToolIds(wrap);
+
   // Thought block
   let thought = wrap.querySelector(':scope > details.thought');
   if (m.thought) {
@@ -1982,8 +2110,7 @@ function patchLastAssistant(m) {
       const body = document.createElement('div');
       body.className = 'thought-body';
       thought.appendChild(body);
-      const bubble = wrap.querySelector(':scope > .bubble.md');
-      wrap.insertBefore(thought, bubble || wrap.firstChild);
+      wrap.insertBefore(thought, wrap.firstChild);
     }
     const body = thought.querySelector('.thought-body');
     if (body) {
@@ -1992,18 +2119,10 @@ function patchLastAssistant(m) {
     }
   }
 
-  let b = wrap.querySelector(':scope > .bubble.md');
-  if (!b) {
-    b = document.createElement('div');
-    b.className = 'bubble md';
-    wrap.appendChild(b);
-  }
-  fillAssistantBubble(b, m);
-
-  const oldTools = wrap.querySelector(':scope > .tools');
-  if (oldTools) oldTools.remove();
-  const tools = renderToolsEl(m);
-  if (tools) wrap.appendChild(tools);
+  const oldTimeline = wrap.querySelector(':scope > .assistant-timeline');
+  const nextTimeline = renderAssistantTimeline(m, openIds);
+  if (oldTimeline) oldTimeline.replaceWith(nextTimeline);
+  else wrap.appendChild(nextTimeline);
   return true;
 }
 
