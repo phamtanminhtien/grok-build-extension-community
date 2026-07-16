@@ -17,6 +17,10 @@ import {
 import { getSettings } from "../config/settings";
 import { logError } from "../log/output";
 import { renderMarkdownToSafeHtml } from "./markdown";
+import {
+  applyAgentMessageChunk,
+  applyUserMessageChunk,
+} from "./sessionMessageMerge";
 import type { DiffReviewService } from "../diff/diffReviewService";
 import { readTextFileHost } from "../agent/hostFs";
 import { dispatchSlash } from "../slash/dispatch";
@@ -71,6 +75,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   /** True while ACP session/load is replaying history into the UI. */
   private loadingHistory = false;
   private currentUserId: string | undefined;
+  /** Avoid re-parsing markdown for messages whose source text has not changed. */
+  private readonly mdCache = new Map<string, { key: string; html: string }>();
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -226,6 +232,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.messages = [];
     this.currentAssistantId = undefined;
     this.currentUserId = undefined;
+    this.mdCache.clear();
     this.scheduleMessagesPost(true);
   }
 
@@ -237,6 +244,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.messages = [];
     this.currentAssistantId = undefined;
     this.currentUserId = undefined;
+    this.mdCache.clear();
     this.diffs?.clear();
     const label = title?.trim() || "session";
     this.pushSystem(`Loading ${label}…`);
@@ -430,6 +438,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       clearUi: () => {
         this.messages = [];
         this.currentAssistantId = undefined;
+        this.mdCache.clear();
         this.scheduleMessagesPost(true);
       },
       newSession: async () => {
@@ -493,6 +502,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       await this.agent.newSession();
       this.messages = [];
       this.currentAssistantId = undefined;
+      this.mdCache.clear();
       this.diffs?.clear();
       this.pushSystem("New session");
       this.scheduleMessagesPost(true);
@@ -506,20 +516,28 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const showThoughts = getSettings().showThoughts;
     const kind = update.sessionUpdate;
 
-    // History replay + live: user turns close the current assistant bubble
+    // History replay only: live turns already pushed the user bubble in
+    // handleSend. Applying agent user_message_chunk again duplicates the
+    // question and clears currentAssistantId, leaving a leftover "…" bubble.
     if (kind === "user_message_chunk") {
-      this.currentAssistantId = undefined;
-      if (!this.currentUserId) {
-        const id = uid();
-        this.currentUserId = id;
-        this.messages.push({ type: "user", id, text: "", chips: [] });
-      }
-      const user = this.messages.find(
-        (m) => m.type === "user" && m.id === this.currentUserId,
+      const text =
+        update.content.type === "text" ? update.content.text : "";
+      const next = applyUserMessageChunk(
+        {
+          messages: this.messages,
+          currentUserId: this.currentUserId,
+          currentAssistantId: this.currentAssistantId,
+          loadingHistory: this.loadingHistory,
+        },
+        text,
+        uid,
       );
-      if (user && user.type === "user" && update.content.type === "text") {
-        user.text += update.content.text;
+      if (!next) {
+        return;
       }
+      this.messages = next.messages as UiMessage[];
+      this.currentUserId = next.currentUserId;
+      this.currentAssistantId = next.currentAssistantId;
       this.scheduleMessagesPost();
       return;
     }
@@ -541,7 +559,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    // Starting assistant output ends user chunk accumulation
+    if (kind === "agent_message_chunk") {
+      const text =
+        update.content.type === "text" ? update.content.text : "";
+      const next = applyAgentMessageChunk(
+        {
+          messages: this.messages,
+          currentUserId: this.currentUserId,
+          currentAssistantId: this.currentAssistantId,
+          loadingHistory: this.loadingHistory,
+        },
+        text,
+        uid,
+      );
+      this.messages = next.messages as UiMessage[];
+      this.currentUserId = next.currentUserId;
+      this.currentAssistantId = next.currentAssistantId;
+      this.scheduleMessagesPost();
+      return;
+    }
+
+    // Thought / tool updates still need an open assistant bubble.
     this.currentUserId = undefined;
 
     if (!this.currentAssistantId) {
@@ -564,11 +602,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
 
     switch (kind) {
-      case "agent_message_chunk":
-        if (update.content.type === "text") {
-          msg.text += update.content.text;
-        }
-        break;
       case "agent_thought_chunk":
         if (showThoughts && update.content.type === "text") {
           msg.thought += update.content.text;
@@ -664,17 +697,37 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.scheduleMessagesPost(true);
   }
 
+  private cachedMarkdown(cacheId: string, source: string): string {
+    const key = source || "";
+    const hit = this.mdCache.get(cacheId);
+    if (hit && hit.key === key) {
+      return hit.html;
+    }
+    const html = renderMarkdownToSafeHtml(key);
+    this.mdCache.set(cacheId, { key, html });
+    return html;
+  }
+
   private serializeMessages(messages: UiMessage[]): SerializedMessage[] {
+    const liveIds = new Set(messages.map((m) => m.id));
+    for (const id of this.mdCache.keys()) {
+      // cacheId is either message id or `${id}:thought`
+      const base = id.endsWith(":thought") ? id.slice(0, -":thought".length) : id;
+      if (!liveIds.has(base)) {
+        this.mdCache.delete(id);
+      }
+    }
+
     return messages.map((m) => {
       if (m.type === "assistant") {
         return {
           type: m.type,
           id: m.id,
           text: m.text,
-          html: renderMarkdownToSafeHtml(m.text || ""),
+          html: this.cachedMarkdown(m.id, m.text || ""),
           thought: m.thought,
           thoughtHtml: m.thought
-            ? renderMarkdownToSafeHtml(m.thought)
+            ? this.cachedMarkdown(`${m.id}:thought`, m.thought)
             : "",
           tools: m.tools,
         };
@@ -1788,9 +1841,66 @@ function shouldStickToBottom(scrollTop, scrollHeight, viewportHeight, thresholdP
   return scrollTop + viewportHeight >= scrollHeight - thresholdPx;
 }
 
+function attachCopyButtons(root) {
+  root.querySelectorAll('pre').forEach((pre) => {
+    if (pre.querySelector('.copy-code')) return;
+    const btn = document.createElement('button');
+    btn.className = 'copy-code';
+    btn.type = 'button';
+    btn.textContent = 'Copy';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const text = pre.innerText.replace(/^Copy\\n?/, '');
+      navigator.clipboard.writeText(text);
+    });
+    pre.style.position = 'relative';
+    pre.prepend(btn);
+  });
+}
+
+function fillAssistantBubble(b, m) {
+  if (m.html) {
+    b.innerHTML = m.html || (m.tools && m.tools.length ? '' : '…');
+    attachCopyButtons(b);
+  } else {
+    b.textContent = m.text || (m.tools && m.tools.length ? '' : '…');
+  }
+}
+
+function renderToolsEl(m) {
+  if (!m.tools || !m.tools.length) return null;
+  const tools = document.createElement('div');
+  tools.className = 'tools';
+  for (const t of m.tools) {
+    const card = document.createElement('div');
+    card.className = 'tool';
+    let paths = '';
+    if (t.paths && t.paths.length) {
+      paths = '<div class="paths">' + t.paths.map(p => {
+        const isEdit = /edit|write|patch|replace|create.?file|search_replace|apply/i.test(
+          (t.kind || '') + ' ' + (t.title || '')
+        );
+        return '<a data-path="' + esc(p) + '" href="#">' + icon('file') + esc(p) + '</a>' +
+          (isEdit
+            ? '<button type="button" class="link" data-diff="' + esc(p) + '">' + icon('file-diff') + ' Diff</button>'
+            : '');
+      }).join('') + '</div>';
+    }
+    card.innerHTML =
+      '<div class="row">' +
+        '<span class="tool-icon">' + icon(toolIconName(t)) + '</span>' +
+        '<span>' + esc(t.title) + '</span>' +
+        '<span class="status">' + statusIcon(t.status) + esc(t.status) + '</span>' +
+      '</div>' + paths;
+    tools.appendChild(card);
+  }
+  return tools;
+}
+
 function renderOneMessage(m) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + m.type;
+  wrap.dataset.msgId = m.id || '';
   if (m.type === 'user') {
     if (m.chips && m.chips.length) {
       const chips = document.createElement('div');
@@ -1821,54 +1931,10 @@ function renderOneMessage(m) {
     }
     const b = document.createElement('div');
     b.className = 'bubble md';
-    if (m.html) {
-      b.innerHTML = m.html || (m.tools && m.tools.length ? '' : '…');
-      b.querySelectorAll('pre').forEach((pre) => {
-        if (pre.querySelector('.copy-code')) return;
-        const btn = document.createElement('button');
-        btn.className = 'copy-code';
-        btn.type = 'button';
-        btn.textContent = 'Copy';
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const text = pre.innerText.replace(/^Copy\\n?/, '');
-          navigator.clipboard.writeText(text);
-        });
-        pre.style.position = 'relative';
-        pre.prepend(btn);
-      });
-    } else {
-      b.textContent = m.text || (m.tools && m.tools.length ? '' : '…');
-    }
+    fillAssistantBubble(b, m);
     wrap.appendChild(b);
-    if (m.tools && m.tools.length) {
-      const tools = document.createElement('div');
-      tools.className = 'tools';
-      for (const t of m.tools) {
-        const card = document.createElement('div');
-        card.className = 'tool';
-        let paths = '';
-        if (t.paths && t.paths.length) {
-          paths = '<div class="paths">' + t.paths.map(p => {
-            const isEdit = /edit|write|patch|replace|create.?file|search_replace|apply/i.test(
-              (t.kind || '') + ' ' + (t.title || '')
-            );
-            return '<a data-path="' + esc(p) + '" href="#">' + icon('file') + esc(p) + '</a>' +
-              (isEdit
-                ? '<button type="button" class="link" data-diff="' + esc(p) + '">' + icon('file-diff') + ' Diff</button>'
-                : '');
-          }).join('') + '</div>';
-        }
-        card.innerHTML =
-          '<div class="row">' +
-            '<span class="tool-icon">' + icon(toolIconName(t)) + '</span>' +
-            '<span>' + esc(t.title) + '</span>' +
-            '<span class="status">' + statusIcon(t.status) + esc(t.status) + '</span>' +
-          '</div>' + paths;
-        tools.appendChild(card);
-      }
-      wrap.appendChild(tools);
-    }
+    const tools = renderToolsEl(m);
+    if (tools) wrap.appendChild(tools);
   } else {
     const b = document.createElement('div');
     b.className = 'bubble';
@@ -1879,11 +1945,90 @@ function renderOneMessage(m) {
   return wrap;
 }
 
+/** Same length + same prefix ids; only last assistant streams — patch that node. */
+function isStreamingTailUpdate(prev, next) {
+  if (!next.length || prev.length !== next.length) return false;
+  const last = next[next.length - 1];
+  if (!last || last.type !== 'assistant') return false;
+  for (let i = 0; i < next.length - 1; i++) {
+    const a = prev[i], b = next[i];
+    if (!a || !b || a.id !== b.id || a.type !== b.type) return false;
+  }
+  const prevLast = prev[prev.length - 1];
+  return !!(prevLast && prevLast.id === last.id && prevLast.type === 'assistant');
+}
+
+function patchLastAssistant(m) {
+  // Prefer data-msg-id; fall back to last .msg.assistant in the list.
+  let wrap = m.id
+    ? messagesEl.querySelector('.msg.assistant[data-msg-id="' + CSS.escape(m.id) + '"]')
+    : null;
+  if (!wrap) {
+    const nodes = messagesEl.querySelectorAll('.msg.assistant');
+    wrap = nodes.length ? nodes[nodes.length - 1] : null;
+  }
+  if (!wrap) return false;
+
+  // Thought block
+  let thought = wrap.querySelector(':scope > details.thought');
+  if (m.thought) {
+    if (!thought) {
+      thought = document.createElement('details');
+      thought.className = 'thought';
+      thought.open = false;
+      const summary = document.createElement('summary');
+      summary.innerHTML = icon('brain') + ' Thinking';
+      thought.appendChild(summary);
+      const body = document.createElement('div');
+      body.className = 'thought-body';
+      thought.appendChild(body);
+      const bubble = wrap.querySelector(':scope > .bubble.md');
+      wrap.insertBefore(thought, bubble || wrap.firstChild);
+    }
+    const body = thought.querySelector('.thought-body');
+    if (body) {
+      if (m.thoughtHtml) body.innerHTML = m.thoughtHtml;
+      else body.textContent = m.thought;
+    }
+  }
+
+  let b = wrap.querySelector(':scope > .bubble.md');
+  if (!b) {
+    b = document.createElement('div');
+    b.className = 'bubble md';
+    wrap.appendChild(b);
+  }
+  fillAssistantBubble(b, m);
+
+  const oldTools = wrap.querySelector(':scope > .tools');
+  if (oldTools) oldTools.remove();
+  const tools = renderToolsEl(m);
+  if (tools) wrap.appendChild(tools);
+  return true;
+}
+
 function renderMessages(messages) {
-  allMessages = messages || [];
+  const next = messages || [];
   const stick = shouldStickToBottom(
     messagesEl.scrollTop, messagesEl.scrollHeight, messagesEl.clientHeight
   );
+
+  // Streaming fast path: only the last assistant bubble changed — avoid wiping
+  // the whole list (main source of UI jank / flicker while tokens arrive).
+  if (
+    allMessages.length > 0 &&
+    isStreamingTailUpdate(allMessages, next) &&
+    allMessages.length <= VIRT_THRESHOLD
+  ) {
+    allMessages = next;
+    emptyEl.hidden = true;
+    if (patchLastAssistant(next[next.length - 1])) {
+      if (stick) messagesEl.scrollTop = messagesEl.scrollHeight;
+      return;
+    }
+  }
+
+  allMessages = next;
   emptyEl.hidden = allMessages.length > 0;
   messagesEl.innerHTML = '';
 
