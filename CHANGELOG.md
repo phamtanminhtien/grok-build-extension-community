@@ -2,6 +2,13 @@
 
 All notable changes to **Grok Build - Community** are documented in this file.
 
+## [0.3.3](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.2...v0.3.3) (2026-07-16)
+
+
+### Features
+
+* update display name in README and package.json to "Grok Build Community Edition" ([bf2b7bd](https://github.com/phamtanminhtien/grok-build-extension-community/commit/bf2b7bd0fbb5b671a88b5711b7788cb5556f5019))
+
 ## [0.3.2](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.1...v0.3.2) (2026-07-16)
 
 
