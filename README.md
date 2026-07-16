@@ -95,23 +95,26 @@ npm run package          # local .vsix (grok-build-community-<version>.vsix)
 # npx ovsx publish grok-build-community-<version>.vsix   # Open VSX (needs OVSX_PAT)
 ```
 
-**Automated release (GitHub Actions):**
+**Automated release ([release-please](https://github.com/googleapis/release-please)):**
 
-> **Release does not run on every push to `main`.** It only starts when you push a version tag `v*` or click **Actions → Release → Run workflow**.
+Flow on every push to `main`:
 
-1. Bump `version` in `package.json` and update `CHANGELOG.md`
-2. Commit to `main`, then tag and push the tag:
-   ```bash
-   git tag v0.3.1
-   git push origin v0.3.1
-   ```
-3. Workflow **Release** packages the VSIX, creates a GitHub Release, and (if secrets are set) publishes to:
+1. **Release Please** opens/updates a **Release PR** (version bump + `CHANGELOG.md`) from [conventional commits](https://www.conventionalcommits.org/)
+2. You **merge** that PR
+3. release-please creates tag `vX.Y.Z` + GitHub Release
+4. Workflow **Release** packages the VSIX and (if secrets are set) publishes to:
    - [VS Code Marketplace](https://marketplace.visualstudio.com/) (`vsce`)
    - [Open VSX](https://open-vsx.org/) (`ovsx`)
 
-Without `VSCE_PAT` / `OVSX_PAT`, marketplace steps are skipped; the GitHub Release + VSIX still publish.
+Use commit prefixes: `feat:`, `fix:`, `feat!:` / `BREAKING CHANGE:`.  
+`chore:` / `ci:` alone usually do **not** open a version bump.
 
-Or run **Actions → Release → Run workflow** (optional dry-run).
+Manual fallback:
+
+```bash
+git tag v0.3.2 && git push origin v0.3.2
+# or Actions → Release → Run workflow
+```
 
 **Secrets** (repo → Settings → Secrets → Actions):
 

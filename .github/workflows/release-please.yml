@@ -1,0 +1,60 @@
+name: Release Please
+
+# Google release-please: on every push to main, open/update a Release PR
+# from conventional commits. When that PR is merged, it tags + creates a
+# GitHub Release; the tag then triggers workflow "Release" (package VSIX /
+# Marketplace / Open VSX).
+#
+# Commit style (https://www.conventionalcommits.org/):
+#   feat: ...     → minor (or patch if pre-1.0 with bump-patch-for-minor-pre-major)
+#   fix: ...      → patch
+#   feat!: ...    → major
+#   chore: ...    → no version bump (hidden in changelog)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.major }}.${{ steps.release.outputs.minor }}.${{ steps.release.outputs.patch }}
+    steps:
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Release Please"
+            echo ""
+            echo "| Output | Value |"
+            echo "|--------|-------|"
+            echo "| release_created | \`${{ steps.release.outputs.release_created }}\` |"
+            echo "| tag_name | \`${{ steps.release.outputs.tag_name }}\` |"
+            echo "| pr | \`${{ steps.release.outputs.pr }}\` |"
+            echo ""
+            echo "If \`release_created\` is empty/false, release-please opened or updated a Release PR (or there are no releasable commits yet)."
+            echo "After you **merge** the Release PR, a \`v*\` tag is pushed and workflow **Release** packages + publishes the VSIX."
+          } >> "$GITHUB_STEP_SUMMARY"
