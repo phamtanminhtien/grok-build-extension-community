@@ -91,8 +91,8 @@ Full checklist: `docs/L0-manual-test.md`
 
 ```bash
 yarn package          # local .vsix (grok-build-community-edition-<version>.vsix)
+# yarn publish:ovsx   # Open VSX first (needs OVSX_PAT)
 # yarn publish:vsce   # VS Code Marketplace (needs VSCE_PAT / vsce login)
-# npx ovsx publish grok-build-community-edition-<version>.vsix   # Open VSX (needs OVSX_PAT)
 ```
 
 **Automated release ([release-please](https://github.com/googleapis/release-please)):**
@@ -103,8 +103,8 @@ Flow on every push to `main` (workflow **Release Please**):
 2. You **merge** that PR
 3. release-please creates tag `vX.Y.Z` + GitHub Release
 4. Same workflow’s **Publish** job packages the VSIX, attaches it to the release, and (if secrets are set) publishes to:
-   - [VS Code Marketplace](https://marketplace.visualstudio.com/) (`vsce`)
-   - [Open VSX](https://open-vsx.org/) (`ovsx`)
+   1. [Open VSX](https://open-vsx.org/) (`ovsx`) — first
+   2. [VS Code Marketplace](https://marketplace.visualstudio.com/) (`vsce`)
 
 Use commit prefixes: `feat:`, `fix:`, `feat!:` / `BREAKING CHANGE:`.  
 `chore:` / `ci:` alone usually do **not** open a version bump.
@@ -113,8 +113,8 @@ Use commit prefixes: `feat:`, `fix:`, `feat!:` / `BREAKING CHANGE:`.
 
 | Secret | Purpose |
 |--------|---------|
+| `OVSX_PAT` | Token from [open-vsx.org/user-settings/tokens](https://open-vsx.org/user-settings/tokens) (published first) |
 | `VSCE_PAT` | Azure DevOps PAT with **Marketplace** (Acquire + Publish) for publisher `tienpham` |
-| `OVSX_PAT` | Token from [open-vsx.org/user-settings/tokens](https://open-vsx.org/user-settings/tokens) |
 
 ---
 

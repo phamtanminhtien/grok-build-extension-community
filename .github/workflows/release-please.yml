@@ -3,9 +3,9 @@ name: Release Please
 # Google release-please: on every push to main, open/update a Release PR
 # from conventional commits. When that PR is merged, release-please tags +
 # creates a GitHub Release, then this workflow packages the VSIX and
-# publishes to Marketplace / Open VSX (publish job runs only when
-# release_created is true — avoids the GITHUB_TOKEN tag-push pitfall of a
-# separate Release workflow).
+# publishes to Open VSX first, then VS Code Marketplace (publish job runs
+# only when release_created is true — avoids the GITHUB_TOKEN tag-push
+# pitfall of a separate Release workflow).
 #
 # Commit style (https://www.conventionalcommits.org/):
 #   feat: ...     → minor (or patch if pre-1.0 with bump-patch-for-minor-pre-major)
@@ -14,8 +14,8 @@ name: Release Please
 #   chore: ...    → no version bump (hidden in changelog)
 #
 # Required secrets (repo Settings → Secrets and variables → Actions):
+#   OVSX_PAT  — https://open-vsx.org/user-settings/tokens (published first)
 #   VSCE_PAT  — Azure DevOps PAT with Marketplace (Acquire + Publish) for publisher `tienpham`
-#   OVSX_PAT  — https://open-vsx.org/user-settings/tokens
 
 on:
   push:
@@ -64,7 +64,7 @@ jobs:
             echo "- **prs_created:** ${RP_PRS:-false}"
             echo ""
             echo "If no release was created, release-please opened/updated a Release PR (or there are no releasable commits)."
-            echo "After you **merge** the Release PR, this workflow tags + creates the GitHub Release, then the **Publish** job packages the VSIX and publishes to Marketplace / Open VSX."
+            echo "After you **merge** the Release PR, this workflow tags + creates the GitHub Release, then the **Publish** job packages the VSIX and publishes to Open VSX first, then VS Code Marketplace."
           } >> "$GITHUB_STEP_SUMMARY"
 
   publish:
@@ -150,6 +150,19 @@ jobs:
           # release-please already created the GitHub Release for this tag
           gh release upload "$TAG_NAME" "$VSIX" --clobber
 
+      # Open VSX first (Cursor / VSCodium / etc.), then VS Code Marketplace.
+      - name: Publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "${OVSX_PAT}" ]; then
+            echo "::warning::OVSX_PAT secret is not set — skip Open VSX. Create a token at https://open-vsx.org/user-settings/tokens as secret OVSX_PAT."
+            exit 0
+          fi
+          npx --yes ovsx publish \
+            "${{ steps.pkg.outputs.vsix }}" \
+            --pat "$OVSX_PAT"
+
       - name: Publish to VS Code Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
@@ -164,18 +177,6 @@ jobs:
             --allow-missing-repository \
             --pat "$VSCE_PAT"
 
-      - name: Publish to Open VSX
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: |
-          if [ -z "${OVSX_PAT}" ]; then
-            echo "::warning::OVSX_PAT secret is not set — skip Open VSX. Create a token at https://open-vsx.org/user-settings/tokens as secret OVSX_PAT."
-            exit 0
-          fi
-          npx --yes ovsx publish \
-            "${{ steps.pkg.outputs.vsix }}" \
-            --pat "$OVSX_PAT"
-
       - name: Summary
         if: always()
         run: |
@@ -186,8 +187,8 @@ jobs:
             echo "|--------|--------|"
             echo "| VSIX | \`${{ steps.pkg.outputs.vsix }}\` |"
             echo "| GitHub Release | attach to \`${{ needs.release-please.outputs.tag_name }}\` |"
+            echo "| Open VSX | via OVSX_PAT (first) |"
             echo "| VS Code Marketplace | via VSCE_PAT |"
-            echo "| Open VSX | via OVSX_PAT |"
             echo ""
             echo "**Extension id:** \`${{ steps.pkg.outputs.publisher }}.${{ steps.pkg.outputs.name }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -302,8 +302,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node scripts/run-tests.mjs",
     "package": "vsce package --no-dependencies --allow-missing-repository",
-    "publish:vsce": "vsce publish --no-dependencies --allow-missing-repository",
     "publish:ovsx": "node -e \"const {execSync}=require('node:child_process');const p=require('./package.json');execSync('npx --yes ovsx publish '+p.name+'-'+p.version+'.vsix',{stdio:'inherit'})\"",
+    "publish:vsce": "vsce publish --no-dependencies --allow-missing-repository",
     "smoke:cli": "node scripts/smoke-cli.mjs"
   },
   "dependencies": {
