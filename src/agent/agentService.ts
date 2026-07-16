@@ -661,6 +661,12 @@ export class AgentService implements vscode.Disposable {
   private logUpdate(params: SessionNotification): void {
     const update = params.update;
     const kind = update.sessionUpdate;
+    const meta = params._meta as
+      | { totalTokens?: number | string }
+      | null
+      | undefined;
+    const tok =
+      meta?.totalTokens != null ? ` tokens=${meta.totalTokens}` : "";
 
     switch (kind) {
       case "agent_message_chunk": {
@@ -679,13 +685,13 @@ export class AgentService implements vscode.Disposable {
       }
       case "tool_call": {
         logSessionUpdate(
-          `[tool_call] ${update.title ?? update.toolCallId} status=${update.status ?? "?"}`,
+          `[tool_call] ${update.title ?? update.toolCallId} status=${update.status ?? "?"}${tok}`,
         );
         break;
       }
       case "tool_call_update": {
         logSessionUpdate(
-          `[tool_call_update] ${update.toolCallId} status=${update.status ?? "?"}`,
+          `[tool_call_update] ${update.toolCallId} status=${update.status ?? "?"}${tok}`,
         );
         break;
       }
@@ -696,7 +702,16 @@ export class AgentService implements vscode.Disposable {
         );
         break;
       }
+      case "usage_update": {
+        logSessionUpdate(
+          `[usage_update] used=${(update as { used?: number }).used} size=${(update as { size?: number }).size}${tok}`,
+        );
+        break;
+      }
       default:
+        if (tok) {
+          logSessionUpdate(`[${kind}]${tok}`);
+        }
         break;
     }
   }

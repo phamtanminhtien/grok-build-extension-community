@@ -26,6 +26,12 @@ import {
   type AssistantItem,
   type ToolCard,
 } from "./sessionMessageMerge";
+import { parseSessionNotificationMeta } from "./sessionNotificationMeta";
+import {
+  buildTurnStatusParts,
+  processLabelForSessionUpdate,
+  type SessionUsageSnapshot,
+} from "./turnStatusFormat";
 import type { DiffReviewService } from "../diff/diffReviewService";
 import { readTextFileHost } from "../agent/hostFs";
 import { dispatchSlash } from "../slash/dispatch";
@@ -81,6 +87,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private currentUserId: string | undefined;
   /** Avoid re-parsing markdown for messages whose source text has not changed. */
   private readonly mdCache = new Map<string, { key: string; html: string }>();
+  /** Live turn clock (ms epoch); cleared when idle. */
+  private turnStartedAt: number | undefined;
+  private turnProcess = "";
+  private sessionUsage: SessionUsageSnapshot = {};
+  private turnStatusTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -91,7 +102,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.supportsSecondarySidebar = options?.supportsSecondarySidebar ?? true;
     this.disposables.push(
       this.agent.onSessionUpdate((n) => this.handleSessionUpdate(n)),
-      this.agent.onBusyChange((busy) => this.post({ type: "busy", busy })),
+      this.agent.onBusyChange((busy) => {
+        this.post({ type: "busy", busy });
+        if (busy) {
+          this.beginTurnStatus();
+        } else {
+          this.endTurnStatusClock();
+          this.postTurnStatus();
+        }
+      }),
       this.agent.onStateChange((state) =>
         this.post({
           type: "agentState",
@@ -108,9 +127,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.agent.onAvailableCommands((cmds) => {
         slashRegistry.setAcpCommands(cmds);
       }),
-      this.agent.onTurnEnd(() => {
+      this.agent.onTurnEnd((response) => {
         this.currentAssistantId = undefined;
-        this.post({ type: "busy", busy: false });
+        if (response.usage) {
+          this.sessionUsage = {
+            ...this.sessionUsage,
+            turnTotalTokens: response.usage.totalTokens,
+            turnInputTokens: response.usage.inputTokens,
+            turnOutputTokens: response.usage.outputTokens,
+            // If we never got usage_update.used, prefer turn total for display.
+            used: this.sessionUsage.used ?? response.usage.totalTokens,
+          };
+        }
+        // Clock + busy UI: onBusyChange(false) runs in sendPrompt finally.
+        this.postTurnStatus();
       }),
       vscode.window.onDidChangeActiveTextEditor(() => this.postAutoContext()),
       vscode.window.onDidChangeTextEditorSelection((e) => {
@@ -249,6 +279,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.currentAssistantId = undefined;
     this.currentUserId = undefined;
     this.mdCache.clear();
+    this.sessionUsage = {};
+    this.endTurnStatusClock();
     this.diffs?.clear();
     const label = title?.trim() || "session";
     this.pushSystem(`Loading ${label}…`);
@@ -269,6 +301,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.messages.shift();
     }
     this.scheduleMessagesPost(true);
+    this.postTurnStatus();
   }
 
   async refreshState(): Promise<void> {
@@ -279,9 +312,53 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (this.messagesFlushTimer) {
       clearTimeout(this.messagesFlushTimer);
     }
+    this.endTurnStatusClock();
     for (const d of this.disposables) {
       d.dispose();
     }
+  }
+
+  private beginTurnStatus(): void {
+    if (!this.turnStartedAt) {
+      this.turnStartedAt = Date.now();
+    }
+    if (!this.turnProcess) {
+      this.turnProcess = "Working…";
+    }
+    if (!this.turnStatusTimer) {
+      this.turnStatusTimer = setInterval(() => this.postTurnStatus(), 250);
+    }
+    this.postTurnStatus();
+  }
+
+  private endTurnStatusClock(): void {
+    if (this.turnStatusTimer) {
+      clearInterval(this.turnStatusTimer);
+      this.turnStatusTimer = undefined;
+    }
+    this.turnStartedAt = undefined;
+    this.turnProcess = "";
+  }
+
+  private postTurnStatus(): void {
+    const busy = this.agent.isBusy();
+    const elapsedMs =
+      busy && this.turnStartedAt ? Date.now() - this.turnStartedAt : 0;
+    const parts = buildTurnStatusParts({
+      busy,
+      process: this.turnProcess,
+      elapsedMs,
+      usage: this.sessionUsage,
+    });
+    this.post({
+      type: "turnStatus",
+      ...parts,
+    });
+    // Always push context bar (even when process row is hidden when idle).
+    this.post({
+      type: "contextBar",
+      ...parts.context,
+    });
   }
 
   private async onMessage(msg: {
@@ -480,6 +557,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.currentAssistantId = asstId;
     this.messages.push(emptyAssistant(asstId));
     this.scheduleMessagesPost(true);
+    this.turnProcess = "Working…";
+    this.beginTurnStatus();
     this.post({ type: "busy", busy: true });
 
     try {
@@ -502,9 +581,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.messages = [];
       this.currentAssistantId = undefined;
       this.mdCache.clear();
+      this.sessionUsage = {};
+      this.endTurnStatusClock();
       this.diffs?.clear();
       this.pushSystem("New session");
       this.scheduleMessagesPost(true);
+      this.postTurnStatus();
     } catch (err) {
       this.pushSystem(errMessage(err));
     }
@@ -514,6 +596,58 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const update = n.update;
     const showThoughts = getSettings().showThoughts;
     const kind = update.sessionUpdate;
+
+    // Grok shell stamps `_meta.totalTokens` on (almost) every session/update —
+    // same source as TUI turn_status `⇣Nk` / context bar. Apply before any
+    // early-return so tokens stay live while streaming.
+    const notifMeta = parseSessionNotificationMeta(n);
+    let statusDirty = false;
+    if (notifMeta.totalTokens != null) {
+      const next = notifMeta.totalTokens;
+      const prev = this.sessionUsage.used;
+      const allow =
+        this.loadingHistory || notifMeta.isReplay
+          ? true // replay: chronological last-wins
+          : prev == null || next >= prev; // live: monotonic
+      if (allow && next !== prev) {
+        this.sessionUsage = { ...this.sessionUsage, used: next };
+        statusDirty = true;
+      }
+    }
+
+    // Optional ACP standard usage_update (cost + window size when present).
+    if (kind === "usage_update") {
+      this.sessionUsage = {
+        ...this.sessionUsage,
+        used: update.used,
+        size: update.size,
+        costAmount: update.cost?.amount ?? this.sessionUsage.costAmount,
+        currency: update.cost?.currency ?? this.sessionUsage.currency,
+      };
+      this.postTurnStatus();
+      return;
+    }
+
+    // Live process label for turn-status (TUI turn_status activity).
+    if (!this.loadingHistory) {
+      const toolTitle =
+        kind === "tool_call" || kind === "tool_call_update"
+          ? (update.title ?? this.findToolCard(update.toolCallId)?.title)
+          : undefined;
+      const label = processLabelForSessionUpdate(
+        kind,
+        toolTitle ?? undefined,
+      );
+      if (label && label !== this.turnProcess) {
+        this.turnProcess = label;
+        statusDirty = true;
+      }
+    }
+
+    // Token/process changes: push immediately; elapsed still ticks via interval.
+    if (statusDirty) {
+      this.postTurnStatus();
+    }
 
     // History replay only: live turns already pushed the user bubble in
     // handleSend. Applying agent user_message_chunk again duplicates the
@@ -808,10 +942,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const hasAuth = await this.auth.hasAnyAuth();
     const state = this.agent.getState();
     const settings = getSettings();
+    const busy = this.agent.isBusy();
+    const elapsedMs =
+      busy && this.turnStartedAt ? Date.now() - this.turnStartedAt : 0;
+    const turnStatus = buildTurnStatusParts({
+      busy,
+      process: this.turnProcess,
+      elapsedMs,
+      usage: this.sessionUsage,
+    });
     this.post({
       type: "init",
       messages: this.serializeMessages(this.messages),
-      busy: this.agent.isBusy(),
+      busy,
       hasAuth,
       agentState: state.kind,
       agentDetail:
@@ -828,6 +971,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       autoAttachEnabled: isAutoAttachEnabled(settings),
       autoChip: this.serializeAutoChip(getActiveEditorChip(settings)),
       reviewCount: this.diffs?.getEntries().length ?? 0,
+      turnStatus,
+      context: turnStatus.context,
     });
   }
 
@@ -964,6 +1109,35 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   header .brand .title {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     letter-spacing: -0.01em;
+  }
+  header .header-right {
+    display: flex; align-items: center; gap: 6px;
+    margin-left: auto; flex-shrink: 0;
+  }
+  /* TUI status-bar style: tokens / context window, top-right */
+  #ctx-bar {
+    font-size: 11px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    padding: 4px 10px; border-radius: var(--radius-pill);
+    color: var(--fg);
+    background: color-mix(in srgb, var(--muted) 10%, transparent);
+    white-space: nowrap;
+    user-select: none;
+    max-width: 12em;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  #ctx-bar[hidden] { display: none !important; }
+  #ctx-bar.level-ok {
+    color: var(--fg);
+  }
+  #ctx-bar.level-warn {
+    color: var(--vscode-editorWarning-foreground, #d29922);
+    background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #d29922) 14%, transparent);
+  }
+  #ctx-bar.level-critical {
+    color: var(--vscode-errorForeground, #f85149);
+    background: color-mix(in srgb, var(--vscode-errorForeground, #f85149) 14%, transparent);
   }
   header .meta {
     color: var(--muted); font-size: 11px;
@@ -1356,6 +1530,45 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     font-size: 9px; color: var(--muted); flex-shrink: 0;
     text-transform: uppercase; letter-spacing: 0.03em;
   }
+  /* Turn status above composer — process · time · tokens · cost (TUI-like) */
+  #turn-status {
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 4px 6px;
+    font-size: 11px; color: var(--muted);
+    min-height: 18px; line-height: 1.3;
+    user-select: none;
+  }
+  #turn-status[hidden] { display: none !important; }
+  #turn-status .ts-left {
+    display: inline-flex; align-items: center; gap: 6px;
+    min-width: 0; flex: 1;
+    overflow: hidden;
+  }
+  #turn-status .ts-process {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--fg); font-weight: 500;
+  }
+  #turn-status.busy .ts-process {
+    color: var(--btn-bg);
+  }
+  #turn-status .ts-right {
+    display: inline-flex; align-items: center; gap: 8px;
+    flex-shrink: 0; font-variant-numeric: tabular-nums;
+    opacity: 0.95;
+  }
+  #turn-status .ts-tokens {
+    color: var(--fg);
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+  #turn-status .ts-sep { opacity: 0.4; }
+  #turn-status .ts-cost { color: var(--fg); opacity: 0.75; }
+  #turn-status .ts-spin {
+    display: none; width: 12px; height: 12px; flex-shrink: 0;
+  }
+  #turn-status.busy .ts-spin { display: inline-flex; }
+  #turn-status .ts-spin .ti { font-size: 12px; }
+
   .composer-shell {
     display: flex; flex-direction: column; gap: 8px;
     background: var(--input-bg);
@@ -1437,9 +1650,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       <span class="brand-mark" aria-hidden="true"><i class="ti ti-message-chatbot"></i></span>
       <span class="title">Grok Build</span>
     </div>
-    <button type="button" class="linkish" id="btn-model" title="Select model">model ▾</button>
-    <button type="button" class="linkish" id="btn-history" title="Session history">History</button>
-    <div class="meta" id="meta"><i class="ti ti-circle-dashed"></i><span>idle</span></div>
+    <div class="header-right">
+      <button type="button" class="linkish" id="btn-model" title="Select model">model ▾</button>
+      <button type="button" class="linkish" id="btn-history" title="Session history">History</button>
+      <div id="ctx-bar" hidden title="Context window usage" aria-label="Context tokens">—</div>
+      <div class="meta" id="meta"><i class="ti ti-circle-dashed"></i><span>idle</span></div>
+    </div>
   </header>
   <div id="review-bar">
     <i class="ti ti-file-diff" aria-hidden="true"></i>
@@ -1476,6 +1692,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         <div id="mention-list"></div>
         <div id="mention-empty" hidden>No matches</div>
       </div>
+      <div id="turn-status" hidden aria-live="polite">
+        <span class="ts-left">
+          <span class="ts-spin" aria-hidden="true"><i class="ti ti-loader ti-spin"></i></span>
+          <span class="ts-process"></span>
+        </span>
+        <span class="ts-right">
+          <span class="ts-time"></span>
+          <span class="ts-tokens"></span>
+          <span class="ts-cost"></span>
+        </span>
+      </div>
       <div class="composer-shell">
         <textarea id="composer" placeholder="Message Grok… (/ commands, @ files, Enter send)" rows="3"></textarea>
         <div class="actions">
@@ -1503,6 +1730,12 @@ const stickyEl = document.getElementById('sticky');
 const reviewBar = document.getElementById('review-bar');
 const reviewLabel = document.getElementById('review-label');
 const btnModel = document.getElementById('btn-model');
+const ctxBarEl = document.getElementById('ctx-bar');
+const turnStatusEl = document.getElementById('turn-status');
+const tsProcess = turnStatusEl.querySelector('.ts-process');
+const tsTime = turnStatusEl.querySelector('.ts-time');
+const tsTokens = turnStatusEl.querySelector('.ts-tokens');
+const tsCost = turnStatusEl.querySelector('.ts-cost');
 const mentionPopover = document.getElementById('mention-popover');
 const mentionList = document.getElementById('mention-list');
 const mentionEmpty = document.getElementById('mention-empty');
@@ -2220,6 +2453,41 @@ function setMeta(text, spinning) {
     '<span>' + esc(text) + '</span>';
 }
 
+// Top-right context bar — TUI style: 8.5K / 200K (used / context window).
+function renderContextBar(c) {
+  if (!c || !c.visible || !c.text) {
+    ctxBarEl.hidden = true;
+    ctxBarEl.textContent = '';
+    ctxBarEl.className = '';
+    ctxBarEl.removeAttribute('title');
+    return;
+  }
+  ctxBarEl.hidden = false;
+  ctxBarEl.textContent = c.text;
+  ctxBarEl.className = 'level-' + (c.level || 'ok');
+  ctxBarEl.title = c.title || ('Context ' + c.text);
+}
+
+function renderTurnStatus(s) {
+  if (!s) return;
+  if (s.context) renderContextBar(s.context);
+
+  if (!s.visible) {
+    turnStatusEl.hidden = true;
+    turnStatusEl.classList.remove('busy');
+    return;
+  }
+  turnStatusEl.hidden = false;
+  turnStatusEl.classList.toggle('busy', !!s.spinning);
+  tsProcess.textContent = s.process || '';
+  tsTime.textContent = s.time || '';
+  tsTokens.textContent = s.tokens || '';
+  tsCost.textContent = s.cost || '';
+  tsTime.style.display = s.time ? '' : 'none';
+  tsTokens.style.display = s.tokens ? '' : 'none';
+  tsCost.style.display = s.cost ? '' : 'none';
+}
+
 function setBusy(b) {
   busy = b;
   sendBtn.disabled = b;
@@ -2424,6 +2692,8 @@ window.addEventListener('message', (event) => {
       (msg.agentDetail ? ' · ' + String(msg.agentDetail).slice(0, 12) : '');
     meta.dataset.base = base;
     setBusy(!!msg.busy);
+    if (msg.turnStatus) renderTurnStatus(msg.turnStatus);
+    if (msg.context) renderContextBar(msg.context);
     emptyHint.textContent = msg.hasAuth
       ? 'CLI/auth detected. You can start chatting.'
       : 'No API key in SecretStorage — CLI ~/.grok auth may still work.';
@@ -2432,6 +2702,10 @@ window.addEventListener('message', (event) => {
     renderMessages(msg.messages || []);
   } else if (msg.type === 'busy') {
     setBusy(!!msg.busy);
+  } else if (msg.type === 'turnStatus') {
+    renderTurnStatus(msg);
+  } else if (msg.type === 'contextBar') {
+    renderContextBar(msg);
   } else if (msg.type === 'agentState') {
     const base = (msg.state || 'idle') +
       (msg.detail ? ' · ' + String(msg.detail).slice(0, 12) : '');

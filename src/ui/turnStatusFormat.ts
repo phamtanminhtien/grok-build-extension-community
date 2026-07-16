@@ -1,0 +1,290 @@
+/**
+ * Format helpers for the chat turn-status row above the composer.
+ * Mirrors grok-build TUI turn_status / context_bar compact display.
+ */
+
+export interface SessionUsageSnapshot {
+  /** Tokens currently in context (usage_update.used). */
+  used?: number;
+  /** Context window size (usage_update.size). */
+  size?: number;
+  /** Cumulative session cost amount. */
+  costAmount?: number;
+  /** ISO 4217 currency, default USD. */
+  currency?: string;
+  /** Last turn token totals from PromptResponse.usage. */
+  turnTotalTokens?: number;
+  turnInputTokens?: number;
+  turnOutputTokens?: number;
+}
+
+export interface TurnStatusView {
+  busy: boolean;
+  /** Human process label: Thinking / Responding / tool title. */
+  process: string;
+  /** Elapsed ms for the current turn (0 when idle). */
+  elapsedMs: number;
+  usage: SessionUsageSnapshot;
+}
+
+/** Format elapsed like TUI: `0.5s`, `5.2s`, `32s`, `1m20s`, `1h2m`. */
+export function formatElapsed(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) {
+    return "0s";
+  }
+  const totalSec = ms / 1000;
+  if (totalSec < 10) {
+    return `${(Math.round(totalSec * 10) / 10).toFixed(1)}s`;
+  }
+  if (totalSec < 60) {
+    return `${Math.floor(totalSec)}s`;
+  }
+  const totalMin = Math.floor(totalSec / 60);
+  if (totalMin < 60) {
+    const sec = Math.floor(totalSec % 60);
+    return `${totalMin}m${sec}s`;
+  }
+  const hours = Math.floor(totalMin / 60);
+  const min = totalMin % 60;
+  return `${hours}h${min}m`;
+}
+
+/**
+ * Compact token count for turn-status arrow form:
+ * - &lt;1k: raw
+ * - 1k–9.9k: 1.23k
+ * - 10k–99.9k: 10.1k
+ * - 100k–999k: 100k
+ * - ≥1m: 1.23m / 10.1m
+ */
+export function formatTokensCompact(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens < 0) {
+    return "0";
+  }
+  const n = Math.floor(tokens);
+  if (n < 1000) {
+    return String(n);
+  }
+  if (n < 10_000) {
+    return `${(n / 1000).toFixed(2)}k`;
+  }
+  if (n < 100_000) {
+    return `${(n / 1000).toFixed(1)}k`;
+  }
+  if (n < 1_000_000) {
+    return `${Math.floor(n / 1000)}k`;
+  }
+  if (n < 10_000_000) {
+    return `${(n / 1_000_000).toFixed(2)}m`;
+  }
+  return `${(n / 1_000_000).toFixed(1)}m`;
+}
+
+/**
+ * TUI context_bar `fmt_tokens` (≤4 chars style):
+ * `0`, `12`, `999`, `1.2K`, `10.0K`, `12K`, `123K`, `1.2M`
+ */
+export function formatTokensContextBar(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens < 0) {
+    return "0";
+  }
+  const n = Math.floor(tokens);
+  if (n < 1_000) {
+    return String(n);
+  }
+  if (n < 10_000) {
+    return `${(n / 1_000).toFixed(1)}K`;
+  }
+  if (n < 1_000_000) {
+    return `${Math.round(n / 1_000)}K`;
+  }
+  if (n < 10_000_000) {
+    return `${(n / 1_000_000).toFixed(1)}M`;
+  }
+  return `${Math.round(n / 1_000_000)}M`;
+}
+
+/** Shell default when model meta has no window size. */
+export const DEFAULT_CONTEXT_WINDOW = 200_000;
+
+/**
+ * Header / status-bar context display: `8.5K / 200K`.
+ * Requires used > 0; uses `size` or {@link DEFAULT_CONTEXT_WINDOW}.
+ */
+export function formatContextBar(
+  used?: number,
+  size?: number,
+): { text: string; pct: number } | undefined {
+  if (used == null || !Number.isFinite(used) || used <= 0) {
+    return undefined;
+  }
+  const total =
+    size != null && Number.isFinite(size) && size > 0
+      ? size
+      : DEFAULT_CONTEXT_WINDOW;
+  const pct = Math.min(100, (used / total) * 100);
+  return {
+    text: `${formatTokensContextBar(used)} / ${formatTokensContextBar(total)}`,
+    pct,
+  };
+}
+
+/**
+ * Token display for the turn-status row (compact arrow form when no window).
+ */
+export function formatContextTokens(
+  used?: number,
+  size?: number,
+): string | undefined {
+  // TUI hides the token chip until usage is non-zero.
+  if (used == null || !Number.isFinite(used) || used <= 0) {
+    return undefined;
+  }
+  const bar = formatContextBar(used, size);
+  if (bar) {
+    return bar.text;
+  }
+  return `↓${formatTokensCompact(used)}`;
+}
+
+/** Urgency level for context bar color (mirrors TUI breakpoints). */
+export function contextUsageLevel(
+  pct: number,
+): "ok" | "warn" | "critical" {
+  if (pct >= 85) {
+    return "critical";
+  }
+  if (pct >= 65) {
+    return "warn";
+  }
+  return "ok";
+}
+
+/** Cost display: `$0.020`, `$1.20`, `€0.50` — omit free/zero. */
+export function formatCost(
+  amount?: number,
+  currency?: string,
+): string | undefined {
+  if (amount == null || !Number.isFinite(amount) || amount <= 0) {
+    return undefined;
+  }
+  const cur = (currency || "USD").toUpperCase();
+  const fixed =
+    amount < 0.01
+      ? amount.toFixed(4)
+      : amount < 1
+        ? amount.toFixed(3)
+        : amount.toFixed(2);
+  const symbol =
+    cur === "USD" ? "$" : cur === "EUR" ? "€" : cur === "GBP" ? "£" : `${cur} `;
+  return `${symbol}${fixed}`;
+}
+
+/**
+ * Build left/right strings for the turn-status row (TUI-like).
+ * Left: process (+ short phase not required). Right: time · tokens · cost.
+ */
+export function resolveUsedTokens(usage: SessionUsageSnapshot): number | undefined {
+  if (usage.used != null && usage.used > 0) {
+    return usage.used;
+  }
+  if (usage.turnTotalTokens != null && usage.turnTotalTokens > 0) {
+    return usage.turnTotalTokens;
+  }
+  return undefined;
+}
+
+/** Header top-right context chip (TUI status-bar style). */
+export function buildContextBarParts(usage: SessionUsageSnapshot): {
+  visible: boolean;
+  text: string;
+  pct: number;
+  level: "ok" | "warn" | "critical";
+  title: string;
+} {
+  const used = resolveUsedTokens(usage);
+  const bar = formatContextBar(used, usage.size);
+  if (!bar) {
+    return {
+      visible: false,
+      text: "",
+      pct: 0,
+      level: "ok",
+      title: "",
+    };
+  }
+  const total =
+    usage.size != null && usage.size > 0
+      ? usage.size
+      : DEFAULT_CONTEXT_WINDOW;
+  return {
+    visible: true,
+    text: bar.text,
+    pct: bar.pct,
+    level: contextUsageLevel(bar.pct),
+    title: `Context ${Math.round(bar.pct * 10) / 10}% · ${used?.toLocaleString()} / ${total.toLocaleString()} tokens`,
+  };
+}
+
+export function buildTurnStatusParts(view: TurnStatusView): {
+  visible: boolean;
+  process: string;
+  time: string;
+  tokens: string;
+  cost: string;
+  spinning: boolean;
+  /** Top-right header context bar (used / window). */
+  context: ReturnType<typeof buildContextBarParts>;
+} {
+  const { busy, process, elapsedMs, usage } = view;
+  const used = resolveUsedTokens(usage);
+  // Turn row keeps compact arrow form only; full used/window is in the header.
+  const tokens =
+    used != null
+      ? `↓${formatTokensCompact(used)}`
+      : "";
+  const cost = formatCost(usage.costAmount, usage.currency) ?? "";
+  const context = buildContextBarParts(usage);
+
+  if (busy) {
+    return {
+      visible: true,
+      process: process || "Working…",
+      time: formatElapsed(elapsedMs),
+      tokens,
+      cost,
+      spinning: true,
+      context,
+    };
+  }
+
+  // Idle: process row only if cost remains; context bar lives in the header.
+  const hasRow = !!cost;
+  return {
+    visible: hasRow,
+    process: hasRow ? "ready" : "",
+    time: "",
+    tokens: "",
+    cost,
+    spinning: false,
+    context,
+  };
+}
+
+/** Map stream events to a process label (TUI activity-ish). */
+export function processLabelForSessionUpdate(
+  kind: string,
+  toolTitle?: string,
+): string | undefined {
+  switch (kind) {
+    case "agent_thought_chunk":
+      return "Thinking";
+    case "agent_message_chunk":
+      return "Responding";
+    case "tool_call":
+    case "tool_call_update":
+      return toolTitle?.trim() || "Tool";
+    default:
+      return undefined;
+  }
+}
