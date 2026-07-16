@@ -97,24 +97,17 @@ yarn package          # local .vsix (grok-build-community-<version>.vsix)
 
 **Automated release ([release-please](https://github.com/googleapis/release-please)):**
 
-Flow on every push to `main`:
+Flow on every push to `main` (workflow **Release Please**):
 
-1. **Release Please** opens/updates a **Release PR** (version bump + `CHANGELOG.md`) from [conventional commits](https://www.conventionalcommits.org/)
+1. Opens/updates a **Release PR** (version bump + `CHANGELOG.md`) from [conventional commits](https://www.conventionalcommits.org/)
 2. You **merge** that PR
 3. release-please creates tag `vX.Y.Z` + GitHub Release
-4. Workflow **Release** packages the VSIX and (if secrets are set) publishes to:
+4. Same workflow’s **Publish** job packages the VSIX, attaches it to the release, and (if secrets are set) publishes to:
    - [VS Code Marketplace](https://marketplace.visualstudio.com/) (`vsce`)
    - [Open VSX](https://open-vsx.org/) (`ovsx`)
 
 Use commit prefixes: `feat:`, `fix:`, `feat!:` / `BREAKING CHANGE:`.  
 `chore:` / `ci:` alone usually do **not** open a version bump.
-
-Manual fallback:
-
-```bash
-git tag v0.3.2 && git push origin v0.3.2
-# or Actions → Release → Run workflow
-```
 
 **Secrets** (repo → Settings → Secrets → Actions):
 
