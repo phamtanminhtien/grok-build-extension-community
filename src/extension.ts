@@ -11,11 +11,7 @@ import {
   promptAndStoreApiKey,
 } from "./auth/authService";
 import { formatLogoutMessage } from "./auth/authFlow";
-import {
-  modelDisplayLabel,
-  selectModelQuickPick,
-  setModelSetting,
-} from "./config/modelService";
+
 import { DiffReviewService } from "./diff/diffReviewService";
 import { ExtensionsPanel } from "./extensions/extensionsPanel";
 import {
@@ -215,52 +211,8 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand("grok.selectModel", async () => {
-      try {
-        // Ensure catalog is loaded from the agent (same list as TUI /model).
-        if (agentService!.getState().kind !== "ready") {
-          await agentService!.ensureStarted();
-        }
-      } catch {
-        /* catalog may still be empty; QuickPick falls back */
-      }
-      const catalog = agentService!.getModels();
-      const model = await selectModelQuickPick(
-        catalog.models,
-        catalog.currentModelId,
-      );
-      if (model === undefined) {
-        return;
-      }
-      if (agentService!.isBusy()) {
-        const ok = await vscode.window.showWarningMessage(
-          "A turn is in progress. Cancel it before switching model?",
-          "Cancel turn",
-          "Keep waiting",
-        );
-        if (ok !== "Cancel turn") {
-          return;
-        }
-        await agentService!.cancelTurn();
-      }
-      try {
-        await agentService!.setSessionModel(model);
-        void vscode.window.showInformationMessage(
-          `Model set to ${modelDisplayLabel(catalog.models, model) || model}`,
-        );
-        await chat.refreshState();
-      } catch (err) {
-        // Fall back: persist + restart agent with --model (spawn path).
-        try {
-          await setModelSetting(model);
-          await agentService!.restart();
-          void vscode.window.showInformationMessage(
-            `Model set to ${model} (agent restarted)`,
-          );
-          await chat.refreshState();
-        } catch (err2) {
-          await showStartError(err2);
-        }
-      }
+      // Chat webview model popover only (same UX as header model button).
+      await chat.openModelPicker();
     }),
 
     vscode.commands.registerCommand("grok.resumeSession", async () => {

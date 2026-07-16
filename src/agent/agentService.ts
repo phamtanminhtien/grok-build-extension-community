@@ -198,7 +198,7 @@ export class AgentService implements vscode.Disposable {
   }
 
   /**
-   * Wire chat webview for permission popovers (prefer over QuickPick).
+   * Wire chat webview for permission popovers.
    */
   setPermissionPromptUi(handler: PermissionPromptHandler | undefined): void {
     this.permissions.setPromptUi(handler);
@@ -1526,64 +1526,16 @@ export class AgentService implements vscode.Disposable {
         });
       } catch (err) {
         logWarn(
-          `ask_user_question webview failed, QuickPick fallback: ${formatUserError(err)}`,
+          `ask_user_question webview failed: ${formatUserError(err)}`,
         );
       }
+    } else {
+      logWarn("ask_user_question: chat popover UI not registered");
     }
-    return this.askUserQuestionQuickPick(parsed);
-  }
-
-  private async askUserQuestionQuickPick(parsed: {
-    mode: "default" | "plan";
-    questions: import("../ui/interactivePrompt").QuestionView[];
-  }): Promise<AskUserQuestionResponse> {
-    const answers: Record<string, string[]> = {};
-    for (const q of parsed.questions) {
-      if (q.options.length === 0) {
-        continue;
-      }
-      if (q.multiSelect) {
-        const picks = await vscode.window.showQuickPick(
-          q.options.map((o) => ({
-            label: o.label,
-            description: o.description,
-            picked: false,
-          })),
-          {
-            title: q.question,
-            canPickMany: true,
-            ignoreFocusOut: true,
-            placeHolder: "Select one or more (Esc cancel)",
-          },
-        );
-        if (!picks) {
-          return { outcome: "cancelled" };
-        }
-        if (picks.length) {
-          answers[q.question] = picks.map((p) => p.label);
-        }
-      } else {
-        const pick = await vscode.window.showQuickPick(
-          q.options.map((o) => ({
-            label: o.label,
-            description: o.description,
-          })),
-          {
-            title: q.question,
-            ignoreFocusOut: true,
-            placeHolder: "Choose an option (Esc cancel)",
-          },
-        );
-        if (!pick) {
-          return { outcome: "cancelled" };
-        }
-        answers[q.question] = [pick.label];
-      }
-    }
-    if (Object.keys(answers).length === 0) {
-      return { outcome: "cancelled" };
-    }
-    return { outcome: "accepted", answers };
+    void vscode.window.showWarningMessage(
+      "Grok Build: open the chat panel to answer the agent question",
+    );
+    return { outcome: "cancelled" };
   }
 
   private async pumpSessionUpdates(session: ActiveSession): Promise<void> {

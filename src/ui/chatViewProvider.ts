@@ -18,10 +18,7 @@ import {
   isAutoAttachEnabled,
   type ContextChip,
 } from "../context/editorContext";
-import {
-  pickContextChips,
-  searchContextSuggestions,
-} from "../context/contextPicker";
+import { searchContextSuggestions } from "../context/contextPicker";
 import { getSettings } from "../config/settings";
 import {
   contextWindowFromCatalog,
@@ -354,14 +351,43 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   async addContextFromPicker(): Promise<void> {
     await this.openChat();
-    // Prefer in-webview popover (grok-build style). Fallback QuickPick for
-    // command palette when the webview is not mounted yet.
-    if (this.views.size > 0) {
-      this.post({ type: "openMention" });
+    if (!(await this.waitForWebview())) {
+      void vscode.window.showWarningMessage(
+        "Grok Build: open the chat panel to add context",
+      );
       return;
     }
-    const picked = await pickContextChips();
-    this.addStickyChips(picked);
+    this.post({ type: "openMention" });
+  }
+
+  /** Open chat model popover (command palette / slash /model with no args). */
+  async openModelPicker(): Promise<void> {
+    await this.openChat();
+    if (!(await this.waitForWebview())) {
+      void vscode.window.showWarningMessage(
+        "Grok Build: open the chat panel to select a model",
+      );
+      return;
+    }
+    await this.ensureModelsLoaded();
+    this.post({ type: "openModel" });
+  }
+
+  /** Wait until a chat webview is registered after focus. */
+  private async waitForWebview(maxMs = 500): Promise<boolean> {
+    if (this.views.size > 0) {
+      return true;
+    }
+    const step = 50;
+    let waited = 0;
+    while (waited < maxMs) {
+      await new Promise((r) => setTimeout(r, step));
+      waited += step;
+      if (this.views.size > 0) {
+        return true;
+      }
+    }
+    return this.views.size > 0;
   }
 
   private addStickyChips(picked: ContextChip[]): void {
@@ -462,12 +488,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     payload: PermissionPromptPayload,
   ): Promise<PermissionPromptResult> {
     await this.openChat();
-    // Wait a tick so webview can mount if just opened
-    if (this.views.size === 0) {
-      await new Promise((r) => setTimeout(r, 120));
-    }
-    if (this.views.size === 0) {
-      // No webview — signal broker to use QuickPick fallback
+    if (!(await this.waitForWebview())) {
       throw new Error("webview not ready");
     }
     return new Promise<PermissionPromptResult>((resolve) => {
@@ -509,10 +530,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     payload: QuestionPromptPayload,
   ): Promise<AskUserQuestionResponse> {
     await this.openChat();
-    if (this.views.size === 0) {
-      await new Promise((r) => setTimeout(r, 120));
-    }
-    if (this.views.size === 0) {
+    if (!(await this.waitForWebview())) {
       throw new Error("webview not ready");
     }
     return new Promise<AskUserQuestionResponse>((resolve) => {
@@ -808,7 +826,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "addContext":
-        // Open in-webview mention popover (not VS Code QuickPick).
+        // Open in-webview mention popover.
         this.post({ type: "openMention" });
         break;
       case "searchMention": {
@@ -881,9 +899,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "selectModel":
-        // Ensure live catalog first (same list as TUI /model), then QuickPick.
+        // Host / legacy message: open in-webview model popover only.
         await this.ensureModelsLoaded();
-        await vscode.commands.executeCommand("grok.selectModel");
+        this.post({ type: "openModel" });
         break;
       case "setModel": {
         const modelId = (msg.modelId ?? "").trim();
@@ -905,7 +923,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           await this.pushFullState();
         } catch (err) {
           this.pushSystem(errMessage(err));
-          await vscode.commands.executeCommand("grok.selectModel");
+          this.post({ type: "openModel" });
         }
         break;
       }
@@ -3578,12 +3596,8 @@ function openModelPopover() {
   modelIndex = Math.max(0, modelItems.findIndex((m) => m.id === currentModelId));
   if (modelIndex < 0) modelIndex = 0;
   renderModelList();
-  if (!modelItems.length) {
-    vscode.postMessage({ type: 'selectModel' });
-    closeModelPopover();
-    return;
-  }
   // Focus list so keyboard works even when opened from the model button.
+  // Empty catalog shows "Waiting for agent catalog…" until models post arrives.
   focusPopoverActive(modelList, '.model-item');
 }
 
@@ -5720,6 +5734,8 @@ window.addEventListener('message', (event) => {
       autosizeComposer();
     }
     syncMentionFromComposer();
+  } else if (msg.type === 'openModel') {
+    openModelPopover();
   } else if (msg.type === 'mentionResults') {
     if (msg.requestId !== mentionRequestId) return;
     mentionItems = msg.items || [];

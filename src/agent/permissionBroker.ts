@@ -20,7 +20,7 @@ export type PermissionPromptHandler = (
 
 /**
  * Resolve ACP permission requests via in-webview popover + optional session memory.
- * Falls back to QuickPick when no webview handler is registered or ready.
+ * Requires the chat webview; if the popover UI is unavailable, the request is denied.
  */
 export class PermissionBroker {
   /** optionIds auto-selected for allow_always this process/session */
@@ -138,20 +138,17 @@ export class PermissionBroker {
           timeoutMs,
         });
       } catch (err) {
-        logWarn(
-          `[permission] webview prompt failed, falling back to QuickPick: ${err}`,
-        );
+        logWarn(`[permission] webview prompt failed: ${err}`);
         result = undefined;
       }
     }
 
     if (!result) {
-      result = await this.quickPickFallback(
-        String(title),
-        detail,
-        options,
-        timeoutMs,
+      logWarn("[permission] chat popover unavailable → deny");
+      void vscode.window.showWarningMessage(
+        "Grok Build: open the chat panel to approve tool permissions",
       );
+      return denyResponse(options);
     }
 
     if (result.outcome === "timeout") {
@@ -184,44 +181,6 @@ export class PermissionBroker {
     logInfo(`[permission] selected ${opt.kind} (${opt.name})`);
     return selected(opt.optionId);
   }
-
-  private async quickPickFallback(
-    title: string,
-    detail: string,
-    options: PermissionOption[],
-    timeoutMs: number,
-  ): Promise<PermissionPromptResult> {
-    const picks = options.map((o) => ({
-      label: quickPickLabel(o),
-      description: o.kind,
-      option: o,
-    }));
-
-    const pickPromise = vscode.window.showQuickPick(picks, {
-      title: `Grok Build wants to: ${title}`,
-      placeHolder: detail.slice(0, 200) || "Choose allow or deny",
-      ignoreFocusOut: true,
-    });
-
-    const timedOut = Symbol("timeout");
-    const race = await Promise.race([
-      pickPromise,
-      new Promise<typeof timedOut>((resolve) => {
-        setTimeout(() => resolve(timedOut), timeoutMs);
-      }),
-    ]);
-
-    if (race === timedOut) {
-      return { outcome: "timeout" };
-    }
-    if (!race) {
-      return { outcome: "cancelled" };
-    }
-    return {
-      outcome: "selected",
-      optionId: (race.option as PermissionOption).optionId,
-    };
-  }
 }
 
 function selected(optionId: string): RequestPermissionResponse {
@@ -237,21 +196,6 @@ function denyResponse(options: PermissionOption[]): RequestPermissionResponse {
     return selected(deny.optionId);
   }
   return { outcome: { outcome: "cancelled" } };
-}
-
-function quickPickLabel(o: PermissionOption): string {
-  switch (o.kind) {
-    case "allow_once":
-      return `$(check) ${o.name || "Allow once"}`;
-    case "allow_always":
-      return `$(pass-filled) ${o.name || "Always allow (session)"}`;
-    case "reject_once":
-      return `$(close) ${o.name || "Deny"}`;
-    case "reject_always":
-      return `$(circle-slash) ${o.name || "Always deny"}`;
-    default:
-      return o.name;
-  }
 }
 
 function summarizeTool(params: RequestPermissionRequest): string {

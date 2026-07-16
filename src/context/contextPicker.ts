@@ -21,48 +21,6 @@ export interface ContextSuggestion {
 }
 
 /**
- * Multi-select QuickPick for sticky chat context (command palette / fallback).
- */
-export async function pickContextChips(): Promise<ContextChip[]> {
-  const items = await searchContextSuggestions("", 40);
-  type Item = vscode.QuickPickItem & { chip?: ContextChip; action?: "browse" };
-
-  const qpItems: Item[] = items.map((s) => ({
-    label: s.label,
-    description: s.description,
-    chip: s.chip,
-  }));
-  qpItems.push({
-    label: "$(search) Browse workspace files…",
-    alwaysShow: true,
-    action: "browse",
-  });
-
-  const pick = await vscode.window.showQuickPick(qpItems, {
-    title: "Add context to Grok",
-    matchOnDescription: true,
-    canPickMany: true,
-  });
-  if (!pick?.length) {
-    return [];
-  }
-
-  const chips: ContextChip[] = [];
-  for (const p of pick) {
-    if (p.chip) {
-      chips.push(p.chip);
-      continue;
-    }
-    if (p.action === "browse") {
-      chips.push(...(await browseWorkspaceChips()));
-    }
-  }
-
-  const settings = getSettings();
-  return chips.filter((c) => !isExcluded(c.fsPath, settings.excludeGlob));
-}
-
-/**
  * Fuzzy-ish workspace + open-editor suggestions for the @ popover.
  * Mirrors grok-build file_search sources: open context first, then workspace files.
  */
@@ -228,40 +186,6 @@ export async function searchFromAtContext(
   limit = 24,
 ): Promise<ContextSuggestion[]> {
   return searchContextSuggestions(matcherQuery(ctx), limit);
-}
-
-async function browseWorkspaceChips(): Promise<ContextChip[]> {
-  const chips: ContextChip[] = [];
-  const uris = await vscode.window.showOpenDialog({
-    canSelectMany: true,
-    canSelectFiles: true,
-    canSelectFolders: true,
-    openLabel: "Add to Grok",
-    defaultUri: vscode.workspace.workspaceFolders?.[0]?.uri,
-  });
-  for (const u of uris ?? []) {
-    if (u.scheme !== "file") {
-      continue;
-    }
-    try {
-      const stat = await vscode.workspace.fs.stat(u);
-      const isDir = !!(stat.type & vscode.FileType.Directory);
-      chips.push({
-        id: `${isDir ? "folder" : "file"}:${u.fsPath}`,
-        label: `${isDir ? "folder" : "file"}:${path.basename(u.fsPath)}`,
-        kind: isDir ? "folder" : "file",
-        fsPath: u.fsPath,
-      });
-    } catch {
-      chips.push({
-        id: `file:${u.fsPath}`,
-        label: `file:${path.basename(u.fsPath)}`,
-        kind: "file",
-        fsPath: u.fsPath,
-      });
-    }
-  }
-  return chips;
 }
 
 function buildFindGlob(query: string): string {

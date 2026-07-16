@@ -82,7 +82,7 @@ export async function dispatchSlash(
 
   // host
   if (cmd.argsRequired && !inv.args.trim() && cmd.hostAction !== "selectModel") {
-    // /model with no args → open QuickPick (args not required on host).
+    // /model with no args → open model popover (args not required on host).
     return {
       kind: "error",
       message: `Usage: ${usageOf(cmd)}`,
