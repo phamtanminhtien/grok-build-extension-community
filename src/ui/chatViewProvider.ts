@@ -1627,15 +1627,67 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   #messages {
     flex: 1; overflow-y: auto; padding: 14px 12px;
     display: flex; flex-direction: column; gap: 12px;
-    scroll-behavior: smooth;
+    /* No CSS smooth scroll — continuous stream updates fight it (jank). */
+    scroll-behavior: auto;
   }
-  .msg { max-width: 100%; animation: msg-in 160ms ease; }
+  .msg { max-width: 100%; }
+  /* Enter animation only for newly inserted messages (not stream patches / re-mounts). */
+  .msg.msg-enter {
+    animation: msg-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
   @keyframes msg-in {
-    from { opacity: 0; transform: translateY(4px); }
+    from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: none; }
   }
+  /* Soft stream: caret on last text bubble while assistant is generating */
+  .msg.assistant.streaming .assistant-timeline > .bubble.md:last-of-type::after {
+    content: '';
+    display: inline-block;
+    width: 2px;
+    height: 0.95em;
+    margin-left: 3px;
+    vertical-align: -0.08em;
+    border-radius: 1px;
+    background: color-mix(in srgb, var(--fg) 72%, transparent);
+    animation: stream-caret 1.05s step-end infinite;
+  }
+  @keyframes stream-caret {
+    0%, 100% { opacity: 0.85; }
+    50% { opacity: 0; }
+  }
+  .msg.assistant.streaming .assistant-timeline > .bubble.md {
+    transition: none; /* avoid opacity thrash on each token */
+  }
+  .assistant-timeline > .bubble.md,
+  .assistant-timeline > .tool-row,
+  .assistant-timeline > .thought {
+    animation: stream-block-in 180ms ease both;
+  }
+  @keyframes stream-block-in {
+    from { opacity: 0.35; transform: translateY(3px); }
+    to { opacity: 1; transform: none; }
+  }
+  /* After first paint, stop re-animating patched blocks */
+  .assistant-timeline.stream-settled > .bubble.md,
+  .assistant-timeline.stream-settled > .tool-row,
+  .assistant-timeline.stream-settled > .thought {
+    animation: none;
+  }
+  .assistant-timeline.stream-settled > .tl-new {
+    animation: stream-block-in 180ms ease both;
+  }
   @media (prefers-reduced-motion: reduce) {
-    .msg { animation: none; }
+    .msg.msg-enter,
+    .assistant-timeline > .bubble.md,
+    .assistant-timeline > .tool-row,
+    .assistant-timeline > .thought,
+    .assistant-timeline.stream-settled > .tl-new {
+      animation: none;
+    }
+    .msg.assistant.streaming .assistant-timeline > .bubble.md:last-of-type::after {
+      animation: none;
+      opacity: 0.55;
+    }
   }
   .msg.user { align-self: flex-end; max-width: 92%; }
   .msg.assistant, .msg.system { align-self: stretch; }
@@ -1690,9 +1742,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
   .copy-code:hover { opacity: 1; background: var(--btn-sec-hover); }
   .msg.system .bubble {
-    color: var(--muted); font-size: 12px; padding: 6px 2px; background: transparent;
-    display: flex; align-items: flex-start; gap: 8px; white-space: pre-wrap;
+    color: var(--muted); font-size: 12px; padding: 8px 0; background: transparent;
+    display: flex; align-items: center; gap: 10px; width: 100%;
     border: none; border-radius: 0; box-shadow: none;
+  }
+  .msg.system .system-sep-line {
+    flex: 1 1 0; min-width: 12px; height: 1px;
+    background: color-mix(in srgb, var(--muted) 22%, transparent);
+  }
+  .msg.system .system-sep-text {
+    flex: 0 1 auto; max-width: 85%;
+    text-align: center; line-height: 1.35; white-space: pre-wrap;
+    word-break: break-word;
   }
 
   /* ── Chips ── */
@@ -1916,7 +1977,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
   #empty .empty-actions button {
     width: 100%; justify-content: center; min-height: 36px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-pill); /* match Send / Mode pills */
   }
 
   /* ── Footer / composer ── */
@@ -2108,10 +2169,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
   .model-item.current .mi-label, .effort-item.current .mi-label { font-weight: 600; }
   #btn-model, #btn-effort {
-    max-width: min(140px, 36%);
+    /* Cap width; allow shrink so the row never overflows the shell */
+    max-width: 140px;
     border-radius: var(--radius-pill);
-    padding: 7px 10px;
+    padding: 6px 10px;
+    min-height: 30px;
     font-weight: 500;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
   }
   #btn-effort[hidden] { display: none !important; }
   #btn-model .model-btn-label, #btn-effort .effort-btn-label {
@@ -2165,45 +2231,69 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   #turn-status .ts-spin .ti { font-size: 12px; }
 
   .composer-shell {
-    display: flex; flex-direction: column; gap: 8px;
+    display: flex; flex-direction: column; gap: 10px;
     background: var(--input-bg);
     border: none;
-    border-radius: var(--radius-md);
-    padding: 10px 10px 8px;
+    /* Fixed radius — not pill: 999px turns a tall multi-line shell into an oval */
+    border-radius: 20px;
+    padding: 12px;
     box-shadow: var(--shadow-soft);
     transition: box-shadow var(--ease), background var(--ease);
+    /* Keep buttons/text inside the rounded shell */
+    overflow: hidden;
+    min-width: 0;
   }
   .composer-shell:focus-within {
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 40%, transparent), var(--shadow-soft);
   }
   #composer {
-    width: 100%; min-height: 60px; max-height: 180px; resize: vertical;
+    width: 100%;
+    /* ~2 lines at line-height 1.45; keep in sync with autosizeComposer minPx */
+    min-height: 44px; max-height: 180px;
+    resize: none; overflow-y: hidden;
     background: transparent; color: var(--input-fg);
     border: none; border-radius: 0; outline: none;
-    padding: 2px 4px; font-family: inherit; font-size: inherit;
+    /* shell owns outer inset; light y so first line isn’t flush */
+    padding: 2px 0;
+    font-family: inherit; font-size: inherit;
     line-height: 1.45;
+    field-sizing: content; /* Chromium: grow with content; JS fallback below */
   }
   #composer:focus { outline: none; }
   #composer::placeholder { color: var(--muted); opacity: 0.85; }
   .actions {
     display: flex; gap: 6px; align-items: center;
-    padding-top: 2px;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
   }
-  /* mode | spacer | model · reasoning · send */
+  /* mode | spacer | model · reasoning · send — stay inside shell, shrink if narrow */
   .actions-right {
     margin-left: auto;
-    display: inline-flex;
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
     gap: 6px;
     align-items: center;
+    justify-content: flex-end;
+    padding: 0;
+  }
+  .actions-right > button {
+    margin: 0;
+    flex: 0 1 auto;
     min-width: 0;
   }
-  /* Mode cycle — left of action row (Shift+Tab) */
+  /* Mode cycle — left of action row (Shift+Tab); pill matches #send */
   #btn-mode {
     font-size: 12px;
     padding: 6px 10px;
     min-height: 30px;
     gap: 5px;
     flex-shrink: 0;
+    border-radius: var(--radius-pill);
   }
   #btn-mode .mode-btn-label {
     max-width: 11em;
@@ -2273,9 +2363,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
   #send {
     border-radius: var(--radius-pill);
-    padding: 7px 16px;
+    padding: 6px 12px;
+    min-height: 30px;
+    min-width: 0;
+    flex: 0 0 auto; /* keep primary action full width of its label */
     box-shadow: 0 1px 2px color-mix(in srgb, var(--btn-bg) 35%, transparent);
-    min-width: 5.5rem;
   }
   #send:hover:not(:disabled) {
     box-shadow: 0 2px 6px color-mix(in srgb, var(--btn-bg) 40%, transparent);
@@ -2395,7 +2487,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         </span>
       </div>
       <div class="composer-shell">
-        <textarea id="composer" placeholder="Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)" rows="3"></textarea>
+        <textarea id="composer" placeholder="Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)" rows="1"></textarea>
         <div class="actions">
           <button id="btn-mode" class="secondary mode-normal" type="button" title="Mode: Normal — Ask before running tools (Shift+Tab)" aria-label="Cycle session mode">
             <i class="ti ti-route-alt-left" aria-hidden="true"></i>
@@ -3173,6 +3265,7 @@ function acceptSlash(idx) {
     composer.value = next;
     const pos = ctx.start + item.insertText.length;
     composer.setSelectionRange(pos, pos);
+    autosizeComposer();
   }
   closeSlash();
   composer.focus();
@@ -3345,6 +3438,7 @@ function acceptMention(idx) {
     composer.value = next;
     const pos = ctx.start;
     composer.setSelectionRange(pos, pos);
+    autosizeComposer();
   }
   vscode.postMessage({ type: 'pickMention', chip: item.chip });
   closeMention();
@@ -3428,6 +3522,10 @@ function attachCopyButtons(root) {
 }
 
 function fillTextBubble(b, text, html) {
+  // Skip identical HTML/text to avoid full reflow flash while streaming.
+  const key = html ? 'h:' + html : 't:' + (text || '');
+  if (b.dataset.streamKey === key) return;
+  b.dataset.streamKey = key;
   if (html) {
     b.innerHTML = html;
     attachCopyButtons(b);
@@ -3468,10 +3566,14 @@ function fillThoughtBlock(d, t) {
   } else {
     body.className = 'thought-body md';
   }
-  if (t && t.html) {
-    body.innerHTML = t.html;
-  } else {
-    body.textContent = (t && t.text) || '';
+  const bodyKey = t && t.html ? 'h:' + t.html : 't:' + ((t && t.text) || '');
+  if (body.dataset.streamKey !== bodyKey) {
+    body.dataset.streamKey = bodyKey;
+    if (t && t.html) {
+      body.innerHTML = t.html;
+    } else {
+      body.textContent = (t && t.text) || '';
+    }
   }
   if (running && body.scrollHeight > body.clientHeight) {
     body.scrollTop = body.scrollHeight;
@@ -3490,6 +3592,16 @@ function renderToolRow(t, open) {
   const d = document.createElement('details');
   d.className = 'tool-row';
   d.dataset.toolId = t.id || '';
+  d.dataset.streamKey =
+    (t.status || '') +
+    '|' +
+    (t.title || '') +
+    '|' +
+    (t.input || '') +
+    '|' +
+    (t.output || '') +
+    '|' +
+    ((t.paths && t.paths.join(',')) || '');
   if (open) d.open = true;
   const summary = document.createElement('summary');
   // No disclosure arrow — click the row to expand detail (TUI-style fold).
@@ -3554,51 +3666,155 @@ function renderToolRow(t, open) {
   return d;
 }
 
+/** Visible timeline items (empty text segments omitted, TUI-aligned). */
+function visibleTimelineItems(m) {
+  const items = Array.isArray(m.items) ? m.items : null;
+  if (items && items.length) {
+    const out = [];
+    for (const item of items) {
+      if (item.kind === 'text') {
+        if (!(item.text || item.html)) continue;
+        out.push(item);
+      } else if (item.kind === 'tool' && item.tool) {
+        out.push(item);
+      } else if (item.kind === 'thought' && item.thought) {
+        out.push(item);
+      }
+    }
+    return out;
+  }
+  // Legacy shape → synthetic items
+  const out = [];
+  if (m.html || m.text) {
+    out.push({ kind: 'text', text: m.text || '', html: m.html || '' });
+  }
+  if (m.tools && m.tools.length) {
+    for (const t of m.tools) out.push({ kind: 'tool', tool: t });
+  }
+  return out;
+}
+
+function timelineItemSig(item) {
+  if (item.kind === 'text') return 't';
+  if (item.kind === 'tool' && item.tool) return 'tool:' + (item.tool.id || '');
+  if (item.kind === 'thought' && item.thought) return 'th:' + (item.thought.id || '');
+  return '?';
+}
+
+function domTimelineSig(timeline) {
+  return Array.from(timeline.children).map((el) => {
+    if (el.classList.contains('bubble')) return 't';
+    if (el.classList.contains('tool-row')) return 'tool:' + (el.dataset.toolId || '');
+    if (el.classList.contains('thought')) return 'th:' + (el.dataset.thoughtId || '');
+    return '?';
+  }).join('|');
+}
+
+function itemsTimelineSig(items) {
+  return items.map(timelineItemSig).join('|');
+}
+
+/** Build one timeline child for a visible item. */
+function renderTimelineItem(item, openToolIds, openThoughtIds) {
+  if (item.kind === 'text') {
+    const b = document.createElement('div');
+    b.className = 'bubble md';
+    fillTextBubble(b, item.text || '', item.html || '');
+    return b;
+  }
+  if (item.kind === 'tool' && item.tool) {
+    const open = openToolIds && openToolIds.has(item.tool.id);
+    return renderToolRow(item.tool, open);
+  }
+  if (item.kind === 'thought' && item.thought) {
+    const open =
+      !!item.thought.running ||
+      (openThoughtIds && openThoughtIds.has(item.thought.id));
+    return renderThoughtRow(item.thought, open);
+  }
+  return null;
+}
+
+/**
+ * Patch timeline in place when structure matches — only last text/thought/tool
+ * content updates. Avoids full DOM replace flicker while tokens stream.
+ * Returns true if patched; false if caller should rebuild.
+ */
+function patchTimelineInPlace(timeline, m, openToolIds, openThoughtIds) {
+  const items = visibleTimelineItems(m);
+  if (itemsTimelineSig(items) !== domTimelineSig(timeline)) return false;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const el = timeline.children[i];
+    if (!el) return false;
+    if (item.kind === 'text') {
+      fillTextBubble(el, item.text || '', item.html || '');
+    } else if (item.kind === 'tool' && item.tool) {
+      const t = item.tool;
+      const key =
+        (t.status || '') +
+        '|' +
+        (t.title || '') +
+        '|' +
+        (t.input || '') +
+        '|' +
+        (t.output || '') +
+        '|' +
+        ((t.paths && t.paths.join(',')) || '');
+      if (el.dataset.streamKey !== key) {
+        const wasOpen = el.open || (openToolIds && openToolIds.has(t.id));
+        const next = renderToolRow(t, wasOpen);
+        next.dataset.streamKey = key;
+        el.replaceWith(next);
+      }
+    } else if (item.kind === 'thought' && item.thought) {
+      const forceOpen =
+        !!item.thought.running ||
+        (openThoughtIds && openThoughtIds.has(item.thought.id)) ||
+        el.open;
+      fillThoughtBlock(el, item.thought);
+      el.open = forceOpen;
+    }
+  }
+  timeline.classList.add('stream-settled');
+  return true;
+}
+
 /** Build timeline nodes (thoughts + text + tools) in stream order. */
 function renderAssistantTimeline(m, openToolIds, openThoughtIds) {
   const timeline = document.createElement('div');
   timeline.className = 'assistant-timeline';
-  const items = Array.isArray(m.items) ? m.items : null;
-
-  if (items && items.length) {
-    for (const item of items) {
-      if (item.kind === 'text') {
-        const text = item.text || '';
-        const html = item.html || '';
-        // Skip empty text segments — no "…" placeholder bubble (TUI-aligned).
-        if (!text && !html) continue;
-        const b = document.createElement('div');
-        b.className = 'bubble md';
-        fillTextBubble(b, text, html);
-        timeline.appendChild(b);
-      } else if (item.kind === 'tool' && item.tool) {
-        const open = openToolIds && openToolIds.has(item.tool.id);
-        timeline.appendChild(renderToolRow(item.tool, open));
-      } else if (item.kind === 'thought' && item.thought) {
-        const open =
-          !!item.thought.running ||
-          (openThoughtIds && openThoughtIds.has(item.thought.id));
-        timeline.appendChild(renderThoughtRow(item.thought, open));
-      }
-    }
-    return timeline;
+  for (const item of visibleTimelineItems(m)) {
+    const node = renderTimelineItem(item, openToolIds, openThoughtIds);
+    if (node) timeline.appendChild(node);
   }
-
-  // Legacy fallback (no items[]): single bubble + tools at end
-  const hasTools = m.tools && m.tools.length;
-  if (m.html || m.text) {
-    const b = document.createElement('div');
-    b.className = 'bubble md';
-    fillTextBubble(b, m.text, m.html);
-    timeline.appendChild(b);
-  }
-  if (hasTools) {
-    for (const t of m.tools) {
-      const open = openToolIds && openToolIds.has(t.id);
-      timeline.appendChild(renderToolRow(t, open));
-    }
-  }
+  // After first frame, only newly appended blocks (class tl-new) animate.
+  requestAnimationFrame(() => timeline.classList.add('stream-settled'));
   return timeline;
+}
+
+/**
+ * When structure only grows at the end, update prefix in place and append new
+ * nodes (with tl-new enter anim) instead of full rebuild.
+ */
+function appendTimelineDelta(timeline, m, openToolIds, openThoughtIds) {
+  const items = visibleTimelineItems(m);
+  const domCount = timeline.children.length;
+  if (domCount === 0 || items.length <= domCount) return false;
+  const prefix = items.slice(0, domCount);
+  if (itemsTimelineSig(prefix) !== domTimelineSig(timeline)) return false;
+  if (!patchTimelineInPlace(timeline, { items: prefix }, openToolIds, openThoughtIds)) {
+    return false;
+  }
+  for (let i = domCount; i < items.length; i++) {
+    const node = renderTimelineItem(items[i], openToolIds, openThoughtIds);
+    if (!node) continue;
+    node.classList.add('tl-new');
+    timeline.appendChild(node);
+  }
+  timeline.classList.add('stream-settled');
+  return true;
 }
 
 function collectOpenToolIds(wrap) {
@@ -3619,10 +3835,14 @@ function collectOpenThoughtIds(wrap) {
   return ids;
 }
 
-function renderOneMessage(m) {
+function renderOneMessage(m, isNew) {
   const wrap = document.createElement('div');
-  wrap.className = 'msg ' + m.type;
+  wrap.className = 'msg ' + m.type + (isNew ? ' msg-enter' : '');
   wrap.dataset.msgId = m.id || '';
+  if (m.type === 'assistant' && busy) {
+    // Only the live tail should show stream caret — refined after append.
+    wrap.classList.add('streaming');
+  }
   if (m.type === 'user') {
     if (m.chips && m.chips.length) {
       const chips = document.createElement('div');
@@ -3640,10 +3860,21 @@ function renderOneMessage(m) {
     // Thoughts live on the timeline with tools/text (TUI scrollback order).
     wrap.appendChild(renderAssistantTimeline(m, null, null));
   } else {
+    // System lifecycle/info: full-width dashed separator with text in the middle.
     const b = document.createElement('div');
-    b.className = 'bubble';
-    b.innerHTML = icon('info-circle') + '<span></span>';
-    b.querySelector('span').textContent = m.text || '';
+    b.className = 'bubble system-sep';
+    const left = document.createElement('span');
+    left.className = 'system-sep-line';
+    left.setAttribute('aria-hidden', 'true');
+    const text = document.createElement('span');
+    text.className = 'system-sep-text';
+    text.textContent = m.text || '';
+    const right = document.createElement('span');
+    right.className = 'system-sep-line';
+    right.setAttribute('aria-hidden', 'true');
+    b.appendChild(left);
+    b.appendChild(text);
+    b.appendChild(right);
     wrap.appendChild(b);
   }
   return wrap;
@@ -3660,6 +3891,44 @@ function isStreamingTailUpdate(prev, next) {
   }
   const prevLast = prev[prev.length - 1];
   return !!(prevLast && prevLast.id === last.id && prevLast.type === 'assistant');
+}
+
+/** Message ids already mounted — used so re-renders don't re-play enter anim. */
+const seenMsgIds = new Set();
+let stickScrollRaf = 0;
+let stickScrollWanted = false;
+
+/**
+ * Follow stream to bottom without fighting the browser.
+ * rAF-coalesced; small growth snaps, large jumps ease via scrollTo.
+ */
+function requestStickScroll(opts) {
+  const force = !!(opts && opts.force);
+  const smooth = !!(opts && opts.smooth);
+  if (!force) {
+    const near = shouldStickToBottom(
+      messagesEl.scrollTop,
+      messagesEl.scrollHeight,
+      messagesEl.clientHeight,
+      busy ? 96 : 48,
+    );
+    if (!near) return;
+  }
+  stickScrollWanted = true;
+  if (stickScrollRaf) return;
+  stickScrollRaf = requestAnimationFrame(() => {
+    stickScrollRaf = 0;
+    if (!stickScrollWanted) return;
+    stickScrollWanted = false;
+    const max = Math.max(0, messagesEl.scrollHeight - messagesEl.clientHeight);
+    const delta = max - messagesEl.scrollTop;
+    if (delta <= 1) return;
+    if (smooth && delta > 80 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      messagesEl.scrollTo({ top: max, behavior: 'smooth' });
+    } else {
+      messagesEl.scrollTop = max;
+    }
+  });
 }
 
 function patchLastAssistant(m) {
@@ -3680,7 +3949,17 @@ function patchLastAssistant(m) {
   // Drop legacy top-level thought (pre-timeline); everything is in the timeline now.
   wrap.querySelectorAll(':scope > details.thought').forEach((el) => el.remove());
 
+  wrap.classList.toggle('streaming', !!busy);
+
   const oldTimeline = wrap.querySelector(':scope > .assistant-timeline');
+  if (oldTimeline) {
+    if (patchTimelineInPlace(oldTimeline, m, openToolIds, openThoughtIds)) {
+      return true;
+    }
+    if (appendTimelineDelta(oldTimeline, m, openToolIds, openThoughtIds)) {
+      return true;
+    }
+  }
   const nextTimeline = renderAssistantTimeline(m, openToolIds, openThoughtIds);
   if (oldTimeline) oldTimeline.replaceWith(nextTimeline);
   else wrap.appendChild(nextTimeline);
@@ -3690,7 +3969,8 @@ function patchLastAssistant(m) {
 function renderMessages(messages) {
   const next = messages || [];
   const stick = shouldStickToBottom(
-    messagesEl.scrollTop, messagesEl.scrollHeight, messagesEl.clientHeight
+    messagesEl.scrollTop, messagesEl.scrollHeight, messagesEl.clientHeight,
+    busy ? 96 : 48,
   );
 
   // Streaming fast path: only the last assistant bubble changed — avoid wiping
@@ -3703,11 +3983,12 @@ function renderMessages(messages) {
     allMessages = next;
     emptyEl.hidden = true;
     if (patchLastAssistant(next[next.length - 1])) {
-      if (stick) messagesEl.scrollTop = messagesEl.scrollHeight;
+      if (stick) requestStickScroll({ force: true });
       return;
     }
   }
 
+  const prevIds = new Set(allMessages.map((m) => m && m.id).filter(Boolean));
   allMessages = next;
   emptyEl.hidden = allMessages.length > 0;
   messagesEl.innerHTML = '';
@@ -3731,7 +4012,11 @@ function renderMessages(messages) {
   }
 
   for (let i = start; i < end; i++) {
-    messagesEl.appendChild(renderOneMessage(allMessages[i]));
+    const m = allMessages[i];
+    // Enter anim only for messages that just appeared (not history load / re-mount).
+    const isNew = !!(m && m.id && !prevIds.has(m.id) && prevIds.size > 0);
+    messagesEl.appendChild(renderOneMessage(m, isNew));
+    if (m && m.id) seenMsgIds.add(m.id);
   }
 
   if (allMessages.length > VIRT_THRESHOLD) {
@@ -3741,8 +4026,18 @@ function renderMessages(messages) {
     messagesEl.appendChild(bottom);
   }
 
+  // Prune seen ids that left the conversation
+  const live = new Set(allMessages.map((m) => m && m.id).filter(Boolean));
+  for (const id of seenMsgIds) {
+    if (!live.has(id)) seenMsgIds.delete(id);
+  }
+
+  // Mark last assistant streaming state
+  const lastAsst = messagesEl.querySelector('.msg.assistant:last-of-type');
+  if (lastAsst) lastAsst.classList.toggle('streaming', !!busy);
+
   if (stick || allMessages.length <= VIRT_THRESHOLD) {
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    requestStickScroll({ force: true, smooth: true });
   }
 }
 
@@ -3821,6 +4116,15 @@ function setBusy(b) {
   composer.disabled = false;
   if (b) setMeta('working…', true);
   else setMeta(meta.dataset.base || 'idle', false);
+  // Stream caret only on the last assistant bubble while the turn is live.
+  messagesEl.querySelectorAll('.msg.assistant.streaming').forEach((el) => {
+    el.classList.remove('streaming');
+  });
+  if (b) {
+    const nodes = messagesEl.querySelectorAll('.msg.assistant');
+    const last = nodes.length ? nodes[nodes.length - 1] : null;
+    if (last) last.classList.add('streaming');
+  }
   updateSendStopButton();
 }
 
@@ -3834,7 +4138,7 @@ function updateSendStopButton() {
   sendBtn.classList.toggle('is-stop', asStop);
   sendBtn.disabled = busy && !empty; // only disable when busy with draft text
   if (asStop) {
-    sendBtn.innerHTML = '<i class="ti ti-player-stop-filled"></i> Stop';
+    sendBtn.innerHTML = '<i class="ti ti-player-stop"></i> Stop';
     sendBtn.title = 'Stop current turn (Esc)';
     sendBtn.setAttribute('aria-label', 'Stop');
   } else {
@@ -3903,6 +4207,7 @@ sendBtn.addEventListener('click', () => {
   if (!text || busy) return;
   vscode.postMessage({ type: 'send', text });
   composer.value = '';
+  autosizeComposer();
   updateSendStopButton();
 });
 
@@ -3955,7 +4260,20 @@ effortList.addEventListener('click', (e) => {
   acceptEffort(Number(btn.getAttribute('data-effort-idx')));
 });
 
+/** Grow #composer with content; cap at max-height and scroll when full. */
+function autosizeComposer() {
+  if (!composer) return;
+  const minPx = 44; // match #composer min-height
+  const maxPx = 180;
+  composer.style.height = 'auto';
+  const sh = composer.scrollHeight;
+  const next = Math.min(Math.max(sh, minPx), maxPx);
+  composer.style.height = next + 'px';
+  composer.style.overflowY = sh > maxPx ? 'auto' : 'hidden';
+}
+
 composer.addEventListener('input', () => {
+  autosizeComposer();
   syncComposerMenus();
   updateSendStopButton();
 });
@@ -4141,7 +4459,8 @@ composer.addEventListener('keydown', (e) => {
   }
 });
 
-// Keep Send/Stop in sync on first paint
+// Keep Send/Stop + composer height in sync on first paint
+autosizeComposer();
 updateSendStopButton();
 
 window.addEventListener('message', (event) => {
@@ -4201,6 +4520,7 @@ window.addEventListener('message', (event) => {
       composer.value = v.slice(0, pos) + insert + v.slice(pos);
       const next = pos + insert.length;
       composer.setSelectionRange(next, next);
+      autosizeComposer();
     }
     syncMentionFromComposer();
   } else if (msg.type === 'mentionResults') {
