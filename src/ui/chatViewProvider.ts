@@ -8,7 +8,10 @@ import {
   buildPromptBlocks,
   type ContextChip,
 } from "../context/editorContext";
-import { pickContextChips } from "../context/contextPicker";
+import {
+  pickContextChips,
+  searchContextSuggestions,
+} from "../context/contextPicker";
 import { getSettings } from "../config/settings";
 import { logError } from "../log/output";
 import { renderMarkdownToSafeHtml } from "./markdown";
@@ -178,7 +181,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   async addContextFromPicker(): Promise<void> {
     await this.openChat();
+    // Prefer in-webview popover (grok-build style). Fallback QuickPick for
+    // command palette when the webview is not mounted yet.
+    if (this.views.size > 0) {
+      this.post({ type: "openMention" });
+      return;
+    }
     const picked = await pickContextChips();
+    this.addStickyChips(picked);
+  }
+
+  private addStickyChips(picked: ContextChip[]): void {
     for (const c of picked) {
       if (!this.stickyChips.some((x) => x.id === c.id)) {
         this.stickyChips.push(c);
@@ -242,6 +255,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     text?: string;
     path?: string;
     id?: string;
+    query?: string;
+    requestId?: number;
+    chip?: ContextChip;
   }): Promise<void> {
     switch (msg.type) {
       case "ready":
@@ -286,7 +302,41 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         await this.pushFullState();
         break;
       case "addContext":
-        await this.addContextFromPicker();
+        // Open in-webview mention popover (not VS Code QuickPick).
+        this.post({ type: "openMention" });
+        break;
+      case "searchMention": {
+        const requestId = msg.requestId ?? 0;
+        const query = msg.query ?? "";
+        try {
+          const items = await searchContextSuggestions(query, 24);
+          this.post({
+            type: "mentionResults",
+            requestId,
+            query,
+            items: items.map((s) => ({
+              id: s.id,
+              label: s.label,
+              description: s.description ?? "",
+              icon: s.icon,
+              chip: s.chip,
+            })),
+          });
+        } catch (err) {
+          logError("Mention search failed", err);
+          this.post({
+            type: "mentionResults",
+            requestId,
+            query,
+            items: [],
+          });
+        }
+        break;
+      }
+      case "pickMention":
+        if (msg.chip) {
+          this.addStickyChips([msg.chip]);
+        }
         break;
       case "removeChip":
         if (msg.id) {
@@ -851,28 +901,33 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
   .msg.user .chips { justify-content: flex-end; }
   .chip {
-    font-size: 11px; padding: 4px 10px; border-radius: var(--radius-pill);
+    font-size: 11px; padding: 3px 6px 3px 9px; border-radius: var(--radius-pill);
     border: none;
     color: var(--muted);
     background: color-mix(in srgb, var(--fg) 8%, transparent);
-    display: inline-flex; align-items: center; gap: 5px;
-    max-width: 100%; line-height: 1.3;
+    display: inline-flex; align-items: center; gap: 4px;
+    max-width: 100%; line-height: 1.25;
     transition: background var(--ease), color var(--ease);
   }
   .chip:hover {
     color: var(--fg);
     background: var(--list-hover);
   }
+  /* Override global button min-height/padding so close stays a circle */
   .chip button {
     background: transparent; border: none; color: inherit;
-    cursor: pointer; padding: 0; width: 16px; height: 16px;
-    border-radius: var(--radius-pill); font-size: 13px; line-height: 1;
+    cursor: pointer; padding: 0 !important;
+    width: 16px; height: 16px; min-width: 16px; min-height: 0 !important;
+    max-width: 16px; max-height: 16px;
+    border-radius: 50%; font-size: 12px; line-height: 1;
     display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0; box-shadow: none; transform: none;
     opacity: 0.7; transition: opacity var(--ease), background var(--ease);
   }
   .chip button:hover {
     opacity: 1; background: color-mix(in srgb, var(--fg) 12%, transparent);
   }
+  .chip button:active:not(:disabled) { transform: none; }
 
   /* ── Thoughts & tools ── */
   .thought {
@@ -957,6 +1012,81 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
   #sticky {
     display: flex; flex-wrap: wrap; gap: 6px; min-height: 0;
+  }
+  .composer-wrap {
+    position: relative;
+    display: flex; flex-direction: column;
+  }
+  /* @ mention popover — above input, like grok-build file_search dropdown */
+  #mention-popover {
+    position: absolute;
+    left: 0; right: 0; bottom: calc(100% + 6px);
+    z-index: 20;
+    max-height: min(280px, 42vh);
+    display: flex; flex-direction: column;
+    background: var(--input-bg);
+    color: var(--fg);
+    border-radius: var(--radius-md);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--fg) 12%, transparent),
+      0 8px 24px color-mix(in srgb, var(--bg) 55%, #000);
+    overflow: hidden;
+  }
+  #mention-popover[hidden] { display: none !important; }
+  #mention-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 8px 10px 6px;
+    font-size: 11px; color: var(--muted); font-weight: 500;
+    border-bottom: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
+    flex-shrink: 0;
+  }
+  #mention-head .hint { opacity: 0.85; }
+  #mention-list {
+    overflow-y: auto; padding: 4px;
+    flex: 1; min-height: 0;
+  }
+  .mention-item {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; text-align: left;
+    padding: 7px 8px; border: none; border-radius: var(--radius-sm);
+    background: transparent; color: var(--fg);
+    font: inherit; font-size: 12px; cursor: pointer;
+    min-height: 32px;
+  }
+  .mention-item:hover {
+    background: var(--list-hover);
+  }
+  .mention-item.active {
+    background: color-mix(in srgb, var(--btn-bg) 28%, transparent);
+  }
+  .mention-item .mi-icon {
+    width: 22px; height: 22px; border-radius: 7px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--muted) 14%, transparent);
+    color: color-mix(in srgb, var(--fg) 72%, var(--muted));
+    flex-shrink: 0;
+  }
+  .mention-item.active .mi-icon {
+    color: var(--btn-fg);
+    background: var(--btn-bg);
+  }
+  .mention-item:hover:not(.active) .mi-icon {
+    color: var(--fg);
+    background: color-mix(in srgb, var(--fg) 14%, transparent);
+  }
+  .mention-item .mi-body {
+    min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px;
+  }
+  .mention-item .mi-label {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 500;
+  }
+  .mention-item .mi-desc {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 10px; color: var(--muted);
+  }
+  #mention-empty {
+    padding: 14px 12px; color: var(--muted); font-size: 12px; text-align: center;
   }
   .composer-shell {
     display: flex; flex-direction: column; gap: 8px;
@@ -1061,13 +1191,23 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   </div>
   <footer>
     <div id="sticky"></div>
-    <div class="composer-shell">
-      <textarea id="composer" placeholder="Message Grok… (@ context, Enter send, Shift+Enter newline)" rows="3"></textarea>
-      <div class="actions">
-        <button id="at" class="secondary icon-btn" type="button" title="Add context" aria-label="Add context"><i class="ti ti-at"></i></button>
-        <button id="stop" class="secondary" type="button" disabled title="Stop"><i class="ti ti-player-stop"></i> Stop</button>
-        <button id="new" class="secondary" type="button" title="New session"><i class="ti ti-plus"></i> New</button>
-        <button id="send" type="button" title="Send"><i class="ti ti-send"></i> Send</button>
+    <div class="composer-wrap">
+      <div id="mention-popover" hidden role="listbox" aria-label="Mention context">
+        <div id="mention-head">
+          <span id="mention-title">@ context</span>
+          <span class="hint">↑↓ · Enter · Esc</span>
+        </div>
+        <div id="mention-list"></div>
+        <div id="mention-empty" hidden>No matches</div>
+      </div>
+      <div class="composer-shell">
+        <textarea id="composer" placeholder="Message Grok… (@ files, Enter send, Shift+Enter newline)" rows="3"></textarea>
+        <div class="actions">
+          <button id="at" class="secondary icon-btn" type="button" title="Add context (@)" aria-label="Add context"><i class="ti ti-at"></i></button>
+          <button id="stop" class="secondary" type="button" disabled title="Stop"><i class="ti ti-player-stop"></i> Stop</button>
+          <button id="new" class="secondary" type="button" title="New session"><i class="ti ti-plus"></i> New</button>
+          <button id="send" type="button" title="Send"><i class="ti ti-send"></i> Send</button>
+        </div>
       </div>
     </div>
   </footer>
@@ -1086,11 +1226,168 @@ const stickyEl = document.getElementById('sticky');
 const reviewBar = document.getElementById('review-bar');
 const reviewLabel = document.getElementById('review-label');
 const btnModel = document.getElementById('btn-model');
+const mentionPopover = document.getElementById('mention-popover');
+const mentionList = document.getElementById('mention-list');
+const mentionEmpty = document.getElementById('mention-empty');
+const mentionTitle = document.getElementById('mention-title');
 let busy = false;
 let allMessages = [];
 let stickyChips = [];
 const EST_ROW = 96;
 const VIRT_THRESHOLD = 40;
+
+/* ── @ mention popover (synced with grok-build file_search UX) ── */
+let mentionOpen = false;
+let mentionItems = [];
+let mentionIndex = 0;
+let mentionRequestId = 0;
+let mentionAtCtx = null; // { start, end } of full @-token
+let mentionSearchTimer = null;
+
+function detectAtContext(text, cursor) {
+  if (cursor < 0 || cursor > text.length) return null;
+  const before = text.slice(0, cursor);
+  const atIdx = before.lastIndexOf('@');
+  if (atIdx < 0) return null;
+  if (atIdx > 0) {
+    const prev = text[atIdx - 1];
+    if (/[A-Za-z0-9_]/.test(prev)) return null;
+  }
+  let tokenEnd = text.length;
+  for (let i = atIdx + 1; i < text.length; i++) {
+    const ch = text[i];
+    if (/\\s/.test(ch) || ch === ',' || ch === ';') {
+      tokenEnd = i;
+      break;
+    }
+  }
+  if (cursor > tokenEnd) return null;
+  return {
+    start: atIdx,
+    end: tokenEnd,
+    query: text.slice(atIdx + 1, cursor),
+  };
+}
+
+function closeMention() {
+  mentionOpen = false;
+  mentionItems = [];
+  mentionIndex = 0;
+  mentionAtCtx = null;
+  mentionPopover.hidden = true;
+  mentionList.innerHTML = '';
+  mentionEmpty.hidden = true;
+  if (mentionSearchTimer) {
+    clearTimeout(mentionSearchTimer);
+    mentionSearchTimer = null;
+  }
+}
+
+function mentionIconName(icon) {
+  if (icon === 'folder') return 'folder';
+  if (icon === 'selection') return 'highlight';
+  if (icon === 'search') return 'search';
+  return 'file';
+}
+
+function renderMentionList() {
+  if (!mentionOpen) return;
+  mentionPopover.hidden = false;
+  mentionTitle.textContent = mentionAtCtx
+    ? ('@' + (mentionAtCtx.query || '…'))
+    : '@ context';
+  if (!mentionItems.length) {
+    mentionList.innerHTML = '';
+    mentionEmpty.hidden = false;
+    mentionEmpty.textContent = 'No matches';
+    return;
+  }
+  mentionEmpty.hidden = true;
+  mentionEmpty.textContent = 'No matches';
+  mentionList.innerHTML = mentionItems.map((it, i) =>
+    '<button type="button" class="mention-item' + (i === mentionIndex ? ' active' : '') +
+    '" role="option" data-idx="' + i + '" aria-selected="' + (i === mentionIndex) + '">' +
+      '<span class="mi-icon">' + icon(mentionIconName(it.icon)) + '</span>' +
+      '<span class="mi-body">' +
+        '<span class="mi-label">' + esc(it.label) + '</span>' +
+        (it.description
+          ? '<span class="mi-desc">' + esc(it.description) + '</span>'
+          : '') +
+      '</span>' +
+    '</button>'
+  ).join('');
+  const active = mentionList.querySelector('.mention-item.active');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+function requestMentionSearch(query) {
+  const requestId = ++mentionRequestId;
+  vscode.postMessage({ type: 'searchMention', query: query || '', requestId });
+}
+
+function openMentionFromContext(ctx) {
+  mentionOpen = true;
+  mentionAtCtx = ctx;
+  mentionIndex = 0;
+  mentionPopover.hidden = false;
+  mentionEmpty.hidden = false;
+  mentionEmpty.textContent = 'Searching…';
+  mentionList.innerHTML = '';
+  mentionTitle.textContent = '@' + (ctx.query || '…');
+  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
+  mentionSearchTimer = setTimeout(() => {
+    requestMentionSearch(ctx.query || '');
+  }, 40);
+}
+
+function syncMentionFromComposer() {
+  const text = composer.value;
+  const cursor = composer.selectionStart || 0;
+  const ctx = detectAtContext(text, cursor);
+  if (!ctx) {
+    if (mentionOpen) closeMention();
+    return;
+  }
+  const same =
+    mentionAtCtx &&
+    mentionAtCtx.start === ctx.start &&
+    mentionAtCtx.query === ctx.query;
+  mentionAtCtx = ctx;
+  if (!mentionOpen) {
+    openMentionFromContext(ctx);
+    return;
+  }
+  if (!same) {
+    mentionIndex = 0;
+    if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
+    mentionSearchTimer = setTimeout(() => {
+      requestMentionSearch(ctx.query || '');
+    }, 60);
+    mentionTitle.textContent = '@' + (ctx.query || '…');
+  }
+}
+
+function acceptMention(idx) {
+  const item = mentionItems[idx];
+  if (!item || !item.chip) return;
+  const text = composer.value;
+  const ctx = mentionAtCtx || detectAtContext(text, composer.selectionStart || 0);
+  if (ctx) {
+    const next = text.slice(0, ctx.start) + text.slice(ctx.end);
+    composer.value = next;
+    const pos = ctx.start;
+    composer.setSelectionRange(pos, pos);
+  }
+  vscode.postMessage({ type: 'pickMention', chip: item.chip });
+  closeMention();
+  composer.focus();
+}
+
+function moveMention(delta) {
+  if (!mentionItems.length) return;
+  mentionIndex = (mentionIndex + delta + mentionItems.length) % mentionItems.length;
+  renderMentionList();
+}
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({
@@ -1339,6 +1636,7 @@ stickyEl.addEventListener('click', (e) => {
 });
 
 sendBtn.addEventListener('click', () => {
+  if (mentionOpen) closeMention();
   const text = composer.value.trim();
   if (!text || busy) return;
   vscode.postMessage({ type: 'send', text });
@@ -1347,8 +1645,19 @@ sendBtn.addEventListener('click', () => {
 
 stopBtn.addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
 newBtn.addEventListener('click', () => vscode.postMessage({ type: 'newSession' }));
-document.getElementById('at').addEventListener('click', () =>
-  vscode.postMessage({ type: 'addContext' }));
+document.getElementById('at').addEventListener('click', () => {
+  composer.focus();
+  const pos = composer.selectionStart || 0;
+  const v = composer.value;
+  const needsAt = !detectAtContext(v, pos);
+  if (needsAt) {
+    const insert = (pos === 0 || /\\s/.test(v[pos - 1] || '')) ? '@' : ' @';
+    composer.value = v.slice(0, pos) + insert + v.slice(pos);
+    const next = pos + insert.length;
+    composer.setSelectionRange(next, next);
+  }
+  syncMentionFromComposer();
+});
 document.getElementById('empty-start').addEventListener('click', () =>
   vscode.postMessage({ type: 'startAgent' }));
 document.getElementById('empty-login').addEventListener('click', () =>
@@ -1359,24 +1668,55 @@ document.getElementById('btn-history').addEventListener('click', () =>
 document.getElementById('btn-review').addEventListener('click', () =>
   vscode.postMessage({ type: 'reviewEdits' }));
 
+mentionList.addEventListener('mousedown', (e) => {
+  // Prevent composer blur before click completes.
+  e.preventDefault();
+});
+mentionList.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-idx]');
+  if (!btn) return;
+  acceptMention(Number(btn.getAttribute('data-idx')));
+});
+
+composer.addEventListener('input', () => syncMentionFromComposer());
+composer.addEventListener('click', () => syncMentionFromComposer());
+composer.addEventListener('keyup', (e) => {
+  if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+    syncMentionFromComposer();
+  }
+});
+
 composer.addEventListener('keydown', (e) => {
+  if (mentionOpen) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveMention(1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveMention(-1);
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      if (mentionItems.length) {
+        e.preventDefault();
+        acceptMention(mentionIndex);
+        return;
+      }
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeMention();
+      return;
+    }
+  }
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     sendBtn.click();
   }
   if (e.key === 'Escape' && busy) {
     vscode.postMessage({ type: 'cancel' });
-  }
-  if (e.key === '@') {
-    // Open picker after the character is inserted
-    setTimeout(() => {
-      const v = composer.value;
-      const pos = composer.selectionStart || 0;
-      const before = v.slice(0, pos);
-      if (/(^|[\\s])@$/.test(before)) {
-        vscode.postMessage({ type: 'addContext' });
-      }
-    }, 0);
   }
 });
 
@@ -1413,6 +1753,25 @@ window.addEventListener('message', (event) => {
     renderSticky();
   } else if (msg.type === 'review') {
     setReview(msg.count || 0);
+  } else if (msg.type === 'openMention') {
+    composer.focus();
+    const pos = composer.selectionStart || 0;
+    const v = composer.value;
+    if (!detectAtContext(v, pos)) {
+      const insert = (pos === 0 || /\\s/.test(v[pos - 1] || '')) ? '@' : ' @';
+      composer.value = v.slice(0, pos) + insert + v.slice(pos);
+      const next = pos + insert.length;
+      composer.setSelectionRange(next, next);
+    }
+    syncMentionFromComposer();
+  } else if (msg.type === 'mentionResults') {
+    if (msg.requestId !== mentionRequestId) return;
+    mentionItems = msg.items || [];
+    mentionIndex = 0;
+    if (!mentionOpen) {
+      mentionOpen = true;
+    }
+    renderMentionList();
   }
 });
 
