@@ -3,6 +3,7 @@
   "displayName": "Grok Build - Community",
   "description": "Community VS Code host for Grok Build — thin ACP client for `grok agent stdio`. Requires the Grok Build CLI (`grok`) on PATH.",
   "version": "0.3.1",
+  "packageManager": "yarn@4.12.0",
   "publisher": "tienpham",
   "license": "MIT",
   "icon": "media/icon.png",

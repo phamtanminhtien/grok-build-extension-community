@@ -22,26 +22,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Enable Corepack
+        run: corepack enable
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: yarn
 
       - name: Install dependencies
-        run: npm ci
+        run: yarn install --immutable
 
       - name: Typecheck
-        run: npm run typecheck
+        run: yarn typecheck
 
       - name: Unit tests
-        run: npm test
+        run: yarn test
 
       - name: Build
-        run: npm run build
+        run: yarn build
 
       - name: Package VSIX
-        run: npm run package
+        run: yarn package
 
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@v4
