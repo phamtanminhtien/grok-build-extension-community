@@ -127,7 +127,7 @@ Record architectural decisions. Status: **Proposed** | **Accepted** | **Supersed
    running binary before coding UI.
 2. Whether `session/load` supports listing sessions or only load-by-id
    (affects L2 picker).
-3. Product name / publisher id for `package.json` (`xai` vs `spacexai` vs other).
+3. ~~Product name / publisher id for `package.json`~~ → **Accepted:** publisher `tienpham` (community).
 4. Telemetry: extension-side vs agent-only.
 5. Minimum `grok` version gate number for first public VSIX.
 6. Whether to support `grok agent serve` (WebSocket) for remote agent

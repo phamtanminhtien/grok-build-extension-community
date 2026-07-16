@@ -8,6 +8,7 @@ import type { AuthService } from "../auth/authService";
 import { pickLoginMethod, promptAndStoreApiKey } from "../auth/authService";
 import { formatLogoutMessage } from "../auth/authFlow";
 import { setModelSetting } from "../config/modelService";
+import { setAlwaysApprove } from "../config/alwaysApprove";
 import { getSettings, resolveSessionCwd } from "../config/settings";
 import { openOutput } from "../log/output";
 import { tabFromSlashName } from "../extensions/tabs";
@@ -181,7 +182,7 @@ async function runHostAction(
     case "settings":
       await vscode.commands.executeCommand(
         "workbench.action.openSettings",
-        "@ext:xai.grok-build-community",
+        "@ext:tienpham.grok-build-community",
       );
       // Fallback filter if publisher id differs
       await vscode.commands.executeCommand(
@@ -190,7 +191,6 @@ async function runHostAction(
       );
       return "Opened Grok settings";
     case "alwaysApprove": {
-      const cfg = vscode.workspace.getConfiguration("grok");
       const arg = inv.args.trim().toLowerCase();
       let next: boolean;
       if (!arg) {
@@ -200,8 +200,11 @@ async function runHostAction(
       } else {
         next = true;
       }
-      await cfg.update("alwaysApprove", next, vscode.ConfigurationTarget.Global);
-      return next
+      const applied = await setAlwaysApprove(next);
+      if (next && !applied) {
+        return "always-approve left OFF";
+      }
+      return applied
         ? "always-approve ON — restart agent for spawn flag to apply"
         : "always-approve OFF — restart agent for spawn flag to apply";
     }

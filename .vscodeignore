@@ -13,3 +13,8 @@ esbuild.mjs
 **/.DS_Store
 *.md
 !README.md
+!CHANGELOG.md
+!LICENSE
+**/.git/**
+**/.github/**
+*.vsix

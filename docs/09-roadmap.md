@@ -68,8 +68,8 @@ Verified headless 2026-07-16: `initialize` + `session/new` + prompt → `L0 OK` 
 ### Exit artifacts
 
 - [x] Runnable extension in Extension Development Host (`F5`) + sidebar chat
-- [ ] Internal VSIX packaging polish
-- Known limitations: no browser OAuth UI yet (API key + CLI auth), terminal host capability deferred
+- [x] Internal VSIX packaging polish (icon, MIT, CHANGELOG, `npm run package`)
+- Known limitations: terminal host capability deferred; binary not bundled; Win/Linux smoke TBD
 
 ---
 

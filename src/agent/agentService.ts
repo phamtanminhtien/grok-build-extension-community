@@ -1309,6 +1309,15 @@ export class AgentService implements vscode.Disposable {
   }
 
   private async startInternal(): Promise<void> {
+    // Honor VS Code Workspace Trust — refuse to spawn the agent in restricted mode.
+    if (!vscode.workspace.isTrusted) {
+      const message =
+        "Grok Build requires a trusted workspace to start the agent. " +
+        "Use “Manage Workspace Trust” and trust this folder, then try again.";
+      this.setState({ kind: "error", message });
+      throw new Error(message);
+    }
+
     this.setState({ kind: "starting" });
     const settings = getSettings();
     const timeoutMs = settings.initializeTimeoutMs;

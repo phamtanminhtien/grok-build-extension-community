@@ -110,27 +110,32 @@ function parseQuestion(raw: unknown): QuestionView | null {
   }
   const multiSelect = !!(q.multiSelect ?? q.multi_select);
   const optionsRaw = Array.isArray(q.options) ? q.options : [];
-  const options: QuestionOptionView[] = optionsRaw
-    .map((opt) => {
-      if (!opt || typeof opt !== "object") {
-        return null;
-      }
-      const o = opt as Record<string, unknown>;
-      const label = String(o.label ?? "").trim();
-      if (!label) {
-        return null;
-      }
-      return {
-        label,
-        description: String(o.description ?? ""),
-        preview:
-          o.preview != null && String(o.preview).trim()
-            ? String(o.preview)
-            : undefined,
-        id: o.id != null ? String(o.id) : undefined,
-      };
-    })
-    .filter((x): x is QuestionOptionView => !!x);
+  const options: QuestionOptionView[] = [];
+  for (const opt of optionsRaw) {
+    if (!opt || typeof opt !== "object") {
+      continue;
+    }
+    const o = opt as Record<string, unknown>;
+    const label = String(o.label ?? "").trim();
+    if (!label) {
+      continue;
+    }
+    const previewRaw =
+      o.preview != null && String(o.preview).trim()
+        ? String(o.preview)
+        : undefined;
+    const option: QuestionOptionView = {
+      label,
+      description: String(o.description ?? ""),
+    };
+    if (previewRaw !== undefined) {
+      option.preview = previewRaw;
+    }
+    if (o.id != null) {
+      option.id = String(o.id);
+    }
+    options.push(option);
+  }
   return {
     question,
     options,

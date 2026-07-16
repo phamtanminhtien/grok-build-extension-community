@@ -28,6 +28,7 @@ import {
   logInfo,
   openOutput,
 } from "./log/output";
+import { onAlwaysApproveConfigChanged } from "./config/alwaysApprove";
 import { resolveSessionCwd } from "./config/settings";
 import { pickGrokSessionToResume } from "./session/sessionPicker";
 import { ChatViewProvider } from "./ui/chatViewProvider";
@@ -77,6 +78,12 @@ export function activate(context: vscode.ExtensionContext): void {
     chat,
     statusBar,
     diffs,
+    // Security: confirm when alwaysApprove is turned on via Settings UI.
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("grok.alwaysApprove")) {
+        void onAlwaysApproveConfigChanged();
+      }
+    }),
     // Same provider instance for activity-bar fallback + secondary sidebar
     vscode.window.registerWebviewViewProvider(
       ChatViewProvider.viewType,

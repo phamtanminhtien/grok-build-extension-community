@@ -86,15 +86,15 @@ Enabling `grok.alwaysApprove` requires a modal:
 
 ## Security checklist before release
 
-- [ ] Workspace Trust honored
-- [ ] alwaysApprove defaults false + confirm
-- [ ] Permission timeout deny
-- [ ] SecretStorage for keys
-- [ ] CSP on webview
-- [ ] spawn without shell
-- [ ] binary path cannot execute through `sh -c`
-- [ ] no full RPC body logging by default
-- [ ] remote/WSL documented (binary on remote)
+- [x] Workspace Trust honored (agent start refused when untrusted)
+- [x] alwaysApprove defaults false + confirm (Settings UI + `/always-approve`)
+- [x] Permission timeout deny
+- [x] SecretStorage for keys
+- [x] CSP on webview (nonce script-src)
+- [x] spawn without shell (`shell: false`)
+- [x] binary path cannot execute through `sh -c`
+- [x] no full RPC body logging by default
+- [x] remote/WSL documented (binary on remote) — see root README
 
 ## Next
 

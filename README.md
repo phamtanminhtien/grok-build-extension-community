@@ -1,27 +1,66 @@
 # Grok Build - Community
 
-Community VS Code host for [Grok Build](../grok-build/): a thin TypeScript client
+Community VS Code host for **Grok Build**: a thin TypeScript client
 that speaks **ACP** to `grok agent stdio`. The agent runtime stays in Rust.
-
-## Status
 
 | Phase | Status |
 |-------|--------|
 | Design docs | Done (`docs/`) |
 | L0 — Protocol wire-up | Done |
 | L1 — MVP chat | Done |
-| **L2 — IDE-native polish** | **Implemented** (markdown, `@` context, model pick, diffs, history; session/load capability-gated) |
+| L2 — IDE-native polish | Implemented |
 | L3 — Depth & productization | Not started |
-
-## Principle
 
 > Do not reimplement the agent. Spawn `grok agent stdio`, speak ACP, map VS Code primitives.
 
-## Prerequisites
+---
 
-- Node 20+
-- [Grok Build CLI](../grok-build/) (`grok` on PATH or set `grok.binaryPath`)
-- CLI auth already set up (`~/.grok`)
+## Install (users)
+
+### Prerequisites
+
+1. **VS Code** 1.93+ (Secondary Side Bar chat tab needs **≥ 1.106**)
+2. **Grok Build CLI** (`grok`) on your `PATH`, **or** set `grok.binaryPath` to the absolute path
+3. **Auth**: CLI login (`grok login` / `~/.grok`) **or** **Grok Build: Set API Key** / **Login** in the extension
+
+The VSIX does **not** bundle the `grok` binary. Install the CLI first on the machine that runs the extension host (local, or the **remote** side of SSH/WSL).
+
+### From VSIX (sideload)
+
+```bash
+# In this repo
+cd grok-vscode-extension
+npm install
+npm run package   # → grok-build-community-0.3.1.vsix
+```
+
+Then in VS Code: **Extensions → ⋯ → Install from VSIX…** and pick the `.vsix`.
+
+### From Marketplace (when published)
+
+Search **“Grok Build - Community”** (publisher id: `tienpham`) and install.
+
+### First run
+
+1. Open a **trusted** workspace (Workspace Trust is required to start the agent)
+2. Open chat: **Grok Build: Open Chat** (or the activity bar / secondary sidebar icon)
+3. If the agent is not running: **Grok Build: Start Agent**
+4. Type a prompt and Send (active file / selection attach by default)
+
+### Remote-SSH / WSL
+
+The extension host runs **on the remote**. Install `grok` **on the remote**, not only on your local Mac/PC. Set `grok.binaryPath` to the remote path if needed.
+
+### Troubleshooting
+
+| Symptom | What to try |
+|---------|-------------|
+| Binary not found | Install CLI; set `grok.binaryPath`; check Output → **Grok Build** |
+| Workspace not trusted | Command Palette → **Manage Workspace Trust** |
+| Auth / 401 | **Grok Build: Login** or **Set API Key**; or `grok login` in a terminal |
+| Stuck / hung agent | **Grok Build: Restart Agent** |
+
+---
 
 ## Develop
 
@@ -36,20 +75,26 @@ npm test
 ### Headless L0 smoke (no VS Code)
 
 ```bash
-npm run smoke:cli
+npm run smoke:cli   # requires `grok` on PATH
 ```
 
 ### Extension Development Host
 
-1. Open this folder in VS Code / Cursor
-2. Press **F5** (Run Extension)
-3. **Both locations work:**
-   - **Activity Bar** (left) — classic Grok Build icon (always)
-   - **Secondary Side Bar** (right) — tab next to Chat / Claude Code / Codex (VS Code ≥ 1.106)
-4. **Grok Build: Open Chat** prefers the secondary tab strip; **Open Chat (Activity Bar)** forces the left sidebar
-5. Type a prompt and Send (active file / selection attach automatically)
+1. Open this folder in VS Code / Cursor  
+2. Press **F5** (Run Extension)  
+3. **Activity Bar** (left) and/or **Secondary Side Bar** (right, VS Code ≥ 1.106)  
+4. Send a prompt  
 
-Full checklist: [docs/L0-manual-test.md](docs/L0-manual-test.md)
+Full checklist: `docs/L0-manual-test.md`
+
+### Package / publish
+
+```bash
+npm run package          # local .vsix
+# npm run publish:vsce   # requires vsce login / PAT for publisher `tienpham`
+```
+
+---
 
 ## Commands
 
@@ -62,23 +107,23 @@ Full checklist: [docs/L0-manual-test.md](docs/L0-manual-test.md)
 | `Grok Build: Cancel Turn` | `session/cancel` |
 | `Grok Build: Add Context…` | `@` sticky context picker |
 | `Grok Build: Select Model` | QuickPick → `grok.model` + agent restart |
-| `Grok Build: Resume Session…` | Same as TUI: `_x.ai/session_summaries/*` + FTS search; disk fallback; `session/load` |
+| `Grok Build: Resume Session…` | Session history + `session/load` when available |
 | `Grok Build: Review Edits…` | Multi-file diff review |
-| `Grok Build: Login / Set API Key` | SecretStorage API key |
+| `Grok Build: Login / Set API Key` | Browser login or SecretStorage API key |
+| `Grok Build: Smoke Test (L0)` | Headless-style prompt via agent |
+| `Grok Build: Restart / Stop Agent` | Process lifecycle |
 
 ### Slash commands (chat composer)
 
-Type `/` in the chat (same names as [Grok Build TUI](../grok-build/)):
+Type `/` in the chat (same names as Grok Build TUI):
 
 | Layer | Examples | Behavior |
 |-------|----------|----------|
 | **Host** | `/new`, `/resume`, `/model`, `/help`, `/settings`, `/copy`, `/export`, `/always-approve`, `/login`… | Run in the extension |
-| **Agent** | `/compact`, `/loop`, `/plan`, skills, hooks/plugins… | Pass-through as prompt (shell resolves) |
+| **Agent** | `/compact`, `/loop`, `/plan`, skills, hooks/plugins… | Pass-through as prompt |
 | **TUI-only** | `/vim-mode`, `/theme`, `/dashboard`, `/minimal`… | Listed for parity; not available in VS Code |
 
-Autocomplete dropdown matches the TUI: ↑↓ Enter Esc. ACP `available_commands_update` merges skills into the list (host wins on name collision).
-| `Grok Build: Smoke Test (L0)` | Headless-style prompt via agent |
-| `Grok Build: Restart / Stop Agent` | Process lifecycle |
+---
 
 ## Settings
 
@@ -86,9 +131,11 @@ Autocomplete dropdown matches the TUI: ↑↓ Enter Esc. ACP `available_commands
 |---------|-------------|
 | `grok.binaryPath` | Absolute path to `grok` (empty = PATH / `~/.grok/bin`) |
 | `grok.model` | Optional `--model` |
-| `grok.alwaysApprove` | Pass `--always-approve` (dangerous) |
+| `grok.alwaysApprove` | Pass `--always-approve` (dangerous; confirm on enable) |
 | `grok.cwd` | Session cwd (empty = first workspace folder) |
 | `grok.initializeTimeoutMs` | Spawn/init timeout (default 30s) |
+
+---
 
 ## Layout
 
@@ -99,25 +146,32 @@ src/
   ui/             # chat webview + status bar
   auth/           # SecretStorage API key
   context/        # active file / selection → ACP blocks
-  config/settings.ts
+  config/         # settings + alwaysApprove guard
   log/output.ts
-media/grok.svg              # activity bar (Tabler message-chatbot)
-media/tabler/               # webfont copied on build for chat UI
+media/grok.svg              # activity bar
+media/icon.png              # marketplace icon (128×128)
+media/tabler/               # webfont copied on build
 scripts/smoke-cli.mjs
 docs/
 ```
 
 Chat UI uses **[@tabler/icons-webfont](https://tabler.io/icons)** (`npm run build` copies CSS/fonts into `media/tabler/`).
 
+---
 
 ## Documentation
 
-Start here: **[docs/README.md](docs/README.md)**
+Start here: `docs/README.md` (design docs in the repo; not shipped inside the VSIX).
 
 | Doc | Topic |
 |-----|--------|
-| [01 Overview](docs/01-overview.md) | Goals / non-goals |
-| [02 Architecture](docs/02-architecture.md) | Process model & modules |
-| [03 ACP](docs/03-acp-integration.md) | Protocol integration |
-| [09 Roadmap](docs/09-roadmap.md) | L0–L3 phases |
-| [L0 Manual Test](docs/L0-manual-test.md) | Acceptance steps |
+| `docs/01-overview.md` | Goals / non-goals |
+| `docs/02-architecture.md` | Process model & modules |
+| `docs/03-acp-integration.md` | Protocol integration |
+| `docs/08-security.md` | Trust, permissions, secrets |
+| `docs/09-roadmap.md` | L0–L3 phases |
+| `CHANGELOG.md` | Release notes |
+
+## License
+
+MIT — see `LICENSE`.

@@ -35,10 +35,12 @@ export async function spawnAgentProcess(options?: {
   logInfo(`Spawning: ${binary} ${args.join(" ")}`);
   logInfo(`Binary version: ${version}`);
 
+  // Never shell-interpret the binary path or args (security checklist).
   const child = spawn(binary, args, {
     cwd: process.cwd(),
     env: options?.env ?? { ...process.env },
     stdio: ["pipe", "pipe", "pipe"],
+    shell: false,
     windowsHide: true,
   });
 
