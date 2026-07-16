@@ -13,6 +13,105 @@ export interface ContextChip {
   selectedText?: string;
 }
 
+/** Whether auto-attach of active editor/selection is enabled in settings. */
+export function isAutoAttachEnabled(
+  settings: ReturnType<typeof getSettings> = getSettings(),
+): boolean {
+  return settings.autoAttachActiveFile || settings.autoAttachSelection;
+}
+
+/**
+ * Focused editor chip for UI preview (ignores auto-attach on/off).
+ * Still respects exclude globs. Prefer selection label when selection exists.
+ */
+export function getActiveEditorChip(
+  settings: ReturnType<typeof getSettings> = getSettings(),
+): ContextChip | null {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.uri.scheme !== "file") {
+    return null;
+  }
+
+  const fsPath = editor.document.uri.fsPath;
+  if (isExcluded(fsPath, settings.excludeGlob)) {
+    return null;
+  }
+
+  const name = path.basename(fsPath);
+  const selection = editor.selection;
+  if (!selection.isEmpty) {
+    const start = selection.start.line + 1;
+    const end = selection.end.line + 1;
+    return {
+      id: `sel:${fsPath}:${start}-${end}`,
+      label: `selection:${name}#L${start}-L${end}`,
+      kind: "selection",
+      fsPath,
+      startLine: start,
+      endLine: end,
+      selectedText: editor.document.getText(selection).slice(0, 50_000),
+    };
+  }
+
+  return {
+    id: `file:${fsPath}`,
+    label: `file:${name}`,
+    kind: "file",
+    fsPath,
+  };
+}
+
+/**
+ * Current active-editor context chip that would be auto-attached on send.
+ * Returns null when disabled, no file editor, or path is excluded.
+ */
+export function getAutoAttachChip(
+  settings: ReturnType<typeof getSettings> = getSettings(),
+): ContextChip | null {
+  if (!isAutoAttachEnabled(settings)) {
+    return null;
+  }
+
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.uri.scheme !== "file") {
+    return null;
+  }
+
+  const fsPath = editor.document.uri.fsPath;
+  if (isExcluded(fsPath, settings.excludeGlob)) {
+    return null;
+  }
+
+  const name = path.basename(fsPath);
+  const selection = editor.selection;
+  const hasSelection = !selection.isEmpty;
+
+  if (settings.autoAttachSelection && hasSelection) {
+    const start = selection.start.line + 1;
+    const end = selection.end.line + 1;
+    return {
+      id: `sel:${fsPath}:${start}-${end}`,
+      label: `selection:${name}#L${start}-L${end}`,
+      kind: "selection",
+      fsPath,
+      startLine: start,
+      endLine: end,
+      selectedText: editor.document.getText(selection).slice(0, 50_000),
+    };
+  }
+
+  if (settings.autoAttachActiveFile) {
+    return {
+      id: `file:${fsPath}`,
+      label: `file:${name}`,
+      kind: "file",
+      fsPath,
+    };
+  }
+
+  return null;
+}
+
 /**
  * Build ACP content blocks: user text + sticky chips + optional active editor.
  */
@@ -48,40 +147,9 @@ export function buildPromptBlocks(
     return { blocks, chips };
   }
 
-  const editor = vscode.window.activeTextEditor;
-  if (!editor || editor.document.uri.scheme !== "file") {
-    return { blocks, chips };
-  }
-
-  const fsPath = editor.document.uri.fsPath;
-  if (isExcluded(fsPath, settings.excludeGlob)) {
-    return { blocks, chips };
-  }
-
-  const name = path.basename(fsPath);
-  const selection = editor.selection;
-  const hasSelection = !selection.isEmpty;
-
-  if (settings.autoAttachSelection && hasSelection) {
-    const start = selection.start.line + 1;
-    const end = selection.end.line + 1;
-    const selected = editor.document.getText(selection);
-    addChip({
-      id: `sel:${fsPath}:${start}-${end}`,
-      label: `selection:${name}#L${start}-L${end}`,
-      kind: "selection",
-      fsPath,
-      startLine: start,
-      endLine: end,
-      selectedText: selected.slice(0, 50_000),
-    });
-  } else if (settings.autoAttachActiveFile) {
-    addChip({
-      id: `file:${fsPath}`,
-      label: `file:${name}`,
-      kind: "file",
-      fsPath,
-    });
+  const auto = getAutoAttachChip(settings);
+  if (auto) {
+    addChip(auto);
   }
 
   return { blocks, chips };

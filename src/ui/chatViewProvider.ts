@@ -6,6 +6,8 @@ import { promptAndStoreApiKey } from "../auth/authService";
 import { BinaryNotFoundError } from "../agent/binaryResolver";
 import {
   buildPromptBlocks,
+  getActiveEditorChip,
+  isAutoAttachEnabled,
   type ContextChip,
 } from "../context/editorContext";
 import {
@@ -94,6 +96,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.agent.onTurnEnd(() => {
         this.currentAssistantId = undefined;
         this.post({ type: "busy", busy: false });
+      }),
+      vscode.window.onDidChangeActiveTextEditor(() => this.postAutoContext()),
+      vscode.window.onDidChangeTextEditorSelection((e) => {
+        if (e.textEditor === vscode.window.activeTextEditor) {
+          this.postAutoContext();
+        }
+      }),
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (
+          e.affectsConfiguration("grok.context.autoAttachActiveFile") ||
+          e.affectsConfiguration("grok.context.autoAttachSelection") ||
+          e.affectsConfiguration("grok.context.excludeGlob")
+        ) {
+          this.postAutoContext();
+        }
       }),
     );
   }
@@ -258,6 +275,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     query?: string;
     requestId?: number;
     chip?: ContextChip;
+    enabled?: boolean;
   }): Promise<void> {
     switch (msg.type) {
       case "ready":
@@ -344,6 +362,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           this.postSticky();
         }
         break;
+      case "setAutoAttach": {
+        const enabled = msg.enabled !== false;
+        const cfg = vscode.workspace.getConfiguration("grok");
+        await cfg.update(
+          "context.autoAttachActiveFile",
+          enabled,
+          vscode.ConfigurationTarget.Global,
+        );
+        await cfg.update(
+          "context.autoAttachSelection",
+          enabled,
+          vscode.ConfigurationTarget.Global,
+        );
+        this.postAutoContext();
+        break;
+      }
       case "selectModel":
         await vscode.commands.executeCommand("grok.selectModel");
         break;
@@ -630,11 +664,41 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       type: "stickyChips",
       chips: this.stickyChips.map((c) => ({ id: c.id, label: c.label })),
     });
+    this.postAutoContext();
+  }
+
+  private serializeAutoChip(chip: ContextChip | null): {
+    id: string;
+    label: string;
+    kind: ContextChip["kind"];
+    fsPath: string;
+  } | null {
+    if (!chip) {
+      return null;
+    }
+    return {
+      id: chip.id,
+      label: chip.label,
+      kind: chip.kind,
+      fsPath: chip.fsPath,
+    };
+  }
+
+  private postAutoContext(): void {
+    const settings = getSettings();
+    // Preview chip always reflects focused editor (even when auto-attach is off)
+    // so the sticky row keeps a stable layout when toggling.
+    this.post({
+      type: "autoContext",
+      enabled: isAutoAttachEnabled(settings),
+      chip: this.serializeAutoChip(getActiveEditorChip(settings)),
+    });
   }
 
   private async pushFullState(): Promise<void> {
     const hasAuth = await this.auth.hasAnyAuth();
     const state = this.agent.getState();
+    const settings = getSettings();
     this.post({
       type: "init",
       messages: this.serializeMessages(this.messages),
@@ -647,11 +711,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           : state.kind === "error"
             ? state.message
             : "",
-      model: getSettings().model || "default",
+      model: settings.model || "default",
       stickyChips: this.stickyChips.map((c) => ({
         id: c.id,
         label: c.label,
       })),
+      autoAttachEnabled: isAutoAttachEnabled(settings),
+      autoChip: this.serializeAutoChip(getActiveEditorChip(settings)),
       reviewCount: this.diffs?.getEntries().length ?? 0,
     });
   }
@@ -902,16 +968,49 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   .msg.user .chips { justify-content: flex-end; }
   .chip {
     font-size: 11px; padding: 3px 6px 3px 9px; border-radius: var(--radius-pill);
-    border: none;
+    border: 1px solid transparent;
+    box-sizing: border-box;
     color: var(--muted);
     background: color-mix(in srgb, var(--fg) 8%, transparent);
     display: inline-flex; align-items: center; gap: 4px;
-    max-width: 100%; line-height: 1.25;
-    transition: background var(--ease), color var(--ease);
+    max-width: 100%; line-height: 1.25; min-height: 24px;
+    transition: background var(--ease), color var(--ease), border-color var(--ease), opacity var(--ease);
   }
   .chip:hover {
     color: var(--fg);
     background: var(--list-hover);
+  }
+  .chip .chip-badge {
+    color: var(--btn-bg);
+    flex-shrink: 0;
+    width: 14px; height: 14px;
+    display: inline-flex; align-items: center; justify-content: center;
+    opacity: 0.95;
+  }
+  .chip .chip-badge .ti { font-size: 13px; line-height: 1; }
+  .chip .chip-label {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0;
+  }
+  /* Auto-attach chip: same structure on/off so toggle does not jump */
+  .chip.chip-auto {
+    color: var(--fg);
+    background: color-mix(in srgb, var(--btn-bg) 14%, transparent);
+    border-color: color-mix(in srgb, var(--btn-bg) 28%, transparent);
+  }
+  .chip.chip-auto.chip-auto-off {
+    color: var(--muted);
+    background: color-mix(in srgb, var(--fg) 6%, transparent);
+    border-color: color-mix(in srgb, var(--fg) 16%, transparent);
+    border-style: solid;
+    opacity: 0.78;
+  }
+  .chip.chip-auto.chip-auto-off .chip-badge { color: var(--muted); opacity: 0.8; }
+  .chip.chip-auto.chip-auto-off:hover {
+    color: var(--fg);
+    opacity: 1;
+    border-color: color-mix(in srgb, var(--btn-bg) 35%, transparent);
+    background: color-mix(in srgb, var(--btn-bg) 10%, transparent);
   }
   /* Override global button min-height/padding so close stays a circle */
   .chip button {
@@ -1182,7 +1281,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   <div id="empty" hidden>
     <div class="hero-icon" aria-hidden="true"><i class="ti ti-message-chatbot"></i></div>
     <h2>Grok Build - Community</h2>
-    <p>Ask about this workspace. Use @ to attach files. Active selection attaches automatically.</p>
+    <p>Ask about this workspace. Use @ to attach files. The focused file can auto-attach (toggle on the chip).</p>
     <p id="empty-hint"></p>
     <div class="empty-actions">
       <button id="empty-start" type="button"><i class="ti ti-player-play"></i> Start agent</button>
@@ -1233,6 +1332,8 @@ const mentionTitle = document.getElementById('mention-title');
 let busy = false;
 let allMessages = [];
 let stickyChips = [];
+let autoAttachEnabled = true;
+let autoChip = null; // { id, label, kind, fsPath } | null
 const EST_ROW = 96;
 const VIRT_THRESHOLD = 40;
 
@@ -1576,10 +1677,33 @@ function renderMessages(messages) {
 }
 
 function renderSticky() {
-  stickyEl.innerHTML = stickyChips.map(c =>
-    '<span class="chip">' + icon(chipIcon(c.label)) + esc(c.label) +
+  let html = '';
+  // Always use the same chip shell for auto on/off (same icons + label + action slot)
+  // so toggling does not reflow the sticky row.
+  if (autoChip) {
+    const on = !!autoAttachEnabled;
+    const title = on
+      ? 'Auto-attached from focused editor — click × to disable'
+      : 'Auto-attach off — click to enable for focused file';
+    const action = on
+      ? '<button type="button" data-auto-toggle="0" title="Disable auto-attach">×</button>'
+      : '<button type="button" data-auto-toggle="1" title="Enable auto-attach">' +
+          icon('plus') + '</button>';
+    html +=
+      '<span class="chip chip-auto' + (on ? '' : ' chip-auto-off') + '" title="' + esc(title) + '"' +
+        (on ? '' : ' data-auto-toggle="1" role="button" tabindex="0"') + '>' +
+        '<span class="chip-badge" aria-hidden="true">' + icon('focus-2') + '</span>' +
+        icon(chipIcon(autoChip.label)) +
+        '<span class="chip-label">' + esc(autoChip.label) + '</span>' +
+        action +
+      '</span>';
+  }
+  html += stickyChips.map(c =>
+    '<span class="chip">' + icon(chipIcon(c.label)) +
+    '<span class="chip-label">' + esc(c.label) + '</span>' +
     '<button type="button" data-chip-id="' + esc(c.id) + '" title="Remove">×</button></span>'
   ).join('');
+  stickyEl.innerHTML = html;
 }
 
 function setMeta(text, spinning) {
@@ -1629,6 +1753,12 @@ messagesEl.addEventListener('click', (e) => {
 });
 
 stickyEl.addEventListener('click', (e) => {
+  const toggle = e.target.closest('[data-auto-toggle]');
+  if (toggle) {
+    const enabled = toggle.getAttribute('data-auto-toggle') === '1';
+    vscode.postMessage({ type: 'setAutoAttach', enabled });
+    return;
+  }
   const btn = e.target.closest('[data-chip-id]');
   if (btn) {
     vscode.postMessage({ type: 'removeChip', id: btn.getAttribute('data-chip-id') });
@@ -1726,6 +1856,8 @@ window.addEventListener('message', (event) => {
   if (msg.type === 'init') {
     renderMessages(msg.messages || []);
     stickyChips = msg.stickyChips || [];
+    autoAttachEnabled = msg.autoAttachEnabled !== false;
+    autoChip = msg.autoChip || null;
     renderSticky();
     setReview(msg.reviewCount || 0);
     const model = msg.model || 'default';
@@ -1750,6 +1882,10 @@ window.addEventListener('message', (event) => {
     if (!busy) setMeta(base, false);
   } else if (msg.type === 'stickyChips') {
     stickyChips = msg.chips || [];
+    renderSticky();
+  } else if (msg.type === 'autoContext') {
+    autoAttachEnabled = !!msg.enabled;
+    autoChip = msg.chip || null;
     renderSticky();
   } else if (msg.type === 'review') {
     setReview(msg.count || 0);
