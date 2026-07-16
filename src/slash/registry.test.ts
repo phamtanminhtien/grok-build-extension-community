@@ -100,6 +100,15 @@ describe("host slash catalog (full reimplement)", () => {
     assert.ok(resolve("hooks-trust"));
   });
 
+  it("extensions browse commands are host openExtensions", () => {
+    for (const name of ["hooks", "plugins", "marketplace", "skills", "mcps"]) {
+      const cmd = resolve(name)!;
+      assert.equal(cmd.layer, "host", name);
+      assert.equal(cmd.hostAction, "openExtensions", name);
+    }
+    assert.equal(resolve("plugin")?.hostAction, "openExtensions");
+  });
+
   it("host wins over acp on collision", () => {
     const acp: AvailableCommand[] = [
       { name: "compact", description: "ACP compact" },

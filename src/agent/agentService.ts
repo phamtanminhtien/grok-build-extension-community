@@ -30,6 +30,7 @@ import {
   sortSessionsNewestFirst,
   type GrokSession,
 } from "../session/grokSession";
+import { toAcpExtWireMethod } from "./acpExtMethod";
 import { BinaryNotFoundError } from "./binaryResolver";
 import { readTextFileHost, writeTextFileHost } from "./hostFs";
 import { PermissionBroker } from "./permissionBroker";
@@ -429,6 +430,29 @@ export class AgentService implements vscode.Disposable {
     }
     logInfo(`session/load ok sessionId=${session.sessionId}`);
     return session.sessionId;
+  }
+
+  /**
+   * Call an agent extension method (`x.ai/*`).
+   *
+   * ACP's JSON-RPC decoder only routes custom methods to `ext_method` when
+   * the **wire** method is `_`-prefixed (`_x.ai/...`). Bare `x.ai/...` is
+   * rejected with method_not_found (-32601). Callers may pass either form.
+   */
+  async requestExt<T = unknown>(
+    method: string,
+    params: Record<string, unknown> = {},
+  ): Promise<T> {
+    await this.ensureStarted();
+    if (!this.connection) {
+      throw new Error("No agent connection");
+    }
+    const wire = toAcpExtWireMethod(method);
+    logInfo(`ext ${wire}`);
+    return this.connection.agent.request<T, Record<string, unknown>>(
+      wire,
+      params,
+    );
   }
 
   /**

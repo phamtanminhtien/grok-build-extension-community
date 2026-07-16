@@ -54,7 +54,9 @@ export type HostAction =
   | "cancel"
   | "reviewEdits"
   | "startAgent"
-  | "restartAgent";
+  | "restartAgent"
+  /** Open Grok Extensions panel; optional tab via slash name mapping. */
+  | "openExtensions";
 
 /** Row shown in the slash dropdown. */
 export interface SlashSuggestion {

@@ -11,6 +11,11 @@ import {
   setModelSetting,
 } from "./config/modelService";
 import { DiffReviewService } from "./diff/diffReviewService";
+import { ExtensionsPanel } from "./extensions/extensionsPanel";
+import {
+  isExtensionsTab,
+  type ExtensionsTab,
+} from "./extensions/tabs";
 import {
   disposeOutput,
   logError,
@@ -277,6 +282,19 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("grok.reviewEdits", async () => {
       await diffs.pickAndOpen();
     }),
+
+    vscode.commands.registerCommand(
+      "grok.openExtensions",
+      async (args?: { tab?: string } | ExtensionsTab) => {
+        let tab: ExtensionsTab = "hooks";
+        if (typeof args === "string" && isExtensionsTab(args)) {
+          tab = args;
+        } else if (args && typeof args === "object" && isExtensionsTab(args.tab)) {
+          tab = args.tab;
+        }
+        ExtensionsPanel.show(context.extensionUri, agentService!, tab);
+      },
+    ),
 
     vscode.commands.registerCommand("grok.smokeTest", async () => {
       openOutput();

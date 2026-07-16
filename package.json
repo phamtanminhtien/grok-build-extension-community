@@ -152,6 +152,12 @@
         "icon": "$(diff)"
       },
       {
+        "command": "grok.openExtensions",
+        "title": "Grok Build: Extensions…",
+        "category": "Grok Build",
+        "icon": "$(extensions)"
+      },
+      {
         "command": "grok.smokeTest",
         "title": "Grok Build: Smoke Test (L0)",
         "category": "Grok Build"
@@ -176,6 +182,11 @@
         },
         {
           "command": "grok.openOutput",
+          "when": "view == grok.chatView || view == grok.chatView.secondary",
+          "group": "navigation"
+        },
+        {
+          "command": "grok.openExtensions",
           "when": "view == grok.chatView || view == grok.chatView.secondary",
           "group": "navigation"
         }

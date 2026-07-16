@@ -330,11 +330,12 @@ export const HOST_COMMANDS: SlashCommandDef[] = [
     layer: "passthrough",
   }),
 
-  // ── Plugins / hooks / skills ─────────────────────────────
+  // ── Plugins / hooks / skills (host: open Extensions panel) ─
   d({
     name: "hooks",
     description: "View hooks",
-    layer: "passthrough",
+    layer: "host",
+    hostAction: "openExtensions",
   }),
   d({
     name: "hooks-trust",
@@ -370,10 +371,9 @@ export const HOST_COMMANDS: SlashCommandDef[] = [
   d({
     name: "plugins",
     aliases: ["plugin"],
-    description: "Manage plugins (list, reload, trust, add, remove)",
-    takesArgs: true,
-    argHint: "list | reload | trust | add | remove …",
-    layer: "passthrough",
+    description: "View plugins",
+    layer: "host",
+    hostAction: "openExtensions",
   }),
   d({
     name: "reload-plugins",
@@ -383,17 +383,20 @@ export const HOST_COMMANDS: SlashCommandDef[] = [
   d({
     name: "marketplace",
     description: "View marketplace",
-    layer: "passthrough",
+    layer: "host",
+    hostAction: "openExtensions",
   }),
   d({
     name: "skills",
     description: "View skills",
-    layer: "passthrough",
+    layer: "host",
+    hostAction: "openExtensions",
   }),
   d({
     name: "mcps",
     description: "Show MCP server status",
-    layer: "passthrough",
+    layer: "host",
+    hostAction: "openExtensions",
   }),
   d({
     name: "config-agents",

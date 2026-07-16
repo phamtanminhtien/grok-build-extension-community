@@ -9,6 +9,7 @@ import { promptAndStoreApiKey } from "../auth/authService";
 import { setModelSetting } from "../config/modelService";
 import { getSettings, resolveSessionCwd } from "../config/settings";
 import { openOutput } from "../log/output";
+import { tabFromSlashName } from "../extensions/tabs";
 import { parseInvocation } from "./detect";
 import { HOST_COMMANDS } from "./hostCommands";
 import type { SlashRegistry } from "./registry";
@@ -270,6 +271,11 @@ async function runHostAction(
     case "restartAgent":
       await deps.agent.restart();
       return "Agent restarted";
+    case "openExtensions": {
+      const tab = tabFromSlashName(cmd.name) ?? "hooks";
+      await vscode.commands.executeCommand("grok.openExtensions", { tab });
+      return undefined;
+    }
     default:
       return `Unhandled host action for /${cmd.name}`;
   }
