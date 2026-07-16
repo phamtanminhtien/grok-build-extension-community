@@ -109,6 +109,9 @@ interface SerializedMessage {
   items?: SerializedTimelineItem[];
 }
 
+/** Official Grok mark (inline SVG; inherits `currentColor`). */
+const GROK_MARK_SVG = `<svg viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="currentColor" d="M200.627 323.264L434.46 86.7826V87.0046L502 19C500.793 20.7342 499.57 22.4224 498.361 24.1106C447.041 95.2696 421.983 130.065 442.09 217.132L441.973 216.999C455.835 276.264 441.001 341.988 393.112 390.202C332.731 451.037 236.113 464.575 156.552 409.813L212.029 383.965C262.804 404.037 318.368 395.224 358.288 355.023C398.223 314.821 407.194 256.281 387.116 207.55C383.301 198.32 371.87 195.995 363.871 201.949L200.627 323.264ZM166.938 352.741L166.895 352.785L11 493C20.8837 479.299 33.1544 466.338 45.3963 453.391C79.9246 416.864 114.188 380.662 93.2849 329.5C65.297 261.037 81.5891 180.812 133.426 128.627C187.31 74.4292 266.663 60.7568 332.937 88.2186C347.609 93.6996 360.395 101.506 370.353 108.765L315.01 134.493C263.482 112.733 204.442 127.532 168.412 163.808C119.682 212.822 109.828 297.816 166.938 352.741Z"/></svg>`;
+
 /**
  * Sidebar webview chat for Grok Build - Community (L1 + L2 polish).
  */
@@ -1729,6 +1732,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     background: color-mix(in srgb, var(--btn-bg) 18%, transparent);
     color: var(--btn-bg); flex-shrink: 0;
   }
+  header .brand .brand-mark svg,
+  #empty .hero-icon svg {
+    width: 16px; height: 16px; display: block;
+  }
+  #empty .hero-icon svg {
+    width: 28px; height: 28px;
+  }
   header .brand .title {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     letter-spacing: -0.01em;
@@ -2199,7 +2209,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     width: 52px; height: 52px; margin: 0 auto 12px;
     border-radius: var(--radius-md);
     display: flex; align-items: center; justify-content: center;
-    font-size: 28px; color: var(--btn-bg);
+    color: var(--btn-bg);
     background: color-mix(in srgb, var(--btn-bg) 14%, transparent);
   }
   #empty h2 {
@@ -2658,7 +2668,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 <div id="app">
   <header>
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true"><i class="ti ti-message-chatbot"></i></span>
+      <span class="brand-mark" aria-hidden="true">${GROK_MARK_SVG}</span>
       <span class="title">Grok Build</span>
     </div>
     <div class="header-right">
@@ -2673,7 +2683,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   </div>
   <div id="messages"></div>
   <div id="empty" hidden>
-    <div class="hero-icon" aria-hidden="true"><i class="ti ti-message-chatbot"></i></div>
+    <div class="hero-icon" aria-hidden="true">${GROK_MARK_SVG}</div>
     <h2>Grok Build - Community</h2>
     <p>Ask about this workspace. Use / for commands, @ for files. The focused file can auto-attach (toggle on the chip).</p>
     <p id="empty-hint"></p>

@@ -177,8 +177,11 @@ src/
   context/        # active file / selection → ACP blocks
   config/         # settings + alwaysApprove guard
   log/output.ts
-media/grok.svg              # activity bar
-media/icon.png              # marketplace icon (128×128)
+media/grok.svg              # activity bar (monochrome Grok mark)
+media/grok-light.svg        # panel tab icon (light theme)
+media/grok-dark.svg         # panel tab icon (dark theme)
+media/icon.png              # marketplace icon (256×256 from media/icon.svg)
+media/icon.svg              # source for marketplace logo
 media/tabler/               # webfont copied on build
 scripts/smoke-cli.mjs
 docs/

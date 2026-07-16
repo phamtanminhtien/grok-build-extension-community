@@ -69,8 +69,8 @@ export class ExtensionsPanel implements vscode.Disposable {
       },
     );
     panel.iconPath = {
-      light: vscode.Uri.joinPath(extensionUri, "media", "grok.svg"),
-      dark: vscode.Uri.joinPath(extensionUri, "media", "grok.svg"),
+      light: vscode.Uri.joinPath(extensionUri, "media", "grok-light.svg"),
+      dark: vscode.Uri.joinPath(extensionUri, "media", "grok-dark.svg"),
     };
 
     const inst = new ExtensionsPanel(panel, extensionUri, agent, tab);
