@@ -41,7 +41,17 @@ export type AssistantItem =
   | { kind: "thought"; thought: ThoughtSegment };
 
 export type MergeUiMessage =
-  | { type: "user"; id: string; text: string; chips?: string[] }
+  | {
+      type: "user";
+      id: string;
+      text: string;
+      chips?: string[];
+      /**
+       * Shell prompt index for rewind/edit-and-resubmit (0-based).
+       * Matches TUI `shell_prompt_index` / `x.ai/rewind` target.
+       */
+      promptIndex?: number;
+    }
   | {
       type: "assistant";
       id: string;
@@ -98,6 +108,54 @@ export function shouldCloseAssistantOnUserChunk(
   return loadingHistory;
 }
 
+/** Next shell prompt index = number of existing user messages. */
+export function nextPromptIndex(
+  messages: readonly MergeUiMessage[],
+): number {
+  let n = 0;
+  for (const m of messages) {
+    if (m.type === "user") n += 1;
+  }
+  return n;
+}
+
+/** Stamp sequential promptIndex on every user message (history load / repair). */
+export function assignPromptIndices(
+  messages: MergeUiMessage[],
+): MergeUiMessage[] {
+  let i = 0;
+  for (const m of messages) {
+    if (m.type === "user") {
+      m.promptIndex = i++;
+    }
+  }
+  return messages;
+}
+
+/**
+ * Drop the user message and everything after it (TUI rewind truncate).
+ * Returns a new array; does not mutate input.
+ */
+export function truncateFromMessageId(
+  messages: readonly MergeUiMessage[],
+  messageId: string,
+): MergeUiMessage[] {
+  const idx = messages.findIndex((m) => m.id === messageId);
+  if (idx < 0) return messages.slice();
+  return messages.slice(0, idx);
+}
+
+/**
+ * Plain text for copy-to-clipboard of a chat message.
+ * Assistant: text timeline only (no tools/thoughts).
+ */
+export function messageCopyText(msg: MergeUiMessage): string {
+  if (msg.type === "user" || msg.type === "system") {
+    return msg.text || "";
+  }
+  return assistantPlainText(msg);
+}
+
 /**
  * Apply a user text chunk. Returns null when the event should be ignored
  * (live echo). Otherwise returns the next merge state.
@@ -120,7 +178,13 @@ export function applyUserMessageChunk(
   let currentUserId = state.currentUserId;
   if (!currentUserId) {
     currentUserId = uid();
-    messages.push({ type: "user", id: currentUserId, text: "", chips: [] });
+    messages.push({
+      type: "user",
+      id: currentUserId,
+      text: "",
+      chips: [],
+      promptIndex: nextPromptIndex(messages),
+    });
   }
 
   const user = messages.find(
@@ -511,4 +575,186 @@ export function isStreamingTailUpdate(
   }
   const prevLast = prev[prev.length - 1];
   return !!prevLast && prevLast.id === last.id && prevLast.type === "assistant";
+}
+
+// ── Verb-group aggregation (TUI "Read 2 files, Edited 4 files") ─────────
+
+/** Semantic bucket for consecutive tool-call folds. */
+export type VerbGroupKind =
+  | "file"
+  | "search"
+  | "dir"
+  | "edit"
+  | "command"
+  | "web"
+  | "mcp"
+  | "other";
+
+/**
+ * Classify a tool card into a verb-group bucket from title/kind heuristics
+ * (ACP does not always send a stable kind enum).
+ */
+export function classifyToolVerb(tool: {
+  title?: string;
+  kind?: string;
+}): VerbGroupKind {
+  const s = `${tool.kind || ""} ${tool.title || ""}`.toLowerCase();
+  if (/list.?dir|list_dir|listdir/.test(s)) return "dir";
+  if (
+    /search_replace|str_replace|apply.?patch|write.?file|edit|write|patch|create.?file|apply/.test(
+      s,
+    )
+  ) {
+    return "edit";
+  }
+  if (/grep|glob|search|find|rg\b|fuzzy/.test(s)) return "search";
+  if (/read|open.?file|cat\b|view.?file/.test(s)) return "file";
+  if (/web.?fetch|fetch|http|browser|web.?search|browse/.test(s)) return "web";
+  if (/terminal|bash|shell|command|execute|run_terminal|run /.test(s)) {
+    return "command";
+  }
+  if (/use.?tool|mcp|integration|call.?tool/.test(s)) return "mcp";
+  return "other";
+}
+
+export function isToolStatusRunning(status?: string): boolean {
+  const s = String(status || "").toLowerCase();
+  return /run|progress|pending|in_progress|start|stream/.test(s);
+}
+
+export function isToolStatusFailed(status?: string): boolean {
+  const s = String(status || "").toLowerCase();
+  return /fail|error|denied|cancel/.test(s);
+}
+
+function verbForKind(kind: VerbGroupKind, running: boolean): string {
+  const table: Record<VerbGroupKind, [string, string]> = {
+    file: ["Read", "Reading"],
+    search: ["Searched", "Searching"],
+    dir: ["Listed", "Listing"],
+    edit: ["Edited", "Editing"],
+    command: ["Ran", "Running"],
+    web: ["Fetched", "Fetching"],
+    mcp: ["Called", "Calling"],
+    other: ["Ran", "Running"],
+  };
+  const [past, present] = table[kind];
+  return running ? present : past;
+}
+
+function nounForKind(kind: VerbGroupKind, count: number): string {
+  const table: Record<VerbGroupKind, [string, string]> = {
+    file: ["file", "files"],
+    search: ["pattern", "patterns"],
+    dir: ["dir", "dirs"],
+    edit: ["file", "files"],
+    command: ["command", "commands"],
+    web: ["website", "websites"],
+    mcp: ["MCP tool", "MCP tools"],
+    other: ["tool", "tools"],
+  };
+  const [one, many] = table[kind];
+  return count === 1 ? one : many;
+}
+
+/** One bucket segment: "Read 2 files" / "Editing 3 files". */
+export function formatVerbBucket(
+  kind: VerbGroupKind,
+  count: number,
+  running: boolean,
+): string {
+  return `${verbForKind(kind, running)} ${count} ${nounForKind(kind, count)}`;
+}
+
+export interface ToolVerbGroup {
+  /** Stable id for DOM open-state (sorted tool ids). */
+  id: string;
+  tools: ToolCard[];
+  /** Aggregated label e.g. "Read 2 files, Edited 4 files". */
+  label: string;
+  running: boolean;
+  failed: number;
+}
+
+/**
+ * Build TUI-style multi-kind label for a consecutive tool run.
+ * Bucket order = first appearance; tense follows any still-running member.
+ */
+export function formatToolVerbGroupLabel(tools: readonly ToolCard[]): {
+  label: string;
+  running: boolean;
+  failed: number;
+} {
+  const buckets: { kind: VerbGroupKind; count: number }[] = [];
+  let running = false;
+  let failed = 0;
+  for (const t of tools) {
+    const kind = classifyToolVerb(t);
+    const pos = buckets.findIndex((b) => b.kind === kind);
+    if (pos < 0) buckets.push({ kind, count: 1 });
+    else buckets[pos]!.count += 1;
+    if (isToolStatusRunning(t.status)) running = true;
+    if (isToolStatusFailed(t.status)) failed += 1;
+  }
+  const parts = buckets.map((b) => formatVerbBucket(b.kind, b.count, running));
+  let label = parts.join(", ");
+  if (failed > 0) label += ` · ${failed} failed`;
+  return { label, running, failed };
+}
+
+export type GroupedTimelineNode =
+  | { type: "text"; item: Extract<AssistantItem, { kind: "text" }> }
+  | { type: "thought"; item: Extract<AssistantItem, { kind: "thought" }> }
+  | { type: "tool"; tool: ToolCard }
+  | { type: "toolGroup"; group: ToolVerbGroup };
+
+/**
+ * Fold consecutive tool timeline items into verb-groups (TUI parity).
+ * Text / thought break the run. A single tool stays ungrouped.
+ * Mixed kinds in one batch share one header: "Read 2 files, Edited 4 files".
+ */
+export function groupConsecutiveTools(
+  items: readonly AssistantItem[],
+): GroupedTimelineNode[] {
+  const out: GroupedTimelineNode[] = [];
+  let run: ToolCard[] = [];
+
+  const flush = () => {
+    if (run.length === 0) return;
+    if (run.length === 1) {
+      out.push({ type: "tool", tool: run[0]! });
+    } else {
+      const meta = formatToolVerbGroupLabel(run);
+      const id = run
+        .map((t) => t.id)
+        .filter(Boolean)
+        .join("|");
+      out.push({
+        type: "toolGroup",
+        group: {
+          id: id || `tg-${out.length}`,
+          tools: run.slice(),
+          label: meta.label,
+          running: meta.running,
+          failed: meta.failed,
+        },
+      });
+    }
+    run = [];
+  };
+
+  for (const item of items) {
+    if (item.kind === "tool" && item.tool) {
+      run.push(item.tool);
+      continue;
+    }
+    flush();
+    if (item.kind === "text") {
+      out.push({ type: "text", item });
+    } else if (item.kind === "thought") {
+      out.push({ type: "thought", item });
+    }
+  }
+  flush();
+  return out;
 }

@@ -29,12 +29,15 @@ import {
   applyAgentThoughtChunk,
   applyToolEvent,
   applyUserMessageChunk,
+  assignPromptIndices,
   assistantHasRunningThought,
   assistantPlainText,
   emptyAssistant,
   extractToolContentText,
   finishAssistantThoughts,
   formatToolValue,
+  nextPromptIndex,
+  truncateFromMessageId,
   type AssistantItem,
   type ThoughtSegment,
   type ToolCard,
@@ -67,7 +70,14 @@ import {
 } from "./interactivePrompt";
 
 type UiMessage =
-  | { type: "user"; id: string; text: string; chips?: string[] }
+  | {
+      type: "user";
+      id: string;
+      text: string;
+      chips?: string[];
+      /** Shell prompt index for edit-and-resubmit rewind (TUI parity). */
+      promptIndex?: number;
+    }
   | {
       type: "assistant";
       id: string;
@@ -93,6 +103,7 @@ interface SerializedMessage {
   text?: string;
   html?: string;
   chips?: string[];
+  promptIndex?: number;
   /** Ordered timeline: thoughts, text, tools in stream order. */
   items?: SerializedTimelineItem[];
 }
@@ -370,6 +381,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         finishAssistantThoughts(m);
       }
     }
+    // Ensure rewind targets match shell prompt order after history replay.
+    assignPromptIndices(this.messages);
     this.currentAssistantId = undefined;
     this.currentUserId = undefined;
     this.thoughtStartedAt = undefined;
@@ -592,6 +605,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     answers?: Record<string, string[]>;
     annotations?: Record<string, { preview?: string; notes?: string }>;
     partial_answers?: Record<string, string>;
+    promptIndex?: number;
+    mode?: string;
   }): Promise<void> {
     switch (msg.type) {
       case "ready":
@@ -604,6 +619,23 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       case "send":
         if (msg.text?.trim()) {
           await this.handleSend(msg.text.trim());
+        }
+        break;
+      case "editMessage":
+        if (msg.id && msg.text !== undefined) {
+          await this.handleEditMessage(
+            msg.id,
+            msg.text,
+            msg.promptIndex,
+            msg.mode === "all" || msg.mode === "conversation_only"
+              ? msg.mode
+              : undefined,
+          );
+        }
+        break;
+      case "copyText":
+        if (msg.text) {
+          await vscode.env.clipboard.writeText(msg.text);
         }
         break;
       case "cancel":
@@ -827,49 +859,56 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async handleSend(text: string): Promise<void> {
+  private async handleSend(
+    text: string,
+    options?: { literal?: boolean },
+  ): Promise<void> {
     if (this.agent.isBusy()) {
       this.pushSystem("Wait for the current turn or press Stop.");
       return;
     }
 
-    // Slash commands (host / pass-through / unsupported) — like TUI pager.
-    slashRegistry.setAcpCommands(this.agent.getAvailableCommands());
-    const outcome = await dispatchSlash(text, {
-      agent: this.agent,
-      auth: this.auth,
-      registry: slashRegistry,
-      getTranscript: () =>
-        this.messages
-          .filter((m) => m.type === "user" || m.type === "assistant")
-          .map((m) => ({
-            role: m.type,
-            text:
-              m.type === "assistant" ? assistantPlainText(m) : m.text,
-          })),
-      clearUi: () => {
-        this.messages = [];
-        this.currentAssistantId = undefined;
-        this.mdCache.clear();
-        this.scheduleMessagesPost(true);
-      },
-      newSession: async () => {
-        await this.handleNewSession();
-      },
-    });
+    // TUI inline-edit resubmit uses literal=true so slash-lookalike text is
+    // sent as a normal prompt (conversation already truncated).
+    if (!options?.literal) {
+      // Slash commands (host / pass-through / unsupported) — like TUI pager.
+      slashRegistry.setAcpCommands(this.agent.getAvailableCommands());
+      const outcome = await dispatchSlash(text, {
+        agent: this.agent,
+        auth: this.auth,
+        registry: slashRegistry,
+        getTranscript: () =>
+          this.messages
+            .filter((m) => m.type === "user" || m.type === "assistant")
+            .map((m) => ({
+              role: m.type,
+              text:
+                m.type === "assistant" ? assistantPlainText(m) : m.text,
+            })),
+        clearUi: () => {
+          this.messages = [];
+          this.currentAssistantId = undefined;
+          this.mdCache.clear();
+          this.scheduleMessagesPost(true);
+        },
+        newSession: async () => {
+          await this.handleNewSession();
+        },
+      });
 
-    if (outcome.kind === "handled") {
-      if (outcome.message) {
-        this.pushSystem(outcome.message);
+      if (outcome.kind === "handled") {
+        if (outcome.message) {
+          this.pushSystem(outcome.message);
+        }
+        return;
       }
-      return;
-    }
-    if (outcome.kind === "error") {
-      this.pushSystem(outcome.message);
-      return;
-    }
-    if (outcome.kind === "passthrough") {
-      text = outcome.text;
+      if (outcome.kind === "error") {
+        this.pushSystem(outcome.message);
+        return;
+      }
+      if (outcome.kind === "passthrough") {
+        text = outcome.text;
+      }
     }
 
     const { blocks, chips } = buildPromptBlocks(text, {
@@ -881,6 +920,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       id: userId,
       text,
       chips: chips.map((c) => c.label),
+      promptIndex: nextPromptIndex(this.messages),
     });
 
     const asstId = uid();
@@ -899,6 +939,105 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: "busy", busy: false });
       await this.showStartError(err);
       this.pushSystem(errMessage(err));
+    }
+  }
+
+  /**
+   * Edit a previous user prompt and resubmit (TUI inline-edit parity).
+   * Webview owns mode selection popover (Both / Conversation only) and
+   * pre-fills the composer; host rewinds then resubmits.
+   */
+  private async handleEditMessage(
+    messageId: string,
+    newText: string,
+    promptIndexHint?: number,
+    modeHint?: "all" | "conversation_only",
+  ): Promise<void> {
+    const text = newText.trim();
+    if (!text) {
+      this.pushSystem("Edited message is empty — nothing to resubmit.");
+      this.post({ type: "restoreEditComposer", id: messageId, text: newText });
+      return;
+    }
+
+    const msg = this.messages.find((m) => m.id === messageId);
+    if (!msg || msg.type !== "user") {
+      this.pushSystem("Could not find that user message to edit.");
+      return;
+    }
+    if (text === msg.text.trim()) {
+      return;
+    }
+
+    const mode = modeHint ?? "conversation_only";
+
+    const promptIndex =
+      typeof promptIndexHint === "number" && Number.isFinite(promptIndexHint)
+        ? promptIndexHint
+        : typeof msg.promptIndex === "number"
+          ? msg.promptIndex
+          : nextPromptIndex(
+              this.messages.slice(
+                0,
+                this.messages.findIndex((m) => m.id === messageId),
+              ),
+            );
+
+    try {
+      if (this.agent.isBusy()) {
+        await this.agent.cancelTurn();
+        this.pushSystem("Cancelled current turn to edit message…");
+      }
+
+      const sessionId = this.agent.getSessionId();
+      if (!sessionId) {
+        this.pushSystem("No active session — cannot rewind to edit.");
+        this.post({ type: "restoreEditComposer", id: messageId, text });
+        return;
+      }
+
+      await this.agent.ensureStarted();
+      const res = await this.agent.requestExt<{
+        success?: boolean;
+        error?: string | null;
+        result?: { success?: boolean; error?: string | null };
+      }>("x.ai/rewind/execute", {
+        sessionId,
+        targetPromptIndex: promptIndex,
+        force: true,
+        mode,
+      });
+
+      const body =
+        res && typeof res === "object" && "result" in res && res.result
+          ? res.result
+          : res;
+      if (body && body.success === false) {
+        this.pushSystem(
+          body.error?.trim()
+            ? `Edit failed: ${body.error}`
+            : "Edit failed: rewind was not successful.",
+        );
+        this.post({ type: "restoreEditComposer", id: messageId, text });
+        return;
+      }
+
+      // Truncate UI from the edited user bubble (TUI remove_from anchor).
+      this.messages = truncateFromMessageId(
+        this.messages,
+        messageId,
+      ) as UiMessage[];
+      this.currentUserId = undefined;
+      this.currentAssistantId = undefined;
+      this.thoughtStartedAt = undefined;
+      this.mdCache.clear();
+      this.scheduleMessagesPost(true);
+
+      // Resubmit edited text as a new prompt (literal — not slash re-dispatch).
+      await this.handleSend(text, { literal: true });
+    } catch (err) {
+      this.pushSystem(errMessage(err));
+      this.post({ type: "restoreEditComposer", id: messageId, text });
     }
   }
 
@@ -1252,6 +1391,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           id: m.id,
           text: m.text,
           chips: m.chips,
+          promptIndex: m.promptIndex,
         };
       }
       return { type: m.type, id: m.id, text: m.text };
@@ -1639,58 +1779,74 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: none; }
   }
-  /* Soft stream: caret on last text bubble while assistant is generating */
-  .msg.assistant.streaming .assistant-timeline > .bubble.md:last-of-type::after {
-    content: '';
-    display: inline-block;
-    width: 2px;
-    height: 0.95em;
-    margin-left: 3px;
-    vertical-align: -0.08em;
-    border-radius: 1px;
-    background: color-mix(in srgb, var(--fg) 72%, transparent);
-    animation: stream-caret 1.05s step-end infinite;
-  }
-  @keyframes stream-caret {
-    0%, 100% { opacity: 0.85; }
-    50% { opacity: 0; }
-  }
-  .msg.assistant.streaming .assistant-timeline > .bubble.md {
-    transition: none; /* avoid opacity thrash on each token */
-  }
-  .assistant-timeline > .bubble.md,
+  /* Timeline tool/thought enter: light opacity only (no stream text anim). */
   .assistant-timeline > .tool-row,
+  .assistant-timeline > .tool-group,
   .assistant-timeline > .thought {
-    animation: stream-block-in 180ms ease both;
+    animation: stream-block-in 160ms ease both;
   }
   @keyframes stream-block-in {
-    from { opacity: 0.35; transform: translateY(3px); }
-    to { opacity: 1; transform: none; }
+    from { opacity: 0.4; }
+    to { opacity: 1; }
   }
-  /* After first paint, stop re-animating patched blocks */
-  .assistant-timeline.stream-settled > .bubble.md,
   .assistant-timeline.stream-settled > .tool-row,
+  .assistant-timeline.stream-settled > .tool-group,
   .assistant-timeline.stream-settled > .thought {
     animation: none;
   }
   .assistant-timeline.stream-settled > .tl-new {
-    animation: stream-block-in 180ms ease both;
+    animation: stream-block-in 160ms ease both;
   }
   @media (prefers-reduced-motion: reduce) {
     .msg.msg-enter,
-    .assistant-timeline > .bubble.md,
     .assistant-timeline > .tool-row,
+    .assistant-timeline > .tool-group,
     .assistant-timeline > .thought,
     .assistant-timeline.stream-settled > .tl-new {
       animation: none;
     }
-    .msg.assistant.streaming .assistant-timeline > .bubble.md:last-of-type::after {
-      animation: none;
-      opacity: 0.55;
-    }
   }
   .msg.user { align-self: flex-end; max-width: 92%; }
   .msg.assistant, .msg.system { align-self: stretch; }
+  .msg { position: relative; }
+  .msg-actions {
+    display: flex; gap: 2px; align-items: center;
+    opacity: 0; pointer-events: none;
+    transition: opacity var(--ease);
+    margin-top: 2px;
+  }
+  .msg:hover .msg-actions,
+  .msg:focus-within .msg-actions,
+  .msg.editing .msg-actions {
+    opacity: 1; pointer-events: auto;
+  }
+  .msg.user.editing .bubble {
+    outline: 1px solid color-mix(in srgb, var(--vscode-charts-blue, #3794ff) 55%, transparent);
+    outline-offset: 1px;
+  }
+  .msg.user .msg-actions { justify-content: flex-end; }
+  .msg.assistant .msg-actions { justify-content: flex-start; }
+  .msg-actions button {
+    display: inline-flex; align-items: center; justify-content: center;
+    border: none; background: transparent; color: var(--muted);
+    font-size: 11px; padding: 4px 6px; border-radius: var(--radius-xs);
+    cursor: pointer; line-height: 1;
+    min-width: 24px; min-height: 24px;
+  }
+  .msg-actions button.msg-act-icon {
+    width: 26px; height: 26px; padding: 0;
+    font-size: 14px;
+  }
+  .msg-actions button.msg-act-icon .ti {
+    font-size: 14px; line-height: 1;
+  }
+  .msg-actions button:hover {
+    color: var(--fg);
+    background: color-mix(in srgb, var(--fg) 10%, transparent);
+  }
+  .msg-actions button.copied {
+    color: var(--vscode-testing-iconPassed, #3fb950);
+  }
   .bubble {
     padding: 10px 14px; border-radius: var(--radius-md);
     word-break: break-word; line-height: 1.5; border: none;
@@ -1942,6 +2098,51 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     background: color-mix(in srgb, var(--fg) 6%, transparent);
     border-radius: 4px;
   }
+  /* Verb-group header: "Read 2 files, Edited 4 files" (TUI fold) */
+  .tool-group {
+    margin: 0;
+    border: none;
+    background: transparent;
+    padding: 0;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .tool-group > summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 0;
+    min-height: 20px;
+    line-height: 1.35;
+  }
+  .tool-group > summary::-webkit-details-marker { display: none; }
+  .tool-group .tool-group-label {
+    flex: 1;
+    min-width: 0;
+    font-weight: 600;
+    color: var(--fg);
+    opacity: 0.88;
+  }
+  .tool-group.running .tool-group-label {
+    color: var(--vscode-charts-blue, var(--link));
+  }
+  .tool-group.failed .tool-group-label {
+    color: var(--vscode-errorForeground, #f14c4c);
+  }
+  .tool-group-members {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 2px 0 4px 14px;
+    border-left: 1px solid color-mix(in srgb, var(--muted) 28%, transparent);
+    margin-left: 6px;
+  }
+  .tool-group-members .tool-row {
+    font-size: 11.5px;
+  }
   .tool-row .tool-io-label {
     font-size: 10px;
     font-weight: 600;
@@ -1993,9 +2194,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     position: relative;
     display: flex; flex-direction: column;
   }
-  /* @ mention + / slash + model/effort + permission/question popovers */
+  /* @ mention + / slash + model/effort + permission/question + rewind popovers */
   #mention-popover, #slash-popover, #model-popover, #effort-popover,
-  #permission-popover, #question-popover {
+  #permission-popover, #question-popover, #rewind-popover {
     position: absolute;
     left: 0; right: 0; bottom: calc(100% + 6px);
     z-index: 20;
@@ -2013,12 +2214,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     z-index: 30;
     max-height: min(420px, 58vh);
   }
+  #rewind-popover { z-index: 25; max-height: min(220px, 36vh); }
   #mention-popover[hidden], #slash-popover[hidden], #model-popover[hidden],
-  #effort-popover[hidden], #permission-popover[hidden], #question-popover[hidden] {
+  #effort-popover[hidden], #permission-popover[hidden], #question-popover[hidden],
+  #rewind-popover[hidden] {
     display: none !important;
   }
   #mention-head, #slash-head, #model-head, #effort-head,
-  #permission-head, #question-head {
+  #permission-head, #question-head, #rewind-head {
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px; padding: 8px 10px 6px;
     font-size: 11px; color: var(--muted); font-weight: 500;
@@ -2026,12 +2229,35 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     flex-shrink: 0;
   }
   #mention-head .hint, #slash-head .hint, #model-head .hint, #effort-head .hint,
-  #permission-head .hint, #question-head .hint { opacity: 0.85; }
+  #permission-head .hint, #question-head .hint, #rewind-head .hint { opacity: 0.85; }
   #mention-list, #slash-list, #model-list, #effort-list,
-  #permission-list, #question-list {
+  #permission-list, #question-list, #rewind-list {
     overflow-y: auto; padding: 4px;
     flex: 1; min-height: 0;
   }
+  #edit-banner {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; margin: 0 0 6px;
+    font-size: 11px; color: var(--muted);
+    background: color-mix(in srgb, var(--vscode-charts-blue, #3794ff) 12%, transparent);
+    border-radius: var(--radius-sm);
+  }
+  #edit-banner[hidden] { display: none !important; }
+  #edit-banner .edit-banner-text { flex: 1; min-width: 0; }
+  #edit-banner button {
+    min-height: 22px; padding: 2px 8px; font-size: 11px;
+  }
+  .rewind-item {
+    display: flex; flex-direction: column; gap: 2px;
+    width: 100%; text-align: left;
+    padding: 8px 10px; border: none; border-radius: var(--radius-xs);
+    background: transparent; color: var(--fg); cursor: pointer; font: inherit;
+  }
+  .rewind-item:hover, .rewind-item.active {
+    background: var(--list-hover, color-mix(in srgb, var(--fg) 10%, transparent));
+  }
+  .rewind-item .rewind-label { font-size: 12px; font-weight: 500; }
+  .rewind-item .rewind-detail { font-size: 11px; color: var(--muted); }
   #permission-detail, #question-body {
     padding: 8px 10px 4px;
     font-size: 12px;
@@ -2416,6 +2642,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   <footer>
     <div id="sticky"></div>
     <div class="composer-wrap">
+      <div id="edit-banner" hidden>
+        <i class="ti ti-pencil" aria-hidden="true"></i>
+        <span class="edit-banner-text">Editing message — send to resubmit · Esc cancel</span>
+        <button type="button" class="secondary" id="edit-banner-cancel">Cancel</button>
+      </div>
       <div id="slash-popover" hidden role="listbox" aria-label="Slash commands">
         <div id="slash-head">
           <span id="slash-title">/ commands</span>
@@ -2447,6 +2678,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         </div>
         <div id="effort-list"></div>
         <div id="effort-empty" hidden>Not supported on this model</div>
+      </div>
+      <div id="rewind-popover" hidden role="listbox" aria-label="Rewind mode">
+        <div id="rewind-head">
+          <span id="rewind-title">Resubmit — what to rewind?</span>
+          <span class="hint">↑↓ · Enter · Esc</span>
+        </div>
+        <div id="rewind-list"></div>
       </div>
       <div id="permission-popover" hidden role="dialog" aria-label="Permission request" aria-modal="true">
         <div id="permission-head">
@@ -3521,19 +3759,23 @@ function attachCopyButtons(root) {
   });
 }
 
-function fillTextBubble(b, text, html) {
-  // Skip identical HTML/text to avoid full reflow flash while streaming.
-  const key = html ? 'h:' + html : 't:' + (text || '');
+/**
+ * Fill assistant text bubble. Prefers markdown HTML when present (including
+ * while streaming). No stream text animation.
+ */
+function fillTextBubble(b, text, html, _opts) {
+  const nextPlain = text || '';
+  const key = html ? 'h:' + html : 't:' + nextPlain;
   if (b.dataset.streamKey === key) return;
   b.dataset.streamKey = key;
+
   if (html) {
     b.innerHTML = html;
     attachCopyButtons(b);
-  } else if (text) {
-    b.textContent = text;
+  } else if (nextPlain) {
+    b.textContent = nextPlain;
   } else {
-    // No "…" placeholder — empty assistant waits silently; TUI uses turn-status
-    // / Thinking… block instead of a fake message bubble.
+    // No placeholder — empty assistant waits silently (TUI turn-status / Thinking).
     b.textContent = '';
   }
 }
@@ -3694,10 +3936,124 @@ function visibleTimelineItems(m) {
   return out;
 }
 
-function timelineItemSig(item) {
-  if (item.kind === 'text') return 't';
-  if (item.kind === 'tool' && item.tool) return 'tool:' + (item.tool.id || '');
-  if (item.kind === 'thought' && item.thought) return 'th:' + (item.thought.id || '');
+// ── Verb-group: consecutive toolcalls → "Read 2 files, Edited 4 files" ──
+function classifyToolVerb(t) {
+  const s = ((t && t.kind) || '') + ' ' + ((t && t.title) || '');
+  const low = s.toLowerCase();
+  if (/list.?dir|list_dir|listdir/.test(low)) return 'dir';
+  if (/search_replace|str_replace|apply.?patch|write.?file|edit|write|patch|create.?file|apply/.test(low)) {
+    return 'edit';
+  }
+  if (/grep|glob|search|find|rg\\b|fuzzy/.test(low)) return 'search';
+  if (/read|open.?file|cat\\b|view.?file/.test(low)) return 'file';
+  if (/web.?fetch|fetch|http|browser|web.?search|browse/.test(low)) return 'web';
+  if (/terminal|bash|shell|command|execute|run_terminal|run /.test(low)) return 'command';
+  if (/use.?tool|mcp|integration|call.?tool/.test(low)) return 'mcp';
+  return 'other';
+}
+
+function isToolStatusRunning(status) {
+  return /run|progress|pending|in_progress|start|stream/.test(String(status || '').toLowerCase());
+}
+function isToolStatusFailed(status) {
+  return /fail|error|denied|cancel/.test(String(status || '').toLowerCase());
+}
+
+function formatToolVerbGroupLabel(tools) {
+  const buckets = [];
+  let running = false;
+  let failed = 0;
+  const verbTable = {
+    file: ['Read', 'Reading'],
+    search: ['Searched', 'Searching'],
+    dir: ['Listed', 'Listing'],
+    edit: ['Edited', 'Editing'],
+    command: ['Ran', 'Running'],
+    web: ['Fetched', 'Fetching'],
+    mcp: ['Called', 'Calling'],
+    other: ['Ran', 'Running'],
+  };
+  const nounTable = {
+    file: ['file', 'files'],
+    search: ['pattern', 'patterns'],
+    dir: ['dir', 'dirs'],
+    edit: ['file', 'files'],
+    command: ['command', 'commands'],
+    web: ['website', 'websites'],
+    mcp: ['MCP tool', 'MCP tools'],
+    other: ['tool', 'tools'],
+  };
+  for (const t of tools) {
+    const kind = classifyToolVerb(t);
+    const pos = buckets.findIndex((b) => b.kind === kind);
+    if (pos < 0) buckets.push({ kind, count: 1 });
+    else buckets[pos].count += 1;
+    if (isToolStatusRunning(t.status)) running = true;
+    if (isToolStatusFailed(t.status)) failed += 1;
+  }
+  const parts = buckets.map((b) => {
+    const v = verbTable[b.kind] || verbTable.other;
+    const n = nounTable[b.kind] || nounTable.other;
+    const verb = running ? v[1] : v[0];
+    const noun = b.count === 1 ? n[0] : n[1];
+    return verb + ' ' + b.count + ' ' + noun;
+  });
+  let label = parts.join(', ');
+  if (failed > 0) label += ' · ' + failed + ' failed';
+  return { label, running, failed };
+}
+
+/**
+ * Fold consecutive tools into verb-groups (singleton stays flat).
+ * Text / thought break the run.
+ */
+function groupConsecutiveTools(items) {
+  const out = [];
+  let run = [];
+  function flush() {
+    if (!run.length) return;
+    if (run.length === 1) {
+      out.push({ type: 'tool', tool: run[0] });
+    } else {
+      const meta = formatToolVerbGroupLabel(run);
+      const id = run.map((t) => t.id).filter(Boolean).join('|') || ('tg-' + out.length);
+      out.push({
+        type: 'toolGroup',
+        group: {
+          id,
+          tools: run.slice(),
+          label: meta.label,
+          running: meta.running,
+          failed: meta.failed,
+        },
+      });
+    }
+    run = [];
+  }
+  for (const item of items) {
+    if (item.kind === 'tool' && item.tool) {
+      run.push(item.tool);
+      continue;
+    }
+    flush();
+    if (item.kind === 'text') out.push({ type: 'text', item });
+    else if (item.kind === 'thought') out.push({ type: 'thought', item });
+  }
+  flush();
+  return out;
+}
+
+function visibleGroupedTimeline(m) {
+  return groupConsecutiveTools(visibleTimelineItems(m));
+}
+
+function timelineNodeSig(node) {
+  if (node.type === 'text') return 't';
+  if (node.type === 'tool' && node.tool) return 'tool:' + (node.tool.id || '');
+  if (node.type === 'toolGroup' && node.group) return 'tg:' + (node.group.id || '');
+  if (node.type === 'thought' && node.item && node.item.thought) {
+    return 'th:' + (node.item.thought.id || '');
+  }
   return '?';
 }
 
@@ -3705,32 +4061,81 @@ function domTimelineSig(timeline) {
   return Array.from(timeline.children).map((el) => {
     if (el.classList.contains('bubble')) return 't';
     if (el.classList.contains('tool-row')) return 'tool:' + (el.dataset.toolId || '');
+    if (el.classList.contains('tool-group')) return 'tg:' + (el.dataset.groupId || '');
     if (el.classList.contains('thought')) return 'th:' + (el.dataset.thoughtId || '');
     return '?';
   }).join('|');
 }
 
-function itemsTimelineSig(items) {
-  return items.map(timelineItemSig).join('|');
+function nodesTimelineSig(nodes) {
+  return nodes.map(timelineNodeSig).join('|');
 }
 
-/** Build one timeline child for a visible item. */
-function renderTimelineItem(item, openToolIds, openThoughtIds) {
-  if (item.kind === 'text') {
+function renderToolGroup(group, openToolIds, openGroupIds) {
+  const d = document.createElement('details');
+  d.className = 'tool-group' +
+    (group.running ? ' running' : '') +
+    (group.failed ? ' failed' : '');
+  d.dataset.groupId = group.id || '';
+  d.dataset.streamKey =
+    group.label + '|' + group.running + '|' + group.failed + '|' +
+    group.tools.map((t) =>
+      (t.id || '') + ':' + (t.status || '') + ':' + (t.title || '')
+    ).join(';');
+  const forceOpen =
+    !!group.running ||
+    (openGroupIds && openGroupIds.has(group.id)) ||
+    (openToolIds && group.tools.some((t) => openToolIds.has(t.id)));
+  if (forceOpen) d.open = true;
+  const summary = document.createElement('summary');
+  const first = group.tools[0];
+  const ico = first ? toolIconName(first) : 'tool';
+  let statusHtml = '';
+  if (group.running) {
+    statusHtml = statusIcon('in_progress') + '…';
+  } else if (group.failed) {
+    statusHtml = statusIcon('failed') + esc(String(group.failed) + ' failed');
+  } else {
+    statusHtml = statusIcon('completed');
+  }
+  summary.innerHTML =
+    '<span class="tool-ico">' + icon(ico) + '</span>' +
+    '<span class="tool-group-label">' + esc(group.label || '') + '</span>' +
+    '<span class="tool-status">' + statusHtml + '</span>';
+  d.appendChild(summary);
+  const members = document.createElement('div');
+  members.className = 'tool-group-members';
+  for (const t of group.tools) {
+    const open = openToolIds && openToolIds.has(t.id);
+    members.appendChild(renderToolRow(t, open));
+  }
+  d.appendChild(members);
+  return d;
+}
+
+/** Build one timeline child for a grouped node. */
+function renderTimelineNode(node, openToolIds, openThoughtIds, openGroupIds, streamText) {
+  if (node.type === 'text' && node.item) {
     const b = document.createElement('div');
     b.className = 'bubble md';
-    fillTextBubble(b, item.text || '', item.html || '');
+    fillTextBubble(b, node.item.text || '', node.item.html || '', {
+      stream: !!streamText,
+    });
     return b;
   }
-  if (item.kind === 'tool' && item.tool) {
-    const open = openToolIds && openToolIds.has(item.tool.id);
-    return renderToolRow(item.tool, open);
+  if (node.type === 'tool' && node.tool) {
+    const open = openToolIds && openToolIds.has(node.tool.id);
+    return renderToolRow(node.tool, open);
   }
-  if (item.kind === 'thought' && item.thought) {
+  if (node.type === 'toolGroup' && node.group) {
+    return renderToolGroup(node.group, openToolIds, openGroupIds);
+  }
+  if (node.type === 'thought' && node.item && node.item.thought) {
+    const t = node.item.thought;
     const open =
-      !!item.thought.running ||
-      (openThoughtIds && openThoughtIds.has(item.thought.id));
-    return renderThoughtRow(item.thought, open);
+      !!t.running ||
+      (openThoughtIds && openThoughtIds.has(t.id));
+    return renderThoughtRow(t, open);
   }
   return null;
 }
@@ -3740,18 +4145,22 @@ function renderTimelineItem(item, openToolIds, openThoughtIds) {
  * content updates. Avoids full DOM replace flicker while tokens stream.
  * Returns true if patched; false if caller should rebuild.
  */
-function patchTimelineInPlace(timeline, m, openToolIds, openThoughtIds) {
-  const items = visibleTimelineItems(m);
-  if (itemsTimelineSig(items) !== domTimelineSig(timeline)) return false;
+function patchTimelineInPlace(timeline, m, openToolIds, openThoughtIds, openGroupIds) {
+  const nodes = visibleGroupedTimeline(m);
+  if (nodesTimelineSig(nodes) !== domTimelineSig(timeline)) return false;
 
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
     const el = timeline.children[i];
     if (!el) return false;
-    if (item.kind === 'text') {
-      fillTextBubble(el, item.text || '', item.html || '');
-    } else if (item.kind === 'tool' && item.tool) {
-      const t = item.tool;
+    if (node.type === 'text' && node.item) {
+      // Only the live tail text node streams per-character.
+      const streamTail = busy && i === nodes.length - 1;
+      fillTextBubble(el, node.item.text || '', node.item.html || '', {
+        stream: streamTail,
+      });
+    } else if (node.type === 'tool' && node.tool) {
+      const t = node.tool;
       const key =
         (t.status || '') +
         '|' +
@@ -3768,12 +4177,30 @@ function patchTimelineInPlace(timeline, m, openToolIds, openThoughtIds) {
         next.dataset.streamKey = key;
         el.replaceWith(next);
       }
-    } else if (item.kind === 'thought' && item.thought) {
+    } else if (node.type === 'toolGroup' && node.group) {
+      const g = node.group;
+      const key =
+        g.label + '|' + g.running + '|' + g.failed + '|' +
+        g.tools.map((t) =>
+          (t.id || '') + ':' + (t.status || '') + ':' + (t.title || '')
+        ).join(';');
+      if (el.dataset.streamKey !== key) {
+        const wasOpen =
+          el.open ||
+          (openGroupIds && openGroupIds.has(g.id)) ||
+          !!g.running;
+        const next = renderToolGroup(g, openToolIds, openGroupIds);
+        if (wasOpen) next.open = true;
+        next.dataset.streamKey = key;
+        el.replaceWith(next);
+      }
+    } else if (node.type === 'thought' && node.item && node.item.thought) {
+      const th = node.item.thought;
       const forceOpen =
-        !!item.thought.running ||
-        (openThoughtIds && openThoughtIds.has(item.thought.id)) ||
+        !!th.running ||
+        (openThoughtIds && openThoughtIds.has(th.id)) ||
         el.open;
-      fillThoughtBlock(el, item.thought);
+      fillThoughtBlock(el, th);
       el.open = forceOpen;
     }
   }
@@ -3782,12 +4209,16 @@ function patchTimelineInPlace(timeline, m, openToolIds, openThoughtIds) {
 }
 
 /** Build timeline nodes (thoughts + text + tools) in stream order. */
-function renderAssistantTimeline(m, openToolIds, openThoughtIds) {
+function renderAssistantTimeline(m, openToolIds, openThoughtIds, openGroupIds) {
   const timeline = document.createElement('div');
   timeline.className = 'assistant-timeline';
-  for (const item of visibleTimelineItems(m)) {
-    const node = renderTimelineItem(item, openToolIds, openThoughtIds);
-    if (node) timeline.appendChild(node);
+  const nodes = visibleGroupedTimeline(m);
+  for (let i = 0; i < nodes.length; i++) {
+    const streamText = busy && i === nodes.length - 1 && nodes[i].type === 'text';
+    const el = renderTimelineNode(
+      nodes[i], openToolIds, openThoughtIds, openGroupIds, streamText,
+    );
+    if (el) timeline.appendChild(el);
   }
   // After first frame, only newly appended blocks (class tl-new) animate.
   requestAnimationFrame(() => timeline.classList.add('stream-settled'));
@@ -3795,23 +4226,74 @@ function renderAssistantTimeline(m, openToolIds, openThoughtIds) {
 }
 
 /**
- * When structure only grows at the end, update prefix in place and append new
- * nodes (with tl-new enter anim) instead of full rebuild.
+ * When structure only grows at the end (new top-level nodes), update prefix
+ * content in place and append new nodes. Group fold (1 tool → "Read 2 files")
+ * changes the prefix signature, so the caller rebuilds instead.
  */
-function appendTimelineDelta(timeline, m, openToolIds, openThoughtIds) {
-  const items = visibleTimelineItems(m);
+function appendTimelineDelta(timeline, m, openToolIds, openThoughtIds, openGroupIds) {
+  const nodes = visibleGroupedTimeline(m);
   const domCount = timeline.children.length;
-  if (domCount === 0 || items.length <= domCount) return false;
-  const prefix = items.slice(0, domCount);
-  if (itemsTimelineSig(prefix) !== domTimelineSig(timeline)) return false;
-  if (!patchTimelineInPlace(timeline, { items: prefix }, openToolIds, openThoughtIds)) {
-    return false;
+  if (domCount === 0 || nodes.length <= domCount) return false;
+  const prefixNodes = nodes.slice(0, domCount);
+  if (nodesTimelineSig(prefixNodes) !== domTimelineSig(timeline)) return false;
+
+  // Patch prefix content without requiring full-list signature match.
+  for (let i = 0; i < prefixNodes.length; i++) {
+    const node = prefixNodes[i];
+    const el = timeline.children[i];
+    if (!el) return false;
+    if (node.type === 'text' && node.item) {
+      // Prefix nodes are never the growing tail when we append after them.
+      fillTextBubble(el, node.item.text || '', node.item.html || '', {
+        stream: false,
+      });
+    } else if (node.type === 'tool' && node.tool) {
+      const t = node.tool;
+      const key =
+        (t.status || '') + '|' + (t.title || '') + '|' +
+        (t.input || '') + '|' + (t.output || '') + '|' +
+        ((t.paths && t.paths.join(',')) || '');
+      if (el.dataset.streamKey !== key) {
+        const wasOpen = el.open || (openToolIds && openToolIds.has(t.id));
+        const next = renderToolRow(t, wasOpen);
+        next.dataset.streamKey = key;
+        el.replaceWith(next);
+      }
+    } else if (node.type === 'toolGroup' && node.group) {
+      const g = node.group;
+      const key =
+        g.label + '|' + g.running + '|' + g.failed + '|' +
+        g.tools.map((t) =>
+          (t.id || '') + ':' + (t.status || '') + ':' + (t.title || '')
+        ).join(';');
+      if (el.dataset.streamKey !== key) {
+        const wasOpen =
+          el.open ||
+          (openGroupIds && openGroupIds.has(g.id)) ||
+          !!g.running;
+        const next = renderToolGroup(g, openToolIds, openGroupIds);
+        if (wasOpen) next.open = true;
+        next.dataset.streamKey = key;
+        el.replaceWith(next);
+      }
+    } else if (node.type === 'thought' && node.item && node.item.thought) {
+      const th = node.item.thought;
+      const forceOpen =
+        !!th.running ||
+        (openThoughtIds && openThoughtIds.has(th.id)) ||
+        el.open;
+      fillThoughtBlock(el, th);
+      el.open = forceOpen;
+    }
   }
-  for (let i = domCount; i < items.length; i++) {
-    const node = renderTimelineItem(items[i], openToolIds, openThoughtIds);
-    if (!node) continue;
-    node.classList.add('tl-new');
-    timeline.appendChild(node);
+  for (let i = domCount; i < nodes.length; i++) {
+    const streamText = busy && i === nodes.length - 1 && nodes[i].type === 'text';
+    const el = renderTimelineNode(
+      nodes[i], openToolIds, openThoughtIds, openGroupIds, streamText,
+    );
+    if (!el) continue;
+    el.classList.add('tl-new');
+    timeline.appendChild(el);
   }
   timeline.classList.add('stream-settled');
   return true;
@@ -3835,10 +4317,270 @@ function collectOpenThoughtIds(wrap) {
   return ids;
 }
 
+function collectOpenGroupIds(wrap) {
+  const ids = new Set();
+  wrap.querySelectorAll('details.tool-group[open]').forEach((el) => {
+    const id = el.dataset.groupId;
+    if (id) ids.add(id);
+  });
+  return ids;
+}
+
+function messageCopyPlain(m) {
+  if (!m) return '';
+  if (m.type === 'user' || m.type === 'system') return m.text || '';
+  if (m.type === 'assistant') {
+    if (m.text) return m.text;
+    const items = Array.isArray(m.items) ? m.items : [];
+    return items
+      .filter((it) => it && it.kind === 'text')
+      .map((it) => it.text || '')
+      .join('');
+  }
+  return '';
+}
+
+function renderMsgActions(m) {
+  const bar = document.createElement('div');
+  bar.className = 'msg-actions';
+  bar.setAttribute('role', 'toolbar');
+  bar.setAttribute('aria-label', 'Message actions');
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'msg-act-copy msg-act-icon';
+  copyBtn.title = 'Copy';
+  copyBtn.setAttribute('aria-label', 'Copy message');
+  copyBtn.innerHTML = icon('copy');
+  copyBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const text = messageCopyPlain(m);
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      copyBtn.classList.add('copied');
+      copyBtn.innerHTML = icon('check');
+      setTimeout(() => {
+        copyBtn.classList.remove('copied');
+        copyBtn.innerHTML = icon('copy');
+      }, 1200);
+    }).catch(() => {
+      // Fallback via host if clipboard API blocked
+      vscode.postMessage({ type: 'copyText', text });
+    });
+  });
+  bar.appendChild(copyBtn);
+
+  if (m.type === 'user') {
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'msg-act-edit msg-act-icon';
+    editBtn.title = 'Edit and resubmit';
+    editBtn.setAttribute('aria-label', 'Edit message');
+    editBtn.innerHTML = icon('pencil');
+    editBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Resolve from allMessages so we always use the live list entry.
+      const live =
+        (m && m.id && allMessages.find((x) => x && x.id === m.id && x.type === 'user')) || m;
+      enterUserMessageEdit(live);
+    });
+    bar.appendChild(editBtn);
+  }
+  return bar;
+}
+
+/**
+ * Composer-based edit of a previous user prompt (TUI inline-edit intent).
+ * Click Edit → draft lands in composer; Send opens rewind-mode popover.
+ */
+let pendingEdit = null; // { id, promptIndex?, original }
+let rewindOpen = false;
+let rewindIndex = 0;
+const REWIND_MODES = [
+  {
+    mode: 'all',
+    label: 'Both conversation and file changes',
+    detail: 'Rewind chat and revert file snapshots from this prompt',
+  },
+  {
+    mode: 'conversation_only',
+    label: 'Conversation only',
+    detail: 'Rewind chat only — leave workspace files as they are',
+  },
+];
+
+const editBanner = document.getElementById('edit-banner');
+const editBannerCancel = document.getElementById('edit-banner-cancel');
+const rewindPopover = document.getElementById('rewind-popover');
+const rewindList = document.getElementById('rewind-list');
+
+function updateEditBanner() {
+  if (!editBanner) return;
+  editBanner.hidden = !pendingEdit;
+  if (pendingEdit) {
+    composer.placeholder = 'Edit message… (Enter resubmit · Esc cancel)';
+  } else {
+    composer.placeholder = 'Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)';
+  }
+  updateSendStopButton();
+}
+
+function clearPendingEdit(opts) {
+  const keepText = !!(opts && opts.keepText);
+  pendingEdit = null;
+  closeRewindPopover();
+  if (!keepText) {
+    // Leave composer alone if caller already set draft / cleared it.
+  }
+  updateEditBanner();
+}
+
+function cancelPendingEdit() {
+  if (!pendingEdit) return;
+  pendingEdit = null;
+  closeRewindPopover();
+  composer.value = '';
+  autosizeComposer();
+  updateEditBanner();
+  renderMessages(allMessages, { force: true });
+  composer.focus();
+}
+
+function enterUserMessageEdit(m) {
+  if (!m || m.type !== 'user' || !m.id) return;
+  if (mentionOpen) closeMention();
+  if (slashOpen) closeSlash();
+  if (modelOpen) closeModelPopover();
+  if (effortOpen) closeEffortPopover();
+  closeRewindPopover();
+  pendingEdit = {
+    id: m.id,
+    promptIndex: typeof m.promptIndex === 'number' ? m.promptIndex : undefined,
+    original: (m.text || '').trim(),
+  };
+  composer.value = m.text || '';
+  autosizeComposer();
+  updateEditBanner();
+  // Highlight source bubble
+  renderMessages(allMessages, { force: true });
+  composer.focus();
+  const len = composer.value.length;
+  try { composer.setSelectionRange(len, len); } catch (_) { /* ignore */ }
+}
+
+function restoreEditComposer(id, text) {
+  const draft = text != null ? String(text) : '';
+  const src = allMessages.find((m) => m && m.id === id && m.type === 'user');
+  pendingEdit = {
+    id: id,
+    promptIndex:
+      src && typeof src.promptIndex === 'number' ? src.promptIndex : undefined,
+    original: src ? (src.text || '').trim() : '',
+  };
+  composer.value = draft;
+  autosizeComposer();
+  updateEditBanner();
+  composer.focus();
+}
+
+function closeRewindPopover() {
+  rewindOpen = false;
+  rewindIndex = 0;
+  if (rewindPopover) rewindPopover.hidden = true;
+}
+
+function renderRewindList() {
+  if (!rewindList) return;
+  rewindList.innerHTML = REWIND_MODES.map((item, i) =>
+    '<button type="button" class="rewind-item' + (i === rewindIndex ? ' active' : '') +
+    '" data-rewind-idx="' + i + '" role="option" aria-selected="' +
+    (i === rewindIndex ? 'true' : 'false') + '">' +
+    '<span class="rewind-label">' + esc(item.label) + '</span>' +
+    '<span class="rewind-detail">' + esc(item.detail) + '</span>' +
+    '</button>'
+  ).join('');
+  const active = rewindList.querySelector('.rewind-item.active');
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+function openRewindPopover() {
+  if (!pendingEdit) return;
+  if (mentionOpen) closeMention();
+  if (slashOpen) closeSlash();
+  if (modelOpen) closeModelPopover();
+  if (effortOpen) closeEffortPopover();
+  rewindOpen = true;
+  rewindIndex = 0;
+  if (rewindPopover) rewindPopover.hidden = false;
+  renderRewindList();
+}
+
+function moveRewind(delta) {
+  if (!REWIND_MODES.length) return;
+  rewindIndex = (rewindIndex + delta + REWIND_MODES.length) % REWIND_MODES.length;
+  renderRewindList();
+}
+
+function acceptRewind(idx) {
+  const item = REWIND_MODES[idx];
+  if (!item || !pendingEdit) return;
+  const text = composer.value.trim();
+  if (!text) {
+    closeRewindPopover();
+    return;
+  }
+  const pe = pendingEdit;
+  closeRewindPopover();
+  pendingEdit = null;
+  updateEditBanner();
+  composer.value = '';
+  autosizeComposer();
+  updateSendStopButton();
+  renderMessages(allMessages, { force: true });
+  vscode.postMessage({
+    type: 'editMessage',
+    id: pe.id,
+    text: text,
+    promptIndex: pe.promptIndex,
+    mode: item.mode,
+  });
+}
+
+/** Send path when a composer edit is pending: open mode popover or no-op. */
+function trySubmitPendingEdit() {
+  if (!pendingEdit) return false;
+  const text = composer.value.trim();
+  if (!text) return true; // swallow empty
+  if (text === pendingEdit.original) {
+    // Unchanged → just cancel edit mode (TUI Enter-with-same exits).
+    cancelPendingEdit();
+    return true;
+  }
+  openRewindPopover();
+  return true;
+}
+
+if (editBannerCancel) {
+  editBannerCancel.addEventListener('click', () => cancelPendingEdit());
+}
+if (rewindList) {
+  rewindList.addEventListener('mousedown', (e) => e.preventDefault());
+  rewindList.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-rewind-idx]');
+    if (!btn) return;
+    acceptRewind(Number(btn.getAttribute('data-rewind-idx')));
+  });
+}
+
 function renderOneMessage(m, isNew) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + m.type + (isNew ? ' msg-enter' : '');
   wrap.dataset.msgId = m.id || '';
+  if (m.type === 'user' && typeof m.promptIndex === 'number') {
+    wrap.dataset.promptIndex = String(m.promptIndex);
+  }
   if (m.type === 'assistant' && busy) {
     // Only the live tail should show stream caret — refined after append.
     wrap.classList.add('streaming');
@@ -3852,13 +4594,18 @@ function renderOneMessage(m, isNew) {
       ).join('');
       wrap.appendChild(chips);
     }
+    if (pendingEdit && m.id === pendingEdit.id) {
+      wrap.classList.add('editing');
+    }
     const b = document.createElement('div');
     b.className = 'bubble';
     b.textContent = m.text || '';
     wrap.appendChild(b);
+    wrap.appendChild(renderMsgActions(m));
   } else if (m.type === 'assistant') {
     // Thoughts live on the timeline with tools/text (TUI scrollback order).
-    wrap.appendChild(renderAssistantTimeline(m, null, null));
+    wrap.appendChild(renderAssistantTimeline(m, null, null, null));
+    wrap.appendChild(renderMsgActions(m));
   } else {
     // System lifecycle/info: full-width dashed separator with text in the middle.
     const b = document.createElement('div');
@@ -3945,6 +4692,7 @@ function patchLastAssistant(m) {
   // Preserve which tool/thought rows the user has expanded across stream patches.
   const openToolIds = collectOpenToolIds(wrap);
   const openThoughtIds = collectOpenThoughtIds(wrap);
+  const openGroupIds = collectOpenGroupIds(wrap);
 
   // Drop legacy top-level thought (pre-timeline); everything is in the timeline now.
   wrap.querySelectorAll(':scope > details.thought').forEach((el) => el.remove());
@@ -3953,20 +4701,21 @@ function patchLastAssistant(m) {
 
   const oldTimeline = wrap.querySelector(':scope > .assistant-timeline');
   if (oldTimeline) {
-    if (patchTimelineInPlace(oldTimeline, m, openToolIds, openThoughtIds)) {
+    if (patchTimelineInPlace(oldTimeline, m, openToolIds, openThoughtIds, openGroupIds)) {
       return true;
     }
-    if (appendTimelineDelta(oldTimeline, m, openToolIds, openThoughtIds)) {
+    if (appendTimelineDelta(oldTimeline, m, openToolIds, openThoughtIds, openGroupIds)) {
       return true;
     }
   }
-  const nextTimeline = renderAssistantTimeline(m, openToolIds, openThoughtIds);
+  const nextTimeline = renderAssistantTimeline(m, openToolIds, openThoughtIds, openGroupIds);
   if (oldTimeline) oldTimeline.replaceWith(nextTimeline);
   else wrap.appendChild(nextTimeline);
   return true;
 }
 
-function renderMessages(messages) {
+function renderMessages(messages, opts) {
+  const force = !!(opts && opts.force);
   const next = messages || [];
   const stick = shouldStickToBottom(
     messagesEl.scrollTop, messagesEl.scrollHeight, messagesEl.clientHeight,
@@ -3976,6 +4725,7 @@ function renderMessages(messages) {
   // Streaming fast path: only the last assistant bubble changed — avoid wiping
   // the whole list (main source of UI jank / flicker while tokens arrive).
   if (
+    !force &&
     allMessages.length > 0 &&
     isStreamingTailUpdate(allMessages, next) &&
     allMessages.length <= VIRT_THRESHOLD
@@ -4112,11 +4862,12 @@ function renderTurnStatus(s) {
 }
 
 function setBusy(b) {
+  const wasBusy = busy;
   busy = b;
   composer.disabled = false;
   if (b) setMeta('working…', true);
   else setMeta(meta.dataset.base || 'idle', false);
-  // Stream caret only on the last assistant bubble while the turn is live.
+  // Mark live assistant while turn is running (styling / stream path).
   messagesEl.querySelectorAll('.msg.assistant.streaming').forEach((el) => {
     el.classList.remove('streaming');
   });
@@ -4124,6 +4875,13 @@ function setBusy(b) {
     const nodes = messagesEl.querySelectorAll('.msg.assistant');
     const last = nodes.length ? nodes[nodes.length - 1] : null;
     if (last) last.classList.add('streaming');
+  } else if (wasBusy) {
+    // Turn ended: re-render tail so plain stream chars become full markdown.
+    const lastMsg =
+      allMessages.length > 0 ? allMessages[allMessages.length - 1] : null;
+    if (lastMsg && lastMsg.type === 'assistant') {
+      patchLastAssistant(lastMsg);
+    }
   }
   updateSendStopButton();
 }
@@ -4141,6 +4899,10 @@ function updateSendStopButton() {
     sendBtn.innerHTML = '<i class="ti ti-player-stop"></i> Stop';
     sendBtn.title = 'Stop current turn (Esc)';
     sendBtn.setAttribute('aria-label', 'Stop');
+  } else if (pendingEdit) {
+    sendBtn.innerHTML = '<i class="ti ti-check"></i> Resubmit';
+    sendBtn.title = 'Resubmit edited message (choose rewind mode)';
+    sendBtn.setAttribute('aria-label', 'Resubmit');
   } else {
     sendBtn.innerHTML = '<i class="ti ti-send"></i> Send';
     sendBtn.title = 'Send';
@@ -4198,11 +4960,16 @@ sendBtn.addEventListener('click', () => {
   if (slashOpen) closeSlash();
   if (modelOpen) closeModelPopover();
   if (effortOpen) closeEffortPopover();
+  if (rewindOpen) {
+    acceptRewind(rewindIndex);
+    return;
+  }
   // Busy + empty → Stop; otherwise Send
   if (busy && !composer.value.trim()) {
     vscode.postMessage({ type: 'cancel' });
     return;
   }
+  if (trySubmitPendingEdit()) return;
   const text = composer.value.trim();
   if (!text || busy) return;
   vscode.postMessage({ type: 'send', text });
@@ -4353,6 +5120,33 @@ composer.addEventListener('keydown', (e) => {
   }
   // permission/question handled on window capture above
   if (permissionOpen || questionOpen) return;
+  if (rewindOpen) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveRewind(1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveRewind(-1);
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      acceptRewind(rewindIndex);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeRewindPopover();
+      return;
+    }
+  }
+  if (pendingEdit && e.key === 'Escape' && !mentionOpen && !slashOpen && !modelOpen && !effortOpen) {
+    e.preventDefault();
+    cancelPendingEdit();
+    return;
+  }
   if (modelOpen) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -4487,6 +5281,8 @@ window.addEventListener('message', (event) => {
     emptyEl.hidden = (msg.messages || []).length > 0;
   } else if (msg.type === 'messages') {
     renderMessages(msg.messages || []);
+  } else if (msg.type === 'restoreEditComposer') {
+    restoreEditComposer(msg.id, msg.text);
   } else if (msg.type === 'busy') {
     setBusy(!!msg.busy);
   } else if (msg.type === 'turnStatus') {

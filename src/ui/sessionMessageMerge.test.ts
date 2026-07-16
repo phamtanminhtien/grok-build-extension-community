@@ -7,17 +7,25 @@ import {
   applyAgentThoughtChunk,
   applyToolEvent,
   applyUserMessageChunk,
+  assignPromptIndices,
   assistantHasRunningThought,
   assistantPlainText,
+  classifyToolVerb,
   emptyAssistant,
   extractToolContentText,
   finishAssistantThoughts,
   formatToolValue,
+  formatToolVerbGroupLabel,
+  groupConsecutiveTools,
   isStreamingTailUpdate,
+  messageCopyText,
+  nextPromptIndex,
   shouldApplyUserMessageChunk,
   shouldCloseAssistantOnUserChunk,
+  truncateFromMessageId,
   upsertAssistantTool,
   type MergeState,
+  type ToolCard,
 } from "./sessionMessageMerge.ts";
 
 function uidSeq(start = 1): () => string {
@@ -78,6 +86,10 @@ describe("applyUserMessageChunk", () => {
     assert.equal(next!.messages.length, 1);
     assert.equal(next!.messages[0]?.type, "user");
     assert.equal(next!.messages[0]?.type === "user" && next!.messages[0].text, "Hi");
+    assert.equal(
+      next!.messages[0]?.type === "user" && next!.messages[0].promptIndex,
+      0,
+    );
     assert.equal(next!.currentUserId, "id-1");
   });
 
@@ -362,5 +374,134 @@ describe("isStreamingTailUpdate", () => {
       ),
       false,
     );
+  });
+});
+
+describe("promptIndex / edit helpers", () => {
+  it("nextPromptIndex counts user messages", () => {
+    assert.equal(nextPromptIndex([]), 0);
+    assert.equal(
+      nextPromptIndex([
+        { type: "user", id: "u0", text: "a", promptIndex: 0 },
+        emptyAssistant("a0"),
+        { type: "user", id: "u1", text: "b", promptIndex: 1 },
+      ]),
+      2,
+    );
+  });
+
+  it("assignPromptIndices renumbers user turns", () => {
+    const messages = [
+      { type: "user" as const, id: "u0", text: "a" },
+      emptyAssistant("a0"),
+      { type: "system" as const, id: "s", text: "note" },
+      { type: "user" as const, id: "u1", text: "b" },
+    ];
+    assignPromptIndices(messages);
+    assert.equal(messages[0]?.type === "user" && messages[0].promptIndex, 0);
+    assert.equal(messages[3]?.type === "user" && messages[3].promptIndex, 1);
+  });
+
+  it("truncateFromMessageId drops target and tail", () => {
+    const messages = [
+      { type: "user" as const, id: "u0", text: "a", promptIndex: 0 },
+      emptyAssistant("a0"),
+      { type: "user" as const, id: "u1", text: "b", promptIndex: 1 },
+      emptyAssistant("a1"),
+    ];
+    const next = truncateFromMessageId(messages, "u1");
+    assert.equal(next.length, 2);
+    assert.equal(next[0]?.id, "u0");
+    assert.equal(next[1]?.id, "a0");
+    assert.equal(messages.length, 4, "input not mutated");
+  });
+
+  it("messageCopyText uses plain text for user/assistant", () => {
+    assert.equal(
+      messageCopyText({ type: "user", id: "u", text: "hello" }),
+      "hello",
+    );
+    assert.equal(
+      messageCopyText({
+        type: "assistant",
+        id: "a",
+        items: [
+          { kind: "thought", thought: { id: "t", text: "secret" } },
+          { kind: "text", text: "answer" },
+        ],
+      }),
+      "answer",
+    );
+  });
+});
+
+describe("tool verb groups (TUI Read 2 files / Edited 4 files)", () => {
+  function tool(
+    id: string,
+    title: string,
+    status = "completed",
+  ): ToolCard {
+    return { id, title, status, paths: [] };
+  }
+
+  it("classifies read / write / search / shell", () => {
+    assert.equal(classifyToolVerb({ title: "Read package.json" }), "file");
+    assert.equal(classifyToolVerb({ title: "Write src/a.ts" }), "edit");
+    assert.equal(classifyToolVerb({ title: "search_replace" }), "edit");
+    assert.equal(classifyToolVerb({ title: "Grep pattern" }), "search");
+    assert.equal(classifyToolVerb({ title: "run_terminal_command" }), "command");
+  });
+
+  it("labels mixed batch like TUI", () => {
+    const { label, running, failed } = formatToolVerbGroupLabel([
+      tool("1", "Read a.ts"),
+      tool("2", "Read b.ts"),
+      tool("3", "Write c.ts"),
+      tool("4", "Write d.ts"),
+      tool("5", "Write e.ts"),
+      tool("6", "Write f.ts"),
+    ]);
+    assert.equal(label, "Read 2 files, Edited 4 files");
+    assert.equal(running, false);
+    assert.equal(failed, 0);
+  });
+
+  it("uses present tense while any tool is running", () => {
+    const { label, running } = formatToolVerbGroupLabel([
+      tool("1", "Read a", "completed"),
+      tool("2", "Read b", "in_progress"),
+    ]);
+    assert.equal(running, true);
+    assert.equal(label, "Reading 2 files");
+  });
+
+  it("groups consecutive tools; text/thought break runs; singleton stays flat", () => {
+    const nodes = groupConsecutiveTools([
+      { kind: "tool", tool: tool("r1", "Read a") },
+      { kind: "tool", tool: tool("r2", "Read b") },
+      { kind: "text", text: "then" },
+      { kind: "tool", tool: tool("w1", "Write x") },
+      { kind: "tool", tool: tool("w2", "Write y") },
+      { kind: "tool", tool: tool("w3", "Write z") },
+      { kind: "tool", tool: tool("w4", "Write w") },
+      { kind: "thought", thought: { id: "t1", text: "hmm" } },
+      { kind: "tool", tool: tool("solo", "Read solo") },
+    ]);
+    assert.equal(nodes.length, 5);
+    assert.equal(nodes[0]?.type, "toolGroup");
+    if (nodes[0]?.type === "toolGroup") {
+      assert.equal(nodes[0].group.label, "Read 2 files");
+      assert.equal(nodes[0].group.tools.length, 2);
+    }
+    assert.equal(nodes[1]?.type, "text");
+    assert.equal(nodes[2]?.type, "toolGroup");
+    if (nodes[2]?.type === "toolGroup") {
+      assert.equal(nodes[2].group.label, "Edited 4 files");
+    }
+    assert.equal(nodes[3]?.type, "thought");
+    assert.equal(nodes[4]?.type, "tool");
+    if (nodes[4]?.type === "tool") {
+      assert.equal(nodes[4].tool.id, "solo");
+    }
   });
 });
