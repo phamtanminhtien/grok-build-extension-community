@@ -5,7 +5,12 @@ import {
   readTextFileHost,
   setBeforeWriteHook,
 } from "./agent/hostFs";
-import { AuthService, promptAndStoreApiKey } from "./auth/authService";
+import {
+  AuthService,
+  pickLoginMethod,
+  promptAndStoreApiKey,
+} from "./auth/authService";
+import { formatLogoutMessage } from "./auth/authFlow";
 import {
   modelDisplayLabel,
   selectModelQuickPick,
@@ -167,18 +172,11 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand("grok.login", async () => {
-      const has = await auth.hasAnyAuth();
-      if (has) {
-        const choice = await vscode.window.showInformationMessage(
-          "Auth already present (SecretStorage, env, or ~/.grok). Set a new API key?",
-          "Set API key",
-          "Cancel",
-        );
-        if (choice !== "Set API key") {
-          return;
-        }
-      }
-      await promptAndStoreApiKey(auth);
+      await runLoginFlow(agentService!, auth, chat);
+    }),
+
+    vscode.commands.registerCommand("grok.logout", async () => {
+      await runLogoutFlow(agentService!, auth, chat);
     }),
 
     vscode.commands.registerCommand("grok.addSelectionToChat", async () => {
@@ -354,6 +352,79 @@ export async function deactivate(): Promise<void> {
     agentService = undefined;
     disposeOutput();
   }
+}
+
+async function runLoginFlow(
+  agent: AgentService,
+  auth: AuthService,
+  chat: ChatViewProvider,
+): Promise<void> {
+  const status = await auth.getStatus();
+  const choice = await pickLoginMethod(status);
+  if (!choice) {
+    return;
+  }
+  if (choice === "apiKey") {
+    const ok = await promptAndStoreApiKey(auth);
+    if (ok) {
+      try {
+        if (agent.getState().kind === "ready") {
+          await agent.restart();
+        } else {
+          await agent.ensureStarted();
+        }
+      } catch (err) {
+        await showStartError(err);
+      }
+      await chat.refreshState();
+    }
+    return;
+  }
+
+  // Browser OAuth via ACP authenticate + openExternal
+  try {
+    await agent.interactiveBrowserLogin();
+    const after = await auth.getStatus();
+    void vscode.window.showInformationMessage(
+      `Grok Build: signed in${after.cliEmail ? ` as ${after.cliEmail}` : ""}`,
+    );
+    await chat.refreshState();
+  } catch (err) {
+    await showStartError(err);
+  }
+}
+
+async function runLogoutFlow(
+  agent: AgentService,
+  auth: AuthService,
+  chat: ChatViewProvider,
+): Promise<void> {
+  const status = await auth.getStatus();
+  if (!status.hasAny && agent.getState().kind !== "ready") {
+    void vscode.window.showInformationMessage("Grok Build: already signed out");
+    return;
+  }
+  const confirm = await vscode.window.showWarningMessage(
+    "Sign out of Grok? This clears the CLI session (~/.grok/auth.json) and any API key stored in VS Code.",
+    { modal: true },
+    "Log out",
+  );
+  if (confirm !== "Log out") {
+    return;
+  }
+  try {
+    const { logout, clearedSecretKey } = await agent.logout();
+    void vscode.window.showInformationMessage(
+      `Grok Build: ${formatLogoutMessage(logout, clearedSecretKey)}`,
+    );
+  } catch (err) {
+    // Still try to clear secret key if agent path failed.
+    if (await auth.hasSecretApiKey()) {
+      await auth.clearApiKey();
+    }
+    await showStartError(err);
+  }
+  await chat.refreshState();
 }
 
 async function showStartError(err: unknown): Promise<void> {

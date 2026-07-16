@@ -11,6 +11,15 @@ import type {
 import * as vscode from "vscode";
 import type { AuthService } from "../auth/authService";
 import {
+  extractUserCode,
+  isSafeAuthUrl,
+  parseAuthUrlResponse,
+  parseLogoutResponse,
+  pickInteractiveAuthMethodId,
+  type AuthMethodLike,
+  type LogoutResult,
+} from "../auth/authFlow";
+import {
   getSettings,
   resolveSessionCwd,
   type GrokSettings,
@@ -124,6 +133,10 @@ export class AgentService implements vscode.Disposable {
     listSessions: false,
     resumeSession: false,
   };
+  /** Auth methods from last `initialize` (for browser login method pick). */
+  private authMethods: AuthMethodLike[] = [];
+  /** Prevent concurrent interactive login flows. */
+  private loginInFlight: Promise<void> | undefined;
 
   private readonly _onStateChange = new vscode.EventEmitter<AgentState>();
   readonly onStateChange = this._onStateChange.event;
@@ -873,6 +886,193 @@ export class AgentService implements vscode.Disposable {
     if (!this.connection) {
       throw new Error("No agent connection");
     }
+    return this.requestExtOnConnection<T>(method, params);
+  }
+
+  /**
+   * Interactive browser login (pager `/login` parity).
+   *
+   * Runs ACP `authenticate` with `force_interactive` + concurrent
+   * `x.ai/auth/get_url` poll; opens a safe `https:` URL via `openExternal`.
+   */
+  async interactiveBrowserLogin(): Promise<void> {
+    if (this.loginInFlight) {
+      return this.loginInFlight;
+    }
+    this.loginInFlight = this.runInteractiveBrowserLogin().finally(() => {
+      this.loginInFlight = undefined;
+    });
+    return this.loginInFlight;
+  }
+
+  /**
+   * Logout: clear agent OAuth session (`x.ai/auth/logout`) when connected,
+   * clear extension SecretStorage API key, stop agent so next start is clean.
+   */
+  async logout(): Promise<{
+    logout: LogoutResult;
+    clearedSecretKey: boolean;
+  }> {
+    let logout: LogoutResult = {
+      ok: true,
+      wasLoggedIn: false,
+      apiKeyStillSet: false,
+    };
+
+    // Prefer live agent logout (clears auth.json + in-memory) when connected.
+    if (this.connection && this.state.kind === "ready") {
+      try {
+        const raw = await this.requestExtOnConnection("x.ai/auth/logout", {});
+        logout = parseLogoutResponse(raw);
+        logInfo(
+          `x.ai/auth/logout was_logged_in=${logout.wasLoggedIn} email=${logout.email ?? ""}`,
+        );
+      } catch (err) {
+        logWarn(`x.ai/auth/logout failed: ${formatUserError(err)}`);
+      }
+    } else {
+      // Best-effort: start briefly just to logout, if binary is available.
+      try {
+        await this.ensureStarted();
+        if (this.connection) {
+          const raw = await this.requestExtOnConnection("x.ai/auth/logout", {});
+          logout = parseLogoutResponse(raw);
+          logInfo(
+            `x.ai/auth/logout was_logged_in=${logout.wasLoggedIn} email=${logout.email ?? ""}`,
+          );
+        }
+      } catch (err) {
+        logWarn(
+          `logout could not reach agent (CLI auth may remain): ${formatUserError(err)}`,
+        );
+      }
+    }
+
+    let clearedSecretKey = false;
+    if (this.auth && (await this.auth.hasSecretApiKey())) {
+      await this.auth.clearApiKey();
+      clearedSecretKey = true;
+    }
+
+    try {
+      await this.stop();
+    } catch (err) {
+      logWarn(`stop after logout: ${formatUserError(err)}`);
+    }
+
+    return { logout, clearedSecretKey };
+  }
+
+  getAuthMethods(): AuthMethodLike[] {
+    return this.authMethods.slice();
+  }
+
+  private async runInteractiveBrowserLogin(): Promise<void> {
+    await this.ensureStarted();
+    if (!this.connection) {
+      throw new Error("No agent connection");
+    }
+
+    const methodId =
+      pickInteractiveAuthMethodId(this.authMethods) ?? "grok.com";
+    logInfo(`interactive login methodId=${methodId}`);
+
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Grok Build: Sign in",
+        cancellable: false,
+      },
+      async (progress) => {
+        progress.report({ message: "Starting browser sign-in…" });
+
+        // Concurrent with authenticate (pager PollAuthUrl + Authenticate).
+        // get_url must race authenticate so the oneshot URL is opened ASAP.
+        const urlPromise = this.pollAndOpenAuthUrl(progress).catch((err) => {
+          logWarn(`auth URL poll: ${formatUserError(err)}`);
+        });
+
+        try {
+          await this.connection!.agent.request(
+            acp.methods.agent.authenticate,
+            {
+              methodId,
+              _meta: {
+                force_interactive: true,
+                use_oauth: true,
+              },
+            },
+          );
+        } catch (err) {
+          const msg = formatUserError(err);
+          logError("interactive login failed", err);
+          throw new Error(msg || "Sign-in failed");
+        } finally {
+          // Auth finished (success or fail); don't hang on a stuck get_url.
+          await Promise.race([urlPromise, sleep(1_000)]);
+        }
+      },
+    );
+
+    logInfo("interactive login completed");
+  }
+
+  private async pollAndOpenAuthUrl(
+    progress: vscode.Progress<{ message?: string }>,
+  ): Promise<void> {
+    // Match pager: up to ~60 attempts × 50ms while waiting for channel setup.
+    for (let i = 0; i < 120; i++) {
+      if (i > 0) {
+        await sleep(100);
+      }
+      if (!this.connection) {
+        return;
+      }
+      let raw: unknown;
+      try {
+        raw = await this.requestExtOnConnection("x.ai/auth/get_url", {});
+      } catch (err) {
+        // Method may not exist on older agents — stop polling.
+        logWarn(`x.ai/auth/get_url: ${formatUserError(err)}`);
+        return;
+      }
+      const info = parseAuthUrlResponse(raw);
+      if (!info.authUrl) {
+        continue;
+      }
+      if (info.externalProvider || info.mode === "command") {
+        progress.report({
+          message: "External sign-in provider opened a browser…",
+        });
+        return;
+      }
+      if (!isSafeAuthUrl(info.authUrl)) {
+        logWarn(`Rejected non-https auth URL: ${info.authUrl.slice(0, 32)}…`);
+        return;
+      }
+      const code = extractUserCode(info.authUrl);
+      progress.report({
+        message: code
+          ? `Open browser and enter code ${code}…`
+          : "Opening browser for approval…",
+      });
+      logInfo(`Opening auth URL (mode=${info.mode ?? "?"})`);
+      await vscode.env.openExternal(vscode.Uri.parse(info.authUrl));
+      progress.report({ message: "Waiting for approval in browser…" });
+      return;
+    }
+    progress.report({
+      message: "Waiting for sign-in (check browser or terminal)…",
+    });
+  }
+
+  private async requestExtOnConnection<T = unknown>(
+    method: string,
+    params: Record<string, unknown> = {},
+  ): Promise<T> {
+    if (!this.connection) {
+      throw new Error("No agent connection");
+    }
     const wire = toAcpExtWireMethod(method);
     logInfo(`ext ${wire}`);
     return this.connection.agent.request<T, Record<string, unknown>>(
@@ -1236,8 +1436,9 @@ export class AgentService implements vscode.Disposable {
       listSessions: sessionCaps?.list != null,
       resumeSession: sessionCaps?.resume != null,
     };
+    this.authMethods = normalizeAuthMethods(initResult.authMethods);
     logInfo(
-      `agent caps loadSession=${this.caps.loadSession} list=${this.caps.listSessions} resume=${this.caps.resumeSession}`,
+      `agent caps loadSession=${this.caps.loadSession} list=${this.caps.listSessions} resume=${this.caps.resumeSession} authMethods=${this.authMethods.map((m) => m.id).join(",") || "(none)"}`,
     );
 
     // Seed catalog from initialize `_meta.modelState` (TUI does the same)
@@ -1541,6 +1742,7 @@ export class AgentService implements vscode.Disposable {
   }
 
   private async stopInternal(): Promise<void> {
+    this.authMethods = [];
     this.teardownConnectionOnly();
     if (this.spawned) {
       const s = this.spawned;
@@ -1645,6 +1847,39 @@ function formatUserError(err: unknown): string {
     return err.message;
   }
   return String(err);
+}
+
+function normalizeAuthMethods(raw: unknown): AuthMethodLike[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const out: AuthMethodLike[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const o = item as Record<string, unknown>;
+    const id = typeof o.id === "string" ? o.id : undefined;
+    if (!id) {
+      continue;
+    }
+    out.push({
+      id,
+      name: typeof o.name === "string" ? o.name : undefined,
+      description:
+        typeof o.description === "string" ? o.description : undefined,
+      type: typeof o.type === "string" ? o.type : undefined,
+      _meta:
+        o._meta && typeof o._meta === "object"
+          ? (o._meta as AuthMethodLike["_meta"])
+          : undefined,
+    });
+  }
+  return out;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function withTimeout<T>(

@@ -23,24 +23,32 @@ The agent process owns authentication with xAI backends. The extension
 Never log secret values. Never send keys to the webview via unsanitized
 message posts without need.
 
-### Login command flow (MVP)
+### Login command flow
 
 ```
-User: Grok: Login
-  → If API key setting exists: validate by starting agent / lightweight check
-  → Else: open external browser to Grok auth (agent-driven or documented URL)
-  → Poll / wait for agent auth completion
-  → Toast success / failure
+User: Grok Build: Login  (or /login, or empty-state Sign in)
+  → QuickPick: browser OAuth | Set API key
+  Browser path (ACP, pager-aligned):
+    1. ensure agent started (initialize + session/new)
+    2. authenticate(methodId=grok.com|oidc, _meta.force_interactive=true)
+    3. concurrent x.ai/auth/get_url → vscode.env.openExternal(https only)
+    4. wait for authenticate; toast + refresh hasAuth
+  API key path:
+    → SecretStorage prompt (existing)
 ```
-
-Upstream also supports device-code and OIDC; wire those after base browser
-or API key path works.
 
 ### Logout
 
-- Clear extension SecretStorage key.
-- Optional: document CLI `grok` logout if exists; do not delete `~/.grok`
-  recursively from the extension.
+```
+User: Grok Build: Logout  (or /logout)
+  → confirm modal
+  → x.ai/auth/logout when agent reachable (clears ~/.grok/auth.json)
+  → clear SecretStorage API key
+  → stop agent process
+  → toast (email if known; warn if XAI_API_KEY env still set)
+```
+
+Do not delete `~/.grok` recursively from the extension.
 
 ## Configuration surface
 

@@ -228,13 +228,13 @@ export const HOST_COMMANDS: SlashCommandDef[] = [
   }),
   d({
     name: "login",
-    description: "Log in or re-authenticate with your account",
+    description: "Sign in with browser (OAuth) or set an API key",
     layer: "host",
     hostAction: "login",
   }),
   d({
     name: "logout",
-    description: "Log out and clear stored API key",
+    description: "Log out (clear Grok session + SecretStorage API key)",
     layer: "host",
     hostAction: "logout",
   }),

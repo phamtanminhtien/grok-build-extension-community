@@ -105,7 +105,12 @@
       },
       {
         "command": "grok.login",
-        "title": "Grok Build: Login / Set API Key",
+        "title": "Grok Build: Login",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.logout",
+        "title": "Grok Build: Logout",
         "category": "Grok Build"
       },
       {

@@ -5,7 +5,8 @@
 import * as vscode from "vscode";
 import type { AgentService } from "../agent/agentService";
 import type { AuthService } from "../auth/authService";
-import { promptAndStoreApiKey } from "../auth/authService";
+import { pickLoginMethod, promptAndStoreApiKey } from "../auth/authService";
+import { formatLogoutMessage } from "../auth/authFlow";
 import { setModelSetting } from "../config/modelService";
 import { getSettings, resolveSessionCwd } from "../config/settings";
 import { openOutput } from "../log/output";
@@ -146,12 +147,26 @@ async function runHostAction(
       await setModelSetting(model);
       return `Model set to ${model}`;
     }
-    case "login":
-      await promptAndStoreApiKey(deps.auth);
-      return "API key updated";
-    case "logout":
-      await deps.auth.clearApiKey();
-      return "API key cleared from SecretStorage (CLI ~/.grok auth may still work)";
+    case "login": {
+      const status = await deps.auth.getStatus();
+      const choice = await pickLoginMethod(status);
+      if (!choice) {
+        return "Login cancelled";
+      }
+      if (choice === "apiKey") {
+        const ok = await promptAndStoreApiKey(deps.auth);
+        return ok ? "API key updated" : "Login cancelled";
+      }
+      await deps.agent.interactiveBrowserLogin();
+      const after = await deps.auth.getStatus();
+      return after.cliEmail
+        ? `Signed in as ${after.cliEmail}`
+        : "Signed in with browser";
+    }
+    case "logout": {
+      const { logout, clearedSecretKey } = await deps.agent.logout();
+      return formatLogoutMessage(logout, clearedSecretKey);
+    }
     case "help":
       return buildHelpMessage(deps.registry);
     case "docs": {

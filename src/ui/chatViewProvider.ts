@@ -2,7 +2,8 @@ import * as vscode from "vscode";
 import type { SessionNotification } from "@agentclientprotocol/sdk";
 import type { AgentService } from "../agent/agentService";
 import type { AuthService } from "../auth/authService";
-import { promptAndStoreApiKey } from "../auth/authService";
+import { pickLoginMethod, promptAndStoreApiKey } from "../auth/authService";
+import { formatLogoutMessage } from "../auth/authFlow";
 import { BinaryNotFoundError } from "../agent/binaryResolver";
 import {
   buildPromptBlocks,
@@ -658,10 +659,41 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       case "reviewEdits":
         await this.diffs?.pickAndOpen();
         break;
-      case "login":
-        await promptAndStoreApiKey(this.auth);
+      case "login": {
+        const status = await this.auth.getStatus();
+        const choice = await pickLoginMethod(status);
+        if (choice === "apiKey") {
+          await promptAndStoreApiKey(this.auth);
+          try {
+            if (this.agent.getState().kind === "ready") {
+              await this.agent.restart();
+            } else if (await this.auth.hasAnyAuth()) {
+              await this.agent.ensureStarted();
+            }
+          } catch (err) {
+            await this.showStartError(err);
+          }
+        } else if (choice === "browser") {
+          try {
+            await this.agent.interactiveBrowserLogin();
+            this.pushSystem("Signed in with browser");
+          } catch (err) {
+            await this.showStartError(err);
+          }
+        }
         await this.pushFullState();
         break;
+      }
+      case "logout": {
+        try {
+          const { logout, clearedSecretKey } = await this.agent.logout();
+          this.pushSystem(formatLogoutMessage(logout, clearedSecretKey));
+        } catch (err) {
+          await this.showStartError(err);
+        }
+        await this.pushFullState();
+        break;
+      }
       case "startAgent":
         try {
           await this.agent.ensureStarted();
@@ -1485,7 +1517,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async pushFullState(): Promise<void> {
-    const hasAuth = await this.auth.hasAnyAuth();
+    const authStatus = await this.auth.getStatus();
+    const hasAuth = authStatus.hasAny;
     const state = this.agent.getState();
     const settings = getSettings();
     const busy = this.agent.isBusy();
@@ -1525,6 +1558,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       messages: this.serializeMessages(this.messages),
       busy,
       hasAuth,
+      authSummary: authStatus.summary,
       agentState: state.kind,
       agentDetail:
         state.kind === "ready"
@@ -2645,7 +2679,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     <p id="empty-hint"></p>
     <div class="empty-actions">
       <button id="empty-start" type="button"><i class="ti ti-player-play"></i> Start agent</button>
-      <button id="empty-login" class="secondary" type="button"><i class="ti ti-key"></i> Set API key</button>
+      <button id="empty-login" class="secondary" type="button"><i class="ti ti-login-2"></i> Sign in</button>
     </div>
   </div>
   <footer>
@@ -5404,8 +5438,8 @@ window.addEventListener('message', (event) => {
     if (msg.turnStatus) renderTurnStatus(msg.turnStatus);
     if (msg.context) renderContextBar(msg.context);
     emptyHint.textContent = msg.hasAuth
-      ? 'CLI/auth detected. You can start chatting.'
-      : 'No API key in SecretStorage — CLI ~/.grok auth may still work.';
+      ? (msg.authSummary || 'Signed in. You can start chatting.')
+      : 'Not signed in — use Sign in (browser OAuth or API key), same as grok login.';
     emptyEl.hidden = (msg.messages || []).length > 0;
   } else if (msg.type === 'messages') {
     renderMessages(msg.messages || []);

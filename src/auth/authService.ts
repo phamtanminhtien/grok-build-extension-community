@@ -4,8 +4,19 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { getSettings } from "../config/settings";
 import { logInfo } from "../log/output";
+import { describeAuthPresence } from "./authFlow";
 
 const SECRET_KEY = "grok.apiKey";
+
+export interface AuthStatus {
+  hasSecretKey: boolean;
+  hasEnvKey: boolean;
+  hasCliAuth: boolean;
+  cliEmail?: string;
+  /** True if any credential source looks present. */
+  hasAny: boolean;
+  summary: string;
+}
 
 export class AuthService {
   constructor(private readonly secrets: vscode.SecretStorage) {}
@@ -25,6 +36,11 @@ export class AuthService {
     return undefined;
   }
 
+  async hasSecretApiKey(): Promise<boolean> {
+    const fromSecret = (await this.secrets.get(SECRET_KEY))?.trim();
+    return !!fromSecret;
+  }
+
   async setApiKey(key: string): Promise<void> {
     await this.secrets.store(SECRET_KEY, key.trim());
     logInfo("API key stored in SecretStorage");
@@ -37,10 +53,31 @@ export class AuthService {
 
   /** True if SecretStorage / env key or CLI auth file looks present. */
   async hasAnyAuth(): Promise<boolean> {
-    if (await this.getApiKey()) {
-      return true;
-    }
-    return hasCliAuthFile();
+    const status = await this.getStatus();
+    return status.hasAny;
+  }
+
+  async getStatus(): Promise<AuthStatus> {
+    const hasSecretKey = !!(await this.secrets.get(SECRET_KEY))?.trim();
+    const settings = getSettings();
+    const hasEnvKey =
+      settings.inheritEnvApiKey && !!process.env.XAI_API_KEY?.trim();
+    const cli = readCliAuthSummary();
+    const hasCliAuth = cli.present;
+    const hasAny = hasSecretKey || hasEnvKey || hasCliAuth;
+    return {
+      hasSecretKey,
+      hasEnvKey,
+      hasCliAuth,
+      cliEmail: cli.email,
+      hasAny,
+      summary: describeAuthPresence({
+        hasSecretKey,
+        hasEnvKey,
+        hasCliAuth,
+        cliEmail: cli.email,
+      }),
+    };
   }
 
   /**
@@ -56,16 +93,34 @@ export class AuthService {
   }
 }
 
-function hasCliAuthFile(): boolean {
+function readCliAuthSummary(): { present: boolean; email?: string } {
   try {
     const p = path.join(os.homedir(), ".grok", "auth.json");
     if (!fs.existsSync(p)) {
-      return false;
+      return { present: false };
     }
     const raw = fs.readFileSync(p, "utf8");
-    return raw.trim().length > 2;
+    if (raw.trim().length <= 2) {
+      return { present: false };
+    }
+    let email: string | undefined;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      for (const v of Object.values(parsed)) {
+        if (v && typeof v === "object") {
+          const e = (v as { email?: unknown }).email;
+          if (typeof e === "string" && e.includes("@")) {
+            email = e;
+            break;
+          }
+        }
+      }
+    } catch {
+      /* non-JSON or unexpected shape — still counts as present */
+    }
+    return { present: true, email };
   } catch {
-    return false;
+    return { present: false };
   }
 }
 
@@ -85,4 +140,36 @@ export async function promptAndStoreApiKey(
   await auth.setApiKey(key);
   void vscode.window.showInformationMessage("Grok Build: API key saved");
   return true;
+}
+
+export type LoginChoice = "browser" | "apiKey" | undefined;
+
+/**
+ * QuickPick: browser OAuth (ACP) vs API key — same surfaces as TUI login.
+ */
+export async function pickLoginMethod(
+  status?: AuthStatus,
+): Promise<LoginChoice> {
+  const items: Array<vscode.QuickPickItem & { id: "browser" | "apiKey" }> = [
+    {
+      id: "browser",
+      label: "$(globe) Sign in with browser",
+      description: "Grok account (OAuth via agent)",
+      detail: "Opens auth.x.ai — same as `grok login`",
+    },
+    {
+      id: "apiKey",
+      label: "$(key) Set API key",
+      description: "Store XAI_API_KEY in SecretStorage",
+      detail: "For API-key-only setups",
+    },
+  ];
+  const picked = await vscode.window.showQuickPick(items, {
+    title: "Grok Build — Login",
+    placeHolder: status?.hasAny
+      ? `${status.summary} — choose how to sign in`
+      : "Choose how to sign in",
+    ignoreFocusOut: true,
+  });
+  return picked?.id;
 }
