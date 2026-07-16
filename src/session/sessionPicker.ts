@@ -79,10 +79,11 @@ export async function pickGrokSessionToResume(
 
     const items: Item[] = [];
     if (!allWorkspaces) {
+      const latest = sessionPickLabels(sessions[0]!);
       items.push({
         label: "$(history) Continue latest (this workspace)",
-        description: sessions[0]!.title,
-        detail: sessions[0]!.sessionId,
+        description: latest.label,
+        detail: latest.description,
         session: sessions[0],
       });
       items.push({

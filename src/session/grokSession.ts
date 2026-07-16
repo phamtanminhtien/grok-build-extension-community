@@ -121,7 +121,7 @@ export function sortSessionsNewestFirst(sessions: GrokSession[]): GrokSession[] 
   return [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-/** QuickPick label/description/detail mirroring TUI row + CLI columns. */
+/** QuickPick label/description/detail (no UUID — match TUI, not CLI table). */
 export function sessionPickLabels(s: GrokSession): {
   label: string;
   description: string;
@@ -131,10 +131,10 @@ export function sessionPickLabels(s: GrokSession): {
   const model = s.modelId || "";
   return {
     label: s.title || "(no summary)",
-    description: [when, model, "local"].filter(Boolean).join(" · "),
+    description: [when, model].filter(Boolean).join(" · "),
     detail: [
-      s.sessionId,
       s.repoName,
+      s.cwd && s.repoName !== s.cwd ? s.cwd : "",
       s.messageCount ? `${s.messageCount} msgs` : "",
     ]
       .filter(Boolean)

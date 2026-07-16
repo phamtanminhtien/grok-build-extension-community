@@ -42,7 +42,7 @@ export class GrokStatusBar implements vscode.Disposable {
     switch (this.state.kind) {
       case "ready":
         this.item.text = `$(comment-discussion) Grok Build`;
-        this.item.tooltip = `Ready · session ${this.state.sessionId.slice(0, 8)}… · model ${model}`;
+        this.item.tooltip = `Ready · model ${model}`;
         this.item.backgroundColor = undefined;
         break;
       case "starting":

@@ -81,7 +81,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           state: state.kind,
           detail:
             state.kind === "ready"
-              ? state.sessionId
+              ? "ready"
               : state.kind === "error"
                 ? state.message
                 : "",
@@ -197,13 +197,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   /**
    * Prepare UI for ACP session/load history replay.
    */
-  beginHistoryLoad(sessionId: string): void {
+  beginHistoryLoad(_sessionId?: string, title?: string): void {
     this.loadingHistory = true;
     this.messages = [];
     this.currentAssistantId = undefined;
     this.currentUserId = undefined;
     this.diffs?.clear();
-    this.pushSystem(`Loading session ${sessionId.slice(0, 8)}…`);
+    const label = title?.trim() || "session";
+    this.pushSystem(`Loading ${label}…`);
     this.post({ type: "busy", busy: true });
   }
 
@@ -216,7 +217,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (
       this.messages.length > 0 &&
       this.messages[0]?.type === "system" &&
-      this.messages[0].text.startsWith("Loading session")
+      this.messages[0].text.startsWith("Loading ")
     ) {
       this.messages.shift();
     }
@@ -349,11 +350,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       if (this.agent.isBusy()) {
         await this.agent.cancelTurn();
       }
-      const id = await this.agent.newSession();
+      await this.agent.newSession();
       this.messages = [];
       this.currentAssistantId = undefined;
       this.diffs?.clear();
-      this.pushSystem(`New session ${id.slice(0, 8)}…`);
+      this.pushSystem("New session");
       this.scheduleMessagesPost(true);
     } catch (err) {
       this.pushSystem(errMessage(err));
@@ -592,7 +593,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       agentState: state.kind,
       agentDetail:
         state.kind === "ready"
-          ? state.sessionId
+          ? "ready"
           : state.kind === "error"
             ? state.message
             : "",

@@ -96,9 +96,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await agentService!.ensureStarted();
         const state = agentService!.getState();
         if (state.kind === "ready") {
-          void vscode.window.showInformationMessage(
-            `Grok Build agent ready (session ${state.sessionId})`,
-          );
+          void vscode.window.showInformationMessage("Grok Build agent ready");
         }
       } catch (err) {
         await showStartError(err);
@@ -112,7 +110,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const state = agentService!.getState();
         if (state.kind === "ready") {
           void vscode.window.showInformationMessage(
-            `Grok Build agent restarted (session ${state.sessionId})`,
+            "Grok Build agent restarted",
           );
         }
         await chat.refreshState();
@@ -138,11 +136,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("grok.newSession", async () => {
       try {
         await chat.openChat();
-        const id = await agentService!.newSession();
+        await agentService!.newSession();
         chat.clearMessages();
-        void vscode.window.showInformationMessage(
-          `Grok Build: new session ${id.slice(0, 8)}…`,
-        );
+        void vscode.window.showInformationMessage("Grok Build: new session");
         await chat.refreshState();
       } catch (err) {
         await showStartError(err);
@@ -257,7 +253,7 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
-        chat.beginHistoryLoad(entry.sessionId);
+        chat.beginHistoryLoad(entry.sessionId, entry.title);
         try {
           await agentService!.loadSession(
             entry.sessionId,
@@ -266,7 +262,7 @@ export function activate(context: vscode.ExtensionContext): void {
           await new Promise((r) => setTimeout(r, 400));
           chat.endHistoryLoad();
           void vscode.window.showInformationMessage(
-            `Resumed ${entry.title || entry.sessionId.slice(0, 8)}`,
+            `Resumed ${entry.title || "session"}`,
           );
           await chat.refreshState();
         } catch (err) {
