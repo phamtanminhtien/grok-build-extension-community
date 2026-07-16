@@ -1,6 +1,6 @@
 {
   "name": "grok-build-community-edition",
-  "displayName": "Grok Build - Community",
+  "displayName": "Grok Build Community Edition",
   "description": "Community VS Code host for Grok Build — thin ACP client for `grok agent stdio`. Requires the Grok Build CLI (`grok`) on PATH.",
   "version": "0.3.2",
   "packageManager": "yarn@4.12.0",

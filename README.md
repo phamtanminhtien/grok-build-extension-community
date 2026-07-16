@@ -1,4 +1,4 @@
-# Grok Build - Community
+# Grok Build Community Edition
 
 Community VS Code host for **Grok Build**: a thin TypeScript client
 that speaks **ACP** to `grok agent stdio`. The agent runtime stays in Rust.
@@ -38,7 +38,7 @@ Then in VS Code: **Extensions → ⋯ → Install from VSIX…** and pick the `.
 
 ### From Marketplace (when published)
 
-Search **“Grok Build - Community”** (publisher id: `tienpham`) and install.
+Search **“Grok Build Community Edition”** (publisher id: `tienpham`) and install.
 
 ### First run
 
