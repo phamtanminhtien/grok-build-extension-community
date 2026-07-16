@@ -15,10 +15,34 @@ export class PermissionBroker {
   private alwaysAllowOptionIds = new Set<string>();
   private alwaysReject = false;
   private queue: Promise<void> = Promise.resolve();
+  /**
+   * Session-scoped always-approve from Shift+Tab mode cycle (TUI yolo).
+   * When set, overrides `grok.alwaysApprove` for this process session.
+   * `undefined` → fall back to settings.
+   */
+  private alwaysApproveOverride: boolean | undefined;
 
   resetSessionMemory(): void {
     this.alwaysAllowOptionIds.clear();
     this.alwaysReject = false;
+    // Keep override across new-session within same process — cycle is UI-owned.
+    // Caller may clear via setAlwaysApproveOverride when resetting modes.
+  }
+
+  /**
+   * Runtime always-approve (Shift+Tab Always-Approve arm). Pass `undefined`
+   * to use only the VS Code setting.
+   */
+  setAlwaysApproveOverride(enabled: boolean | undefined): void {
+    this.alwaysApproveOverride = enabled;
+  }
+
+  /** Effective always-approve: session override, else settings. */
+  isAlwaysApprove(): boolean {
+    if (this.alwaysApproveOverride !== undefined) {
+      return this.alwaysApproveOverride;
+    }
+    return getSettings().alwaysApprove;
   }
 
   handle(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
@@ -34,7 +58,6 @@ export class PermissionBroker {
   private async handleOne(
     params: RequestPermissionRequest,
   ): Promise<RequestPermissionResponse> {
-    const settings = getSettings();
     const options = params.options ?? [];
     const title =
       params.toolCall?.title ??
@@ -43,12 +66,12 @@ export class PermissionBroker {
 
     logInfo(`[permission] request: ${title}`);
 
-    if (settings.alwaysApprove) {
+    if (this.isAlwaysApprove()) {
       const allow =
         options.find((o) => o.kind === "allow_always") ??
         options.find((o) => o.kind === "allow_once");
       if (allow) {
-        logInfo(`[permission] alwaysApprove setting → ${allow.kind}`);
+        logInfo(`[permission] alwaysApprove → ${allow.kind}`);
         return selected(allow.optionId);
       }
     }
@@ -76,7 +99,7 @@ export class PermissionBroker {
       option: o,
     }));
 
-    const timeoutMs = settings.permissionTimeoutMs;
+    const timeoutMs = getSettings().permissionTimeoutMs;
     const pickPromise = vscode.window.showQuickPick(picks, {
       title: `Grok Build wants to: ${title}`,
       placeHolder: detail.slice(0, 200) || "Choose allow or deny",

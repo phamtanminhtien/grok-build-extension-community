@@ -25,6 +25,16 @@ import {
   type GrokModelOption,
 } from "../config/modelService";
 import {
+  cycleMode,
+  cycleModeFromAgent,
+  modeLabel,
+  modeToAcpModeId,
+  modeToPermissionCanonical,
+  modeWantsAuto,
+  modeWantsYolo,
+  type CycleModeId,
+} from "../ui/sessionModeCycle";
+import {
   logError,
   logInfo,
   logSessionUpdate,
@@ -139,6 +149,24 @@ export class AgentService implements vscode.Disposable {
   }>();
   readonly onModelsChange = this._onModelsChange.event;
 
+  /**
+   * Shift+Tab cycle mode (TUI: Normal → Plan → Auto → Always-Approve).
+   * Plan = ACP session mode; Auto/Always-Approve = permission via
+   * `x.ai/yolo_mode_changed` (Always-Approve also auto-allows host dialogs).
+   */
+  private cycleModeId: CycleModeId = "normal";
+  private acpModeId = "default";
+  /** Session auto classifier (TUI `session.auto_mode`). */
+  private autoMode = false;
+  private availableModes: Array<{ id: string; name: string; description?: string }> =
+    [];
+  private readonly _onModeChange = new vscode.EventEmitter<{
+    mode: CycleModeId;
+    label: string;
+    acpModeId: string;
+  }>();
+  readonly onModeChange = this._onModeChange.event;
+
   setAuthService(auth: AuthService): void {
     this.auth = auth;
   }
@@ -183,6 +211,215 @@ export class AgentService implements vscode.Disposable {
 
   getCapabilities(): AgentCaps {
     return { ...this.caps };
+  }
+
+  /** Current Shift+Tab cycle mode for the composer button. */
+  getModeState(): {
+    mode: CycleModeId;
+    label: string;
+    acpModeId: string;
+    availableModes: Array<{ id: string; name: string; description?: string }>;
+  } {
+    return {
+      mode: this.cycleModeId,
+      label: modeLabel(this.cycleModeId),
+      acpModeId: this.acpModeId,
+      availableModes: this.availableModes.map((m) => ({ ...m })),
+    };
+  }
+
+  /**
+   * Cycle mode like TUI Shift+Tab:
+   * Normal → Plan → Auto → Always-Approve → Normal.
+   */
+  async cycleSessionMode(): Promise<CycleModeId> {
+    const next = cycleMode(this.cycleModeId);
+    await this.applyCycleMode(next);
+    return next;
+  }
+
+  /**
+   * Apply a cycle mode arm (optimistic UI, then ACP + permission notify).
+   */
+  async applyCycleMode(mode: CycleModeId): Promise<void> {
+    const prev = this.cycleModeId;
+    this.cycleModeId = mode;
+    this.autoMode = modeWantsAuto(mode);
+    // Always-Approve → host auto-allow; Plan/Auto/Normal → no host yolo.
+    this.permissions.setAlwaysApproveOverride(
+      modeWantsYolo(mode) ? true : mode === "plan" || mode === "auto" ? false : undefined,
+    );
+    this.fireModeChange();
+
+    try {
+      const targetAcp = modeToAcpModeId(mode);
+      if (targetAcp !== this.acpModeId || mode === "plan" || prev === "plan") {
+        await this.setSessionMode(targetAcp, { preserveCycle: true });
+      }
+      // Permission arms always notify (TUI PersistPermissionMode).
+      if (mode !== "plan" || prev === "plan") {
+        await this.notifyPermissionMode(mode);
+      }
+      // Re-assert cycle after wire (setSessionMode may not re-derive when preserve).
+      this.cycleModeId = mode;
+      this.autoMode = modeWantsAuto(mode);
+      this.fireModeChange();
+    } catch (err) {
+      logWarn(`applyCycleMode failed: ${formatUserError(err)}`);
+      this.cycleModeId = prev;
+      this.autoMode = modeWantsAuto(prev);
+      this.permissions.setAlwaysApproveOverride(
+        modeWantsYolo(prev)
+          ? true
+          : prev === "plan" || prev === "auto"
+            ? false
+            : undefined,
+      );
+      this.fireModeChange();
+      throw err;
+    }
+  }
+
+  /**
+   * ACP `session/set_mode` (plan / default).
+   * @param preserveCycle when true (Shift+Tab path), do not re-derive
+   *   cycleModeId from ACP alone (permission flags applied by caller).
+   */
+  async setSessionMode(
+    modeId: string,
+    opts?: { preserveCycle?: boolean },
+  ): Promise<void> {
+    const id = modeId.trim();
+    if (!id) {
+      throw new Error("Mode id is empty");
+    }
+    await this.ensureStarted();
+    if (!this.connection || !this.session) {
+      throw new Error("No active session");
+    }
+    const sessionId = this.session.sessionId;
+    logInfo(`session/set_mode sessionId=${sessionId} modeId=${id}`);
+    const camel = { sessionId, modeId: id };
+    try {
+      await this.connection.agent.request<unknown, typeof camel>(
+        "session/set_mode",
+        camel,
+      );
+    } catch (err) {
+      const snake = { session_id: sessionId, mode_id: id };
+      try {
+        await this.connection.agent.request<unknown, typeof snake>(
+          "session/set_mode",
+          snake,
+        );
+      } catch {
+        throw err;
+      }
+    }
+    this.acpModeId = id;
+    if (!opts?.preserveCycle) {
+      this.cycleModeId = cycleModeFromAgent(id, {
+        yolo: this.permissions.isAlwaysApprove(),
+        auto: this.autoMode,
+      });
+    }
+    this.fireModeChange();
+    logInfo(`session/set_mode ok modeId=${id}`);
+  }
+
+  /**
+   * Notify agent of permission mode (TUI `x.ai/yolo_mode_changed`).
+   * Agent maps yolo_mode → SetYoloMode, auto_mode/permission_mode → auto classifier.
+   */
+  private async notifyPermissionMode(mode: CycleModeId): Promise<void> {
+    if (!this.connection || !this.session) {
+      return;
+    }
+    const permission_mode = modeToPermissionCanonical(mode);
+    const yolo_mode = modeWantsYolo(mode);
+    const auto_mode = modeWantsAuto(mode);
+    const params = {
+      yolo_mode,
+      auto_mode,
+      permission_mode,
+      sessionId: this.session.sessionId,
+    };
+    logInfo(
+      `x.ai/yolo_mode_changed yolo=${yolo_mode} auto=${auto_mode} perm=${permission_mode}`,
+    );
+    // Prefer underscore-prefixed wire (ACP ext routing); fall back to bare.
+    try {
+      await this.connection.agent.notify("_x.ai/yolo_mode_changed", params);
+    } catch {
+      try {
+        await this.connection.agent.notify("x.ai/yolo_mode_changed", params);
+      } catch (err) {
+        logWarn(
+          `yolo_mode_changed notify failed: ${formatUserError(err)}`,
+        );
+      }
+    }
+  }
+
+  private fireModeChange(): void {
+    this._onModeChange.fire({
+      mode: this.cycleModeId,
+      label: modeLabel(this.cycleModeId),
+      acpModeId: this.acpModeId,
+    });
+  }
+
+  private ingestSessionModes(
+    session: ActiveSession,
+    extra?: { modes?: unknown },
+  ): void {
+    const modes =
+      (session.modes as
+        | {
+            currentModeId?: string;
+            availableModes?: Array<{
+              id: string;
+              name: string;
+              description?: string | null;
+            }>;
+          }
+        | null
+        | undefined) ??
+      (extra?.modes as
+        | {
+            currentModeId?: string;
+            availableModes?: Array<{
+              id: string;
+              name: string;
+              description?: string | null;
+            }>;
+          }
+        | null
+        | undefined);
+    if (!modes) {
+      return;
+    }
+    if (Array.isArray(modes.availableModes)) {
+      this.availableModes = modes.availableModes.map((m) => ({
+        id: String(m.id),
+        name: String(m.name ?? m.id),
+        description: m.description ? String(m.description) : undefined,
+      }));
+    }
+    if (modes.currentModeId) {
+      this.acpModeId = String(modes.currentModeId);
+      if (this.acpModeId === "plan") {
+        this.cycleModeId = "plan";
+        this.autoMode = false;
+        this.permissions.setAlwaysApproveOverride(false);
+      } else if (this.cycleModeId === "plan") {
+        this.cycleModeId = cycleModeFromAgent(this.acpModeId, {
+          yolo: this.permissions.isAlwaysApprove(),
+          auto: this.autoMode,
+        });
+      }
+      this.fireModeChange();
+    }
   }
 
   /**
@@ -285,6 +522,7 @@ export class AgentService implements vscode.Disposable {
     const session = await this.connection.agent.buildSession(cwd).start();
     this.session = session;
     this.ingestSessionModels(session);
+    this.ingestSessionModes(session);
     void this.pumpSessionUpdates(session);
 
     if (this.state.kind === "ready") {
@@ -579,6 +817,7 @@ export class AgentService implements vscode.Disposable {
     this.session = session;
     // load response may carry config in result; merge meta when present.
     this.ingestSessionModels(session, loadRes as { _meta?: unknown; models?: unknown });
+    this.ingestSessionModes(session, loadRes as { modes?: unknown });
     void this.pumpSessionUpdates(session);
 
     if (this.state.kind === "ready") {
@@ -1133,6 +1372,31 @@ export class AgentService implements vscode.Disposable {
         logSessionUpdate(
           `[usage_update] used=${(update as { used?: number }).used} size=${(update as { size?: number }).size}${tok}`,
         );
+        break;
+      }
+      case "current_mode_update": {
+        const u = update as { currentModeId?: string };
+        const mid = u.currentModeId ? String(u.currentModeId) : "";
+        logSessionUpdate(`[current_mode_update] modeId=${mid}`);
+        if (mid) {
+          this.acpModeId = mid;
+          if (mid === "plan") {
+            this.cycleModeId = "plan";
+            this.autoMode = false;
+            this.permissions.setAlwaysApproveOverride(false);
+          } else if (
+            this.cycleModeId === "always-approve" ||
+            this.cycleModeId === "auto"
+          ) {
+            // Permission arms keep ACP on "default"; don't clobber UI.
+          } else {
+            this.cycleModeId = cycleModeFromAgent(mid, {
+              yolo: this.permissions.isAlwaysApprove(),
+              auto: this.autoMode,
+            });
+          }
+          this.fireModeChange();
+        }
         break;
       }
       default:

@@ -46,6 +46,14 @@ import {
   processLabelForSessionUpdate,
   type SessionUsageSnapshot,
 } from "./turnStatusFormat";
+import {
+  modeButtonLabel,
+  modeCssClass,
+  modeDescription,
+  modeLabel,
+  modeToast,
+  type CycleModeId,
+} from "./sessionModeCycle";
 import type { DiffReviewService } from "../diff/diffReviewService";
 import { readTextFileHost } from "../agent/hostFs";
 import { dispatchSlash } from "../slash/dispatch";
@@ -160,6 +168,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             m.currentEffortLabel ||
             effortDisplayLabel(m.efforts, m.currentEffortId),
         });
+      }),
+      this.agent.onModeChange((m) => {
+        this.postModeState(m.mode);
       }),
       this.agent.onTurnEnd((response) => {
         this.currentAssistantId = undefined;
@@ -592,6 +603,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         } catch (err) {
           this.pushSystem(errMessage(err));
           await vscode.commands.executeCommand("grok.selectModel");
+        }
+        break;
+      }
+      case "cycleMode": {
+        try {
+          const next = await this.agent.cycleSessionMode();
+          this.postModeState(next);
+          // TUI shows a short mode-switch banner; use a compact system line.
+          this.pushSystem(modeToast(next));
+        } catch (err) {
+          this.pushSystem(errMessage(err));
         }
         break;
       }
@@ -1175,6 +1197,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const currentEffortLabel =
       catalog.currentEffortLabel ||
       effortDisplayLabel(efforts, currentEffortId);
+    const modeState = this.agent.getModeState();
     this.post({
       type: "init",
       messages: this.serializeMessages(this.messages),
@@ -1194,6 +1217,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       efforts,
       currentEffortId,
       currentEffortLabel,
+      mode: modeState.mode,
+      modeLabel: modeButtonLabel(modeState.mode),
+      modeCss: modeCssClass(modeState.mode),
+      modeTitle: `Mode: ${modeLabel(modeState.mode)} — ${modeDescription(modeState.mode)} (Shift+Tab)`,
       stickyChips: this.stickyChips.map((c) => ({
         id: c.id,
         label: c.label,
@@ -1203,6 +1230,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       reviewCount: this.diffs?.getEntries().length ?? 0,
       turnStatus,
       context: turnStatus.context,
+    });
+  }
+
+  private postModeState(mode: CycleModeId): void {
+    this.post({
+      type: "mode",
+      mode,
+      modeLabel: modeButtonLabel(mode),
+      modeCss: modeCssClass(mode),
+      modeTitle: `Mode: ${modeLabel(mode)} — ${modeDescription(mode)} (Shift+Tab)`,
     });
   }
 
@@ -1795,7 +1832,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     padding: 7px 10px;
     font-weight: 500;
   }
-  #btn-model { margin-left: auto; }
   #btn-effort[hidden] { display: none !important; }
   #btn-model .model-btn-label, #btn-effort .effort-btn-label {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1871,6 +1907,51 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   .actions {
     display: flex; gap: 6px; align-items: center;
     padding-top: 2px;
+  }
+  /* mode | spacer | model · reasoning · send */
+  .actions-right {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    min-width: 0;
+  }
+  /* Mode cycle — left of action row (Shift+Tab) */
+  #btn-mode {
+    font-size: 12px;
+    padding: 6px 10px;
+    min-height: 30px;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+  #btn-mode .mode-btn-label {
+    max-width: 11em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #btn-mode.mode-plan {
+    color: color-mix(in srgb, var(--focus) 85%, var(--fg));
+    background: color-mix(in srgb, var(--focus) 14%, transparent);
+  }
+  #btn-mode.mode-plan:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--focus) 22%, transparent);
+  }
+  /* TUI accent_system for auto flag */
+  #btn-mode.mode-auto {
+    color: color-mix(in srgb, #5b9fd4 90%, var(--fg));
+    background: color-mix(in srgb, #5b9fd4 14%, transparent);
+  }
+  #btn-mode.mode-auto:hover:not(:disabled) {
+    background: color-mix(in srgb, #5b9fd4 22%, transparent);
+  }
+  /* always-approve (YOLO) — red for destructive auto-run */
+  #btn-mode.mode-always-approve {
+    color: color-mix(in srgb, #e05353 92%, var(--fg));
+    background: color-mix(in srgb, #e05353 16%, transparent);
+  }
+  #btn-mode.mode-always-approve:hover:not(:disabled) {
+    background: color-mix(in srgb, #e05353 26%, transparent);
   }
 
   /* ── Buttons ── */
@@ -1995,19 +2076,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         </span>
       </div>
       <div class="composer-shell">
-        <textarea id="composer" placeholder="Message Grok… (/ commands, @ files, Enter send)" rows="3"></textarea>
+        <textarea id="composer" placeholder="Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)" rows="3"></textarea>
         <div class="actions">
-          <button id="btn-model" class="secondary" type="button" title="Select model (same catalog as TUI)" aria-label="Select model" aria-haspopup="listbox">
-            <i class="ti ti-cpu" aria-hidden="true"></i>
-            <span class="model-btn-label" id="model-btn-label">model</span>
-            <i class="ti ti-chevron-up" aria-hidden="true"></i>
+          <button id="btn-mode" class="secondary mode-normal" type="button" title="Mode: Normal — Ask before running tools (Shift+Tab)" aria-label="Cycle session mode">
+            <i class="ti ti-route-alt-left" aria-hidden="true"></i>
+            <span class="mode-btn-label" id="mode-btn-label">Normal</span>
           </button>
-          <button id="btn-effort" class="secondary" type="button" hidden title="Reasoning effort" aria-label="Reasoning effort" aria-haspopup="listbox">
-            <i class="ti ti-brain" aria-hidden="true"></i>
-            <span class="effort-btn-label" id="effort-btn-label">effort</span>
-            <i class="ti ti-chevron-up" aria-hidden="true"></i>
-          </button>
-          <button id="send" type="button" title="Send"><i class="ti ti-send"></i> Send</button>
+          <div class="actions-right">
+            <button id="btn-model" class="secondary" type="button" title="Select model (same catalog as TUI)" aria-label="Select model" aria-haspopup="listbox">
+              <i class="ti ti-cpu" aria-hidden="true"></i>
+              <span class="model-btn-label" id="model-btn-label">model</span>
+              <i class="ti ti-chevron-up" aria-hidden="true"></i>
+            </button>
+            <button id="btn-effort" class="secondary" type="button" hidden title="Reasoning effort" aria-label="Reasoning effort" aria-haspopup="listbox">
+              <i class="ti ti-brain" aria-hidden="true"></i>
+              <span class="effort-btn-label" id="effort-btn-label">effort</span>
+              <i class="ti ti-chevron-up" aria-hidden="true"></i>
+            </button>
+            <button id="send" type="button" title="Send"><i class="ti ti-send"></i> Send</button>
+          </div>
         </div>
       </div>
     </div>
@@ -2050,7 +2137,10 @@ const effortEmpty = document.getElementById('effort-empty');
 const effortTitle = document.getElementById('effort-title');
 const btnEffort = document.getElementById('btn-effort');
 const effortBtnLabel = document.getElementById('effort-btn-label');
+const btnMode = document.getElementById('btn-mode');
+const modeBtnLabel = document.getElementById('mode-btn-label');
 let busy = false;
+let currentMode = 'normal';
 let allMessages = [];
 let stickyChips = [];
 let autoAttachEnabled = true;
@@ -2086,6 +2176,37 @@ function setEffortButtonLabel(label) {
   btnEffort.hidden = false;
   effortBtnLabel.textContent = currentEffortLabel || 'effort';
   btnEffort.title = 'Reasoning effort: ' + (currentEffortLabel || currentEffortId || '—');
+}
+
+/** Map cycle mode id → button label (keep in sync with sessionModeCycle.ts). */
+function modeLabelForId(id) {
+  switch (String(id || '')) {
+    case 'plan': return 'Plan';
+    case 'auto': return 'Auto';
+    case 'always-approve': return 'Always Approve';
+    case 'normal':
+    default: return 'Normal';
+  }
+}
+
+function modeCssForId(id) {
+  switch (String(id || '')) {
+    case 'plan': return 'mode-plan';
+    case 'auto': return 'mode-auto';
+    case 'always-approve': return 'mode-always-approve';
+    case 'normal':
+    default: return 'mode-normal';
+  }
+}
+
+function applyModeState(s) {
+  if (!s) return;
+  if (s.mode) currentMode = String(s.mode);
+  const label = s.modeLabel || s.label || modeLabelForId(currentMode);
+  modeBtnLabel.textContent = label;
+  const css = s.modeCss || modeCssForId(currentMode);
+  btnMode.className = 'secondary ' + css;
+  btnMode.title = s.modeTitle || ('Mode: ' + label + ' (Shift+Tab)');
 }
 
 function applyModelsState(s) {
@@ -3148,7 +3269,17 @@ composer.addEventListener('keyup', (e) => {
   }
 });
 
+btnMode.addEventListener('click', () => {
+  vscode.postMessage({ type: 'cycleMode' });
+});
+
 composer.addEventListener('keydown', (e) => {
+  // TUI Shift+Tab: cycle Normal → Plan → Always-Approve (even with draft text).
+  if (e.key === 'Tab' && e.shiftKey) {
+    e.preventDefault();
+    vscode.postMessage({ type: 'cycleMode' });
+    return;
+  }
   if (modelOpen) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -3265,6 +3396,7 @@ window.addEventListener('message', (event) => {
     renderSticky();
     setReview(msg.reviewCount || 0);
     applyModelsState(msg);
+    applyModeState(msg);
     const base = (msg.agentState || 'idle') +
       (msg.agentDetail ? ' · ' + String(msg.agentDetail).slice(0, 12) : '');
     meta.dataset.base = base;
@@ -3285,6 +3417,8 @@ window.addEventListener('message', (event) => {
     renderContextBar(msg);
   } else if (msg.type === 'models') {
     applyModelsState(msg);
+  } else if (msg.type === 'mode') {
+    applyModeState(msg);
   } else if (msg.type === 'agentState') {
     const base = (msg.state || 'idle') +
       (msg.detail ? ' · ' + String(msg.detail).slice(0, 12) : '');
