@@ -9,14 +9,10 @@ import {
   type ContextChip,
 } from "../context/editorContext";
 import { pickContextChips } from "../context/contextPicker";
-import { getSettings, resolveSessionCwd } from "../config/settings";
+import { getSettings } from "../config/settings";
 import { logError } from "../log/output";
 import { renderMarkdownToSafeHtml } from "./markdown";
 import type { DiffReviewService } from "../diff/diffReviewService";
-import {
-  deriveTitle,
-  type SessionHistoryStore,
-} from "../session/sessionHistoryStore";
 import { readTextFileHost } from "../agent/hostFs";
 
 type UiMessage =
@@ -64,7 +60,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private stickyChips: ContextChip[] = [];
   private messagesFlushTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly disposables: vscode.Disposable[] = [];
-  private history: SessionHistoryStore | undefined;
   private diffs: DiffReviewService | undefined;
   /** True while ACP session/load is replaying history into the UI. */
   private loadingHistory = false;
@@ -96,13 +91,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.agent.onTurnEnd(() => {
         this.currentAssistantId = undefined;
         this.post({ type: "busy", busy: false });
-        void this.persistHistory();
       }),
     );
-  }
-
-  setHistoryStore(store: SessionHistoryStore): void {
-    this.history = store;
   }
 
   setDiffReview(diffs: DiffReviewService): void {
@@ -231,7 +221,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.messages.shift();
     }
     this.scheduleMessagesPost(true);
-    void this.persistHistory();
   }
 
   async refreshState(): Promise<void> {
@@ -357,7 +346,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private async handleNewSession(): Promise<void> {
     try {
-      await this.persistHistory();
       if (this.agent.isBusy()) {
         await this.agent.cancelTurn();
       }
@@ -590,27 +578,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.post({
       type: "stickyChips",
       chips: this.stickyChips.map((c) => ({ id: c.id, label: c.label })),
-    });
-  }
-
-  private async persistHistory(): Promise<void> {
-    if (!this.history) {
-      return;
-    }
-    const sessionId = this.agent.getSessionId();
-    if (!sessionId) {
-      return;
-    }
-    const firstUser = this.messages.find((m) => m.type === "user");
-    const preview =
-      firstUser && firstUser.type === "user" ? firstUser.text : "";
-    await this.history.upsert({
-      sessionId,
-      cwd: resolveSessionCwd(),
-      title: deriveTitle(preview, sessionId),
-      updatedAt: Date.now(),
-      preview: preview.slice(0, 200),
-      messageCount: this.messages.length,
     });
   }
 

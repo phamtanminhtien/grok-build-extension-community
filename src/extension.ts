@@ -17,11 +17,7 @@ import {
   logInfo,
   openOutput,
 } from "./log/output";
-import { listDiskSessions } from "./session/diskSessions";
-import {
-  deriveTitle,
-  SessionHistoryStore,
-} from "./session/sessionHistoryStore";
+import { listDiskSessions, type DiskSession } from "./session/diskSessions";
 import { resolveSessionCwd } from "./config/settings";
 import { ChatViewProvider } from "./ui/chatViewProvider";
 import { GrokStatusBar } from "./ui/statusBar";
@@ -43,7 +39,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const auth = new AuthService(context.secrets);
   agentService.setAuthService(auth);
 
-  const history = new SessionHistoryStore(context.workspaceState);
   const diffs = new DiffReviewService();
 
   setBeforeWriteHook(async (filePath) => {
@@ -60,7 +55,6 @@ export function activate(context: vscode.ExtensionContext): void {
     auth,
     { supportsSecondarySidebar },
   );
-  chat.setHistoryStore(history);
   chat.setDiffReview(diffs);
 
   const statusBar = new GrokStatusBar(agentService);
@@ -245,102 +239,32 @@ export function activate(context: vscode.ExtensionContext): void {
         await chat.openChat();
         const workspaceCwd = resolveSessionCwd();
 
-        // Primary source: same on-disk store as TUI / `grok sessions list`
-        let disk = listDiskSessions({ cwd: workspaceCwd, limit: 40 });
+        // Only ~/.grok/sessions — same source as Grok Build TUI / CLI
+        let items = listDiskSessions({ cwd: workspaceCwd, limit: 40 });
         let scope: "workspace" | "all" = "workspace";
-        if (disk.length === 0) {
-          disk = listDiskSessions({ allWorkspaces: true, limit: 40 });
+        if (items.length === 0) {
+          items = listDiskSessions({ allWorkspaces: true, limit: 40 });
           scope = "all";
         }
-
-        // Merge thin local index for sessions not yet flushed to disk
-        const local = history.list();
-        const byId = new Map<
-          string,
-          {
-            sessionId: string;
-            cwd: string;
-            title: string;
-            updatedAt: number;
-            preview: string;
-            source: string;
-            modelId?: string;
-            messageCount: number;
-          }
-        >();
-        for (const e of disk) {
-          byId.set(e.sessionId, {
-            sessionId: e.sessionId,
-            cwd: e.cwd,
-            title: e.title,
-            updatedAt: e.updatedAt,
-            preview: e.preview,
-            source: "disk",
-            modelId: e.modelId,
-            messageCount: e.messageCount,
-          });
-        }
-        for (const e of local) {
-          if (byId.has(e.sessionId)) {
-            continue;
-          }
-          byId.set(e.sessionId, {
-            sessionId: e.sessionId,
-            cwd: e.cwd,
-            title: e.title,
-            updatedAt: e.updatedAt,
-            preview: e.preview,
-            source: "extension",
-            messageCount: e.messageCount,
-          });
-        }
-
-        // Optional ACP list if agent ever advertises it
-        try {
-          const remote = await agentService!.listRemoteSessions();
-          for (const r of remote) {
-            const prev = byId.get(r.sessionId);
-            if (prev) {
-              continue;
-            }
-            byId.set(r.sessionId, {
-              sessionId: r.sessionId,
-              cwd: r.cwd || "",
-              title: r.title || deriveTitle("", r.sessionId),
-              updatedAt: r.updatedAt || Date.now(),
-              preview: r.title || "",
-              source: "agent",
-              messageCount: 0,
-            });
-          }
-        } catch {
-          /* ignore */
-        }
-
-        const items = [...byId.values()].sort(
-          (a, b) => b.updatedAt - a.updatedAt,
-        );
         if (items.length === 0) {
           void vscode.window.showInformationMessage(
-            "No Grok sessions found under ~/.grok/sessions for this workspace.",
+            "No sessions in ~/.grok/sessions. Chat in Grok Build (or this extension) first.",
           );
           return;
         }
 
         type PickItem = vscode.QuickPickItem & {
-          entry?: (typeof items)[0];
+          entry?: DiskSession;
           action?: "all";
         };
         const picks: PickItem[] = [];
-        if (scope === "workspace" && items.length > 0) {
+        if (scope === "workspace") {
           picks.push({
             label: "$(history) Continue latest for this workspace",
             description: items[0]!.title,
             detail: items[0]!.sessionId,
             entry: items[0],
           });
-        }
-        if (scope === "workspace") {
           picks.push({
             label: "$(folder) Show all workspaces…",
             alwaysShow: true,
@@ -352,8 +276,8 @@ export function activate(context: vscode.ExtensionContext): void {
             ? new Date(e.updatedAt).toLocaleString()
             : "";
           picks.push({
-            label: e.title || deriveTitle(e.preview, e.sessionId),
-            description: `${e.sessionId.slice(0, 8)}… · ${e.source}${e.modelId ? ` · ${e.modelId}` : ""}`,
+            label: e.title,
+            description: `${e.sessionId.slice(0, 8)}…${e.modelId ? ` · ${e.modelId}` : ""}`,
             detail: [when, e.cwd, e.messageCount ? `${e.messageCount} msgs` : ""]
               .filter(Boolean)
               .join(" · "),
@@ -368,7 +292,7 @@ export function activate(context: vscode.ExtensionContext): void {
               : "Resume Grok session (all workspaces)",
           matchOnDescription: true,
           matchOnDetail: true,
-          placeHolder: "Same history as TUI / grok sessions list",
+          placeHolder: "Synced with ~/.grok/sessions (same as TUI)",
         });
         if (!pick) {
           return;
@@ -378,18 +302,9 @@ export function activate(context: vscode.ExtensionContext): void {
           pick = await vscode.window.showQuickPick(
             allDisk.map((e) => ({
               label: e.title,
-              description: `${e.sessionId.slice(0, 8)}… · ${e.modelId ?? ""}`,
+              description: `${e.sessionId.slice(0, 8)}…${e.modelId ? ` · ${e.modelId}` : ""}`,
               detail: `${new Date(e.updatedAt).toLocaleString()} · ${e.cwd}`,
-              entry: {
-                sessionId: e.sessionId,
-                cwd: e.cwd,
-                title: e.title,
-                updatedAt: e.updatedAt,
-                preview: e.preview,
-                source: "disk",
-                modelId: e.modelId,
-                messageCount: e.messageCount,
-              },
+              entry: e,
             })),
             {
               title: "Resume Grok session (all workspaces)",
@@ -405,7 +320,6 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
-        // Ensure agent is up so we can read capabilities
         await agentService!.ensureStarted();
         const caps = agentService!.getCapabilities();
         if (!caps.loadSession) {
@@ -421,7 +335,6 @@ export function activate(context: vscode.ExtensionContext): void {
             pick.entry.sessionId,
             pick.entry.cwd || workspaceCwd,
           );
-          // Give the update stream a moment to flush into the chat handler
           await new Promise((r) => setTimeout(r, 400));
           chat.endHistoryLoad();
           void vscode.window.showInformationMessage(

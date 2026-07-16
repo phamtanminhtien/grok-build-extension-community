@@ -1,13 +1,18 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { SessionHistoryEntry } from "./sessionHistoryStore";
 
-export interface DiskSession extends SessionHistoryEntry {
-  /** local disk under ~/.grok/sessions */
+/** Session metadata from ~/.grok/sessions (same store as the Grok Build TUI). */
+export interface DiskSession {
+  sessionId: string;
+  cwd: string;
+  title: string;
+  updatedAt: number;
+  preview: string;
+  messageCount: number;
+  /** Always on-disk Grok store */
   source: "disk";
   modelId?: string;
-  status?: string;
 }
 
 /**
