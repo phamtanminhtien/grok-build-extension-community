@@ -90,9 +90,31 @@ Full checklist: `docs/L0-manual-test.md`
 ### Package / publish
 
 ```bash
-npm run package          # local .vsix
-# npm run publish:vsce   # requires vsce login / PAT for publisher `tienpham`
+npm run package          # local .vsix (grok-build-community-<version>.vsix)
+# npm run publish:vsce   # VS Code Marketplace (needs VSCE_PAT / vsce login)
+# npx ovsx publish grok-build-community-<version>.vsix   # Open VSX (needs OVSX_PAT)
 ```
+
+**Automated release (GitHub Actions):**
+
+1. Bump `version` in `package.json` and update `CHANGELOG.md`
+2. Commit, then tag and push:
+   ```bash
+   git tag v0.3.1
+   git push origin v0.3.1
+   ```
+3. Workflow **Release** packages the VSIX, creates a GitHub Release, and publishes to:
+   - [VS Code Marketplace](https://marketplace.visualstudio.com/) (`vsce`)
+   - [Open VSX](https://open-vsx.org/) (`ovsx`)
+
+Or run **Actions → Release → Run workflow** (optional dry-run).
+
+**Secrets** (repo → Settings → Secrets → Actions):
+
+| Secret | Purpose |
+|--------|---------|
+| `VSCE_PAT` | Azure DevOps PAT with **Marketplace** (Acquire + Publish) for publisher `tienpham` |
+| `OVSX_PAT` | Token from [open-vsx.org/user-settings/tokens](https://open-vsx.org/user-settings/tokens) |
 
 ---
 
