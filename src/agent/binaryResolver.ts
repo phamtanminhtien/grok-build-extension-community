@@ -4,19 +4,50 @@ import * as path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { getSettings } from "../config/settings";
+import {
+  BinaryNotFoundError,
+  getCliInstallInfo,
+  installHint,
+  isBinaryMissingError,
+  GROK_CLI_DOCS_URL,
+  type CliInstallInfo,
+} from "./cliInstallInfo";
+
+export {
+  BinaryNotFoundError,
+  getCliInstallInfo,
+  installHint,
+  isBinaryMissingError,
+  GROK_CLI_DOCS_URL,
+  type CliInstallInfo,
+};
 
 const execFileAsync = promisify(execFile);
 
-export class BinaryNotFoundError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "BinaryNotFoundError";
+export type GrokBinaryProbe =
+  | { found: true; path: string }
+  | { found: false };
+
+/**
+ * Probe for `grok` without throwing. Same order as resolveGrokBinary.
+ */
+export async function probeGrokBinary(
+  binaryPathSetting?: string,
+): Promise<GrokBinaryProbe> {
+  try {
+    const resolved = await resolveGrokBinary(binaryPathSetting);
+    return { found: true, path: resolved };
+  } catch (err) {
+    if (err instanceof BinaryNotFoundError) {
+      return { found: false };
+    }
+    throw err;
   }
 }
 
 /**
  * Resolve path to `grok` binary.
- * Order: setting → PATH → ~/.grok/bin/grok → /usr/local/bin/grok
+ * Order: setting → PATH → ~/.grok/bin/grok → common install locations
  */
 export async function resolveGrokBinary(
   binaryPathSetting?: string,
@@ -71,17 +102,6 @@ export async function getGrokVersion(binary: string): Promise<string> {
   } catch {
     return "unknown";
   }
-}
-
-function installHint(): string {
-  return [
-    "",
-    "Install Grok Build CLI, then either:",
-    "  • ensure `grok` is on your PATH, or",
-    "  • set Settings → Grok: Binary Path to the absolute path.",
-    "",
-    "Typical install location: ~/.grok/bin/grok",
-  ].join("\n");
 }
 
 async function isExecutable(filePath: string): Promise<boolean> {

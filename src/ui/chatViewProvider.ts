@@ -4,7 +4,14 @@ import type { AgentService } from "../agent/agentService";
 import type { AuthService } from "../auth/authService";
 import { pickLoginMethod, promptAndStoreApiKey } from "../auth/authService";
 import { formatLogoutMessage } from "../auth/authFlow";
-import { BinaryNotFoundError } from "../agent/binaryResolver";
+import {
+  getCliInstallInfo,
+  probeGrokBinary,
+} from "../agent/binaryResolver";
+import {
+  handleMissingCliError,
+  promptMissingCli,
+} from "../agent/missingCliPrompt";
 import {
   buildPromptBlocks,
   getActiveEditorChip,
@@ -240,6 +247,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           e.affectsConfiguration("grok.context.excludeGlob")
         ) {
           this.postAutoContext();
+        }
+        if (e.affectsConfiguration("grok.binaryPath")) {
+          void this.pushFullState();
         }
       }),
       // Keep empty-state Sign in / Log out + account label in sync when the
@@ -730,13 +740,61 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
       case "startAgent":
         try {
-          await this.agent.ensureStarted();
-          this.pushSystem("Agent ready");
+          const probe = await probeGrokBinary();
+          if (!probe.found) {
+            const outcome = await promptMissingCli();
+            if (outcome === "retry") {
+              await this.agent.ensureStarted();
+              this.pushSystem("Agent ready");
+            }
+          } else {
+            await this.agent.ensureStarted();
+            this.pushSystem("Agent ready");
+          }
         } catch (err) {
           await this.showStartError(err);
         }
         await this.pushFullState();
         break;
+      case "copyInstallCommand": {
+        const info = getCliInstallInfo();
+        await vscode.env.clipboard.writeText(info.command);
+        void vscode.window.showInformationMessage(
+          `Copied install command — paste in a terminal, then click “I installed it”.`,
+        );
+        break;
+      }
+      case "openInstallDocs": {
+        const info = getCliInstallInfo();
+        await vscode.env.openExternal(vscode.Uri.parse(info.docsUrl));
+        break;
+      }
+      case "setBinaryPath":
+        await vscode.commands.executeCommand(
+          "workbench.action.openSettings",
+          "grok.binaryPath",
+        );
+        break;
+      case "recheckCli": {
+        const probe = await probeGrokBinary();
+        if (probe.found) {
+          void vscode.window.showInformationMessage(
+            `Found grok at ${probe.path}`,
+          );
+          try {
+            await this.agent.ensureStarted();
+            this.pushSystem("Agent ready");
+          } catch (err) {
+            await this.showStartError(err);
+          }
+        } else {
+          void vscode.window.showWarningMessage(
+            "Still cannot find `grok`. Install the CLI, then try again.",
+          );
+        }
+        await this.pushFullState();
+        break;
+      }
       case "addContext":
         // Open in-webview mention popover (not VS Code QuickPick).
         this.post({ type: "openMention" });
@@ -931,6 +989,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   ): Promise<void> {
     if (this.agent.isBusy()) {
       this.pushSystem("Wait for the current turn or press Stop.");
+      return;
+    }
+
+    // Require CLI before any chat turn — force install if missing.
+    const probe = await probeGrokBinary();
+    if (!probe.found) {
+      await promptMissingCli();
+      await this.pushFullState();
       return;
     }
 
@@ -1554,6 +1620,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const authStatus = await this.auth.getStatus();
     const hasAuth = authStatus.hasAny;
     void vscode.commands.executeCommand("setContext", "grok.signedIn", hasAuth);
+    const probe = await probeGrokBinary();
+    const install = getCliInstallInfo();
+    void vscode.commands.executeCommand(
+      "setContext",
+      "grok.cliFound",
+      probe.found,
+    );
     const state = this.agent.getState();
     const settings = getSettings();
     const busy = this.agent.isBusy();
@@ -1594,6 +1667,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       busy,
       hasAuth,
       authSummary: authStatus.summary,
+      cliFound: probe.found,
+      cliPath: probe.found ? probe.path : "",
+      installCommand: install.command,
+      installDocsUrl: install.docsUrl,
+      installTypicalPath: install.typicalPath,
       agentState: state.kind,
       agentDetail:
         state.kind === "ready"
@@ -1646,25 +1724,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private async showStartError(err: unknown): Promise<void> {
     logError("Chat start/send failed", err);
-    const msg = errMessage(err);
-    if (
-      err instanceof BinaryNotFoundError ||
-      /binary|not find|ENOENT/i.test(msg)
-    ) {
-      const openSettings = "Open Settings";
-      const choice = await vscode.window.showErrorMessage(
-        msg.split("\n")[0] ?? msg,
-        openSettings,
-      );
-      if (choice === openSettings) {
-        await vscode.commands.executeCommand(
-          "workbench.action.openSettings",
-          "grok.binaryPath",
-        );
-      }
+    if (await handleMissingCliError(err)) {
+      await this.pushFullState();
       return;
     }
-    void vscode.window.showErrorMessage(`Grok Build: ${msg}`);
+    void vscode.window.showErrorMessage(`Grok Build: ${errMessage(err)}`);
   }
 
   private getHtml(webview: vscode.Webview): string {
@@ -2235,7 +2299,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   /* ── Empty state ── */
   #empty {
     margin: auto; text-align: center; color: var(--muted); padding: 28px 18px;
-    max-width: 300px; line-height: 1.55;
+    max-width: 320px; line-height: 1.55;
   }
   #empty .hero-icon {
     width: 52px; height: 52px; margin: 0 auto 12px;
@@ -2243,6 +2307,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     display: flex; align-items: center; justify-content: center;
     color: var(--btn-bg);
     background: color-mix(in srgb, var(--btn-bg) 14%, transparent);
+  }
+  #empty.cli-missing .hero-icon {
+    color: var(--vscode-errorForeground, #f14c4c);
+    background: color-mix(in srgb, var(--vscode-errorForeground, #f14c4c) 14%, transparent);
   }
   #empty h2 {
     color: var(--fg); font-size: 15px; font-weight: 600;
@@ -2256,6 +2324,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     width: 100%; justify-content: center; min-height: 36px;
     border-radius: var(--radius-pill); /* match Send / Mode pills */
   }
+  #empty .install-cmd {
+    margin-top: 12px;
+    text-align: left;
+    font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    background: var(--input-bg);
+    border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+    color: var(--fg);
+    word-break: break-all;
+    user-select: all;
+    cursor: pointer;
+  }
+  #empty .install-note {
+    margin-top: 8px;
+    font-size: 11px;
+    opacity: 0.85;
+  }
+  #empty-ready[hidden], #empty-cli-missing[hidden] { display: none !important; }
 
   /* ── Footer / composer ── */
   footer {
@@ -2716,12 +2805,26 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   <div id="messages"></div>
   <div id="empty" hidden>
     <div class="hero-icon" aria-hidden="true">${GROK_MARK_SVG}</div>
-    <h2>Grok Build - Community</h2>
-    <p>Ask about this workspace. Use / for commands, @ for files. The focused file can auto-attach (toggle on the chip).</p>
-    <p id="empty-hint"></p>
-    <div class="empty-actions">
-      <button id="empty-start" type="button"><i class="ti ti-player-play"></i> Start agent</button>
-      <button id="empty-auth" class="secondary" type="button" data-action="login" title="Sign in with browser or API key (same as grok login)"><i class="ti ti-login-2"></i> Sign in</button>
+    <div id="empty-ready">
+      <h2>Grok Build - Community</h2>
+      <p>Ask about this workspace. Use / for commands, @ for files. The focused file can auto-attach (toggle on the chip).</p>
+      <p id="empty-hint"></p>
+      <div class="empty-actions">
+        <button id="empty-start" type="button"><i class="ti ti-player-play"></i> Start agent</button>
+        <button id="empty-auth" class="secondary" type="button" data-action="login" title="Sign in with browser or API key (same as grok login)"><i class="ti ti-login-2"></i> Sign in</button>
+      </div>
+    </div>
+    <div id="empty-cli-missing" hidden>
+      <h2>Install Grok Build CLI</h2>
+      <p>This extension needs the <code>grok</code> binary. It is not bundled — install the CLI first, then come back.</p>
+      <div class="install-cmd" id="empty-install-cmd" title="Click to copy" role="button" tabindex="0"></div>
+      <p class="install-note" id="empty-install-path"></p>
+      <div class="empty-actions">
+        <button id="empty-copy-install" type="button"><i class="ti ti-copy"></i> Copy install command</button>
+        <button id="empty-recheck" type="button"><i class="ti ti-refresh"></i> I installed it — check again</button>
+        <button id="empty-open-docs" class="secondary" type="button"><i class="ti ti-external-link"></i> Open install docs</button>
+        <button id="empty-set-path" class="secondary" type="button"><i class="ti ti-folder"></i> Set binary path…</button>
+      </div>
     </div>
   </div>
   <footer>
@@ -2838,8 +2941,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 const vscode = acquireVsCodeApi();
 const messagesEl = document.getElementById('messages');
 const emptyEl = document.getElementById('empty');
+const emptyReady = document.getElementById('empty-ready');
+const emptyCliMissing = document.getElementById('empty-cli-missing');
 const emptyHint = document.getElementById('empty-hint');
 const emptyAuthBtn = document.getElementById('empty-auth');
+const emptyInstallCmd = document.getElementById('empty-install-cmd');
+const emptyInstallPath = document.getElementById('empty-install-path');
 /** Toggle empty-state auth CTA: Sign in when logged out, Log out when signed in (CLI/API). */
 function updateEmptyAuthUi(hasAuth, authSummary) {
   emptyHint.textContent = hasAuth
@@ -2857,6 +2964,31 @@ function updateEmptyAuthUi(hasAuth, authSummary) {
       'Sign in with browser or API key (same as grok login)';
     emptyAuthBtn.innerHTML = '<i class="ti ti-login-2"></i> Sign in';
   }
+}
+/** True when the grok binary is not resolved — blocks chat until installed. */
+let cliMissing = false;
+/** Show install-CLI panel when binary is missing (blocks agent use). */
+function updateEmptyCliUi(cliFound, installCommand, typicalPath) {
+  cliMissing = !cliFound;
+  emptyEl.classList.toggle('cli-missing', cliMissing);
+  if (emptyReady) emptyReady.hidden = cliMissing;
+  if (emptyCliMissing) emptyCliMissing.hidden = !cliMissing;
+  if (emptyInstallCmd && installCommand) {
+    emptyInstallCmd.textContent = installCommand;
+  }
+  if (emptyInstallPath) {
+    emptyInstallPath.textContent = typicalPath
+      ? 'Typical path after install: ' + typicalPath
+      : '';
+  }
+  // Soft-lock composer when CLI is missing
+  if (composer) {
+    composer.disabled = cliMissing;
+    composer.placeholder = cliMissing
+      ? 'Install Grok Build CLI to chat…'
+      : 'Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)';
+  }
+  updateSendStopButton();
 }
 const meta = document.getElementById('meta');
 const composer = document.getElementById('composer');
@@ -5073,7 +5205,7 @@ function renderTurnStatus(s) {
 function setBusy(b) {
   const wasBusy = busy;
   busy = b;
-  composer.disabled = false;
+  composer.disabled = cliMissing;
   if (b) setMeta('working…', true);
   else setMeta(meta.dataset.base || 'idle', false);
   // Mark live assistant while turn is running (styling / stream path).
@@ -5101,10 +5233,15 @@ function setBusy(b) {
  */
 function updateSendStopButton() {
   const empty = !composer.value.trim();
-  const asStop = busy && empty;
+  const asStop = busy && empty && !cliMissing;
   sendBtn.classList.toggle('is-stop', asStop);
-  sendBtn.disabled = busy && !empty; // only disable when busy with draft text
-  if (asStop) {
+  // Block send while CLI missing; otherwise only disable when busy with draft.
+  sendBtn.disabled = cliMissing || (busy && !empty);
+  if (cliMissing) {
+    sendBtn.innerHTML = '<i class="ti ti-send"></i> Send';
+    sendBtn.title = 'Install Grok Build CLI first';
+    sendBtn.setAttribute('aria-label', 'Send (disabled — CLI missing)');
+  } else if (asStop) {
     sendBtn.innerHTML = '<i class="ti ti-player-stop"></i> Stop';
     sendBtn.title = 'Stop current turn (Esc)';
     sendBtn.setAttribute('aria-label', 'Stop');
@@ -5202,6 +5339,22 @@ document.getElementById('empty-auth').addEventListener('click', () => {
   const action = (btn && btn.getAttribute('data-action')) || 'login';
   vscode.postMessage({ type: action === 'logout' ? 'logout' : 'login' });
 });
+document.getElementById('empty-copy-install')?.addEventListener('click', () =>
+  vscode.postMessage({ type: 'copyInstallCommand' }));
+document.getElementById('empty-install-cmd')?.addEventListener('click', () =>
+  vscode.postMessage({ type: 'copyInstallCommand' }));
+document.getElementById('empty-install-cmd')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    vscode.postMessage({ type: 'copyInstallCommand' });
+  }
+});
+document.getElementById('empty-recheck')?.addEventListener('click', () =>
+  vscode.postMessage({ type: 'recheckCli' }));
+document.getElementById('empty-open-docs')?.addEventListener('click', () =>
+  vscode.postMessage({ type: 'openInstallDocs' }));
+document.getElementById('empty-set-path')?.addEventListener('click', () =>
+  vscode.postMessage({ type: 'setBinaryPath' }));
 document.getElementById('btn-review').addEventListener('click', () =>
   vscode.postMessage({ type: 'reviewEdits' }));
 
@@ -5495,14 +5648,22 @@ window.addEventListener('message', (event) => {
     setReview(msg.reviewCount || 0);
     applyModelsState(msg);
     applyModeState(msg);
-    const base = (msg.agentState || 'idle') +
-      (msg.agentDetail ? ' · ' + String(msg.agentDetail).slice(0, 12) : '');
+    const base = !msg.cliFound
+      ? 'cli missing'
+      : (msg.agentState || 'idle') +
+        (msg.agentDetail ? ' · ' + String(msg.agentDetail).slice(0, 12) : '');
     meta.dataset.base = base;
     setBusy(!!msg.busy);
     if (msg.turnStatus) renderTurnStatus(msg.turnStatus);
     if (msg.context) renderContextBar(msg.context);
     updateEmptyAuthUi(!!msg.hasAuth, msg.authSummary || '');
-    emptyEl.hidden = (msg.messages || []).length > 0;
+    updateEmptyCliUi(
+      msg.cliFound !== false,
+      msg.installCommand || '',
+      msg.installTypicalPath || '',
+    );
+    // Always show empty install panel when CLI missing (even with leftover messages).
+    emptyEl.hidden = msg.cliFound !== false && (msg.messages || []).length > 0;
   } else if (msg.type === 'messages') {
     renderMessages(msg.messages || []);
   } else if (msg.type === 'restoreEditComposer') {

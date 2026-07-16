@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { AgentService } from "./agent/agentService";
-import { BinaryNotFoundError } from "./agent/binaryResolver";
+import { handleMissingCliError } from "./agent/missingCliPrompt";
 import {
   readTextFileHost,
   setBeforeWriteHook,
@@ -438,24 +438,10 @@ async function runLogoutFlow(
 
 async function showStartError(err: unknown): Promise<void> {
   logError("Command failed", err);
-  const msg = errMessage(err);
-
-  if (err instanceof BinaryNotFoundError || /binary|not find|ENOENT/i.test(msg)) {
-    const openSettings = "Open Settings";
-    const choice = await vscode.window.showErrorMessage(
-      msg.split("\n")[0] ?? msg,
-      openSettings,
-    );
-    if (choice === openSettings) {
-      await vscode.commands.executeCommand(
-        "workbench.action.openSettings",
-        "grok.binaryPath",
-      );
-    }
+  if (await handleMissingCliError(err)) {
     return;
   }
-
-  void vscode.window.showErrorMessage(`Grok Build: ${msg}`);
+  void vscode.window.showErrorMessage(`Grok Build: ${errMessage(err)}`);
 }
 
 function errMessage(err: unknown): string {
