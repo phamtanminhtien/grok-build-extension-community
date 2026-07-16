@@ -1,0 +1,105 @@
+{
+  "name": "grok-build-community",
+  "displayName": "Grok Build - Community",
+  "description": "Community VS Code host for Grok Build — thin ACP client for `grok agent stdio`.",
+  "version": "0.1.0",
+  "publisher": "xai",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "grok",
+    "grok-build",
+    "xai",
+    "agent",
+    "acp",
+    "community"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "grok.openOutput",
+        "title": "Grok Build: Open Output",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.startAgent",
+        "title": "Grok Build: Start Agent",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.restartAgent",
+        "title": "Grok Build: Restart Agent",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.stopAgent",
+        "title": "Grok Build: Stop Agent",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.smokeTest",
+        "title": "Grok Build: Smoke Test (L0)",
+        "category": "Grok Build"
+      }
+    ],
+    "configuration": {
+      "title": "Grok Build",
+      "properties": {
+        "grok.binaryPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Absolute path to the `grok` binary. Empty = search PATH then `~/.grok/bin/grok`."
+        },
+        "grok.model": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Optional model id passed as `grok agent --model <id> stdio`."
+        },
+        "grok.alwaysApprove": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Pass `--always-approve` to the agent (auto-approve tools). Use only for trusted workspaces."
+        },
+        "grok.cwd": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Working directory for the agent session. Empty = first workspace folder, else process cwd."
+        },
+        "grok.initializeTimeoutMs": {
+          "type": "number",
+          "default": 30000,
+          "minimum": 5000,
+          "markdownDescription": "Timeout for spawn + `initialize` before killing the agent process."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "compile": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "package": "vsce package --no-dependencies",
+    "smoke:cli": "node scripts/smoke-cli.mjs"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^1.2.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/vscode": "^1.93.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.2"
+  }
+}

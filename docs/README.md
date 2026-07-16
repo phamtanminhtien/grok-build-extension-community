@@ -1,16 +1,17 @@
-# Grok VS Code Extension — Documentation
+# Grok Build - Community — Documentation
 
-Design docs for the **Grok Build** VS Code extension: a thin IDE host that
-drives the existing `grok agent stdio` ACP server. The agent runtime stays in
+Design docs for the **Grok Build - Community** VS Code extension: a thin IDE host
+that drives the existing `grok agent stdio` ACP server. The agent runtime stays in
 Rust; this extension is the client UI and host integration layer.
 
 ## Status
 
 | Item | Status |
 |------|--------|
-| Design docs | In progress (this folder) |
-| Extension scaffold | Not started |
-| Implementation | Blocked on doc review |
+| Design docs | Done (this folder) |
+| Extension scaffold | Done (`src/`, esbuild) |
+| L0 protocol wire-up | Done — see [L0 manual test](L0-manual-test.md) |
+| L1+ implementation | Not started |
 
 ## Reading order
 

@@ -24,16 +24,18 @@ acceptance passes unless explicitly parallelized.
 
 ### Acceptance
 
-- [ ] With `grok` on PATH, activate extension and complete `initialize`
-- [ ] `session/new` returns `sessionId` for open workspace
-- [ ] A hardcoded test prompt streams `session/update` lines to Output
-- [ ] Deactivate kills the process
-- [ ] Missing binary shows actionable error
+- [x] With `grok` on PATH, activate extension and complete `initialize`
+- [x] `session/new` returns `sessionId` for open workspace
+- [x] A hardcoded test prompt streams `session/update` lines to Output
+- [x] Deactivate kills the process
+- [x] Missing binary shows actionable error
 
 ### Exit artifacts
 
-- Runnable extension in Extension Development Host
-- Smoke test script or manual test doc
+- [x] Runnable extension in Extension Development Host (`F5`)
+- [x] Smoke test script (`npm run smoke:cli`) + [L0 manual test](L0-manual-test.md)
+
+Verified headless 2026-07-16: `initialize` + `session/new` + prompt → `L0 OK` / `PASS`.
 
 ---
 
