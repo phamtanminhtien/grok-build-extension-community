@@ -47,6 +47,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const chat = new ChatViewProvider(context.extensionUri, agentService, auth, {
     supportsSecondarySidebar,
+    globalStorageUri: context.globalStorageUri,
   });
   chat.setDiffReview(diffs);
 
@@ -143,6 +144,15 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand("grok.setApiKey", async () => {
       await promptAndStoreApiKey(auth);
+    }),
+
+    vscode.commands.registerCommand("grok.attachImage", async () => {
+      try {
+        await chat.openChat();
+        await chat.attachImagesFromDialog();
+      } catch (err) {
+        await showStartError(err);
+      }
     }),
 
     vscode.commands.registerCommand("grok.clearApiKey", async () => {

@@ -365,6 +365,12 @@ header button.linkish:focus-visible {
 .msg.user {
   align-self: flex-end;
   max-width: 92%;
+  min-width: 0;
+  /* Children size independently — chips/images must not stretch the bubble */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
 }
 .msg.assistant,
 .msg.system {
@@ -445,6 +451,10 @@ header button.linkish:focus-visible {
   border-radius: var(--radius-md) var(--radius-md) var(--radius-xs)
     var(--radius-md);
   box-shadow: var(--shadow-soft);
+  /* Size to text only — never stretch to match wider chips/images */
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .msg.assistant .bubble {
   background: var(--bubble-asst);
@@ -636,9 +646,16 @@ header button.linkish:focus-visible {
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
 .msg.user .chips {
   justify-content: flex-end;
+  margin-bottom: 0; /* gap handled by .msg.user */
+  /* Cap mention row so long paths wrap/truncate instead of widening the message */
+  max-width: 100%;
+  width: max-content;
+  box-sizing: border-box;
 }
 .chip {
   font-size: 11px;
@@ -652,6 +669,7 @@ header button.linkish:focus-visible {
   align-items: center;
   gap: 4px;
   max-width: 100%;
+  min-width: 0;
   line-height: 1.25;
   min-height: 24px;
   transition:
@@ -659,6 +677,10 @@ header button.linkish:focus-visible {
     color var(--ease),
     border-color var(--ease),
     opacity var(--ease);
+}
+/* User message mentions: keep chips from forcing bubble width */
+.msg.user .chip {
+  max-width: min(100%, 16rem);
 }
 .chip:hover {
   color: var(--fg);
@@ -1091,6 +1113,254 @@ header button.linkish:focus-visible {
   gap: 8px;
   margin-top: 16px;
 }
+
+/* ── Image attachments: compact thumbs inside composer shell ── */
+.composer-shell .image-previews {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 0 2px;
+  max-height: 88px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.image-previews[hidden] {
+  display: none !important;
+}
+/* Compact square thumb — top of composer, above textarea */
+.image-card {
+  position: relative;
+  margin: 0;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 56px;
+  /* Neutral soft edge — avoid theme accent/purple border */
+  border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+  /* Concentric with shell: radius = composer radius − padding (20 − 12 = 8) */
+  border-radius: var(--composer-inner-radius, 8px);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  overflow: hidden;
+}
+.image-card-open {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  display: block;
+  line-height: 0;
+}
+.image-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.image-card-missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 9px;
+  color: var(--muted);
+  padding: 2px;
+  text-align: center;
+  line-height: 1.15;
+}
+/* Override global button min-height/padding so remove stays a circle */
+.image-card-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 2;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 0 !important;
+  max-width: 16px;
+  max-height: 16px;
+  padding: 0 !important;
+  margin: 0;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 50%;
+  background: #fff;
+  color: #222;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  gap: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+  opacity: 1;
+  transform: none;
+  transition:
+    background var(--ease),
+    color var(--ease),
+    box-shadow var(--ease);
+}
+.image-card-remove:hover:not(:disabled) {
+  background: #fff;
+  color: #000;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  transform: none;
+}
+.image-card-remove:active:not(:disabled) {
+  transform: none;
+  background: #f3f3f3;
+}
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 6px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.msg.user .msg-images {
+  margin: 0; /* gap handled by .msg.user */
+  justify-content: flex-end;
+  width: max-content;
+  max-width: 100%;
+}
+.msg-image {
+  margin: 0;
+  max-width: min(200px, 100%);
+  min-width: 0;
+  box-sizing: border-box;
+}
+.msg-image img {
+  max-width: 100%;
+  max-height: 180px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  /* Match .bubble / user bubble primary radius (--radius-md = 14px) */
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  display: block;
+}
+.msg-image figcaption {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  max-width: 100%;
+  /* Single-line filename */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Full-view drop overlay — real element so nested dragleave does not flicker */
+#drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(
+    in srgb,
+    var(--vscode-focusBorder, #007fd4) 14%,
+    color-mix(in srgb, var(--bg) 72%, transparent)
+  );
+  border: 2px dashed var(--vscode-focusBorder, #007fd4);
+  box-sizing: border-box;
+  /* Receives all drag events while visible (no children under the hit target). */
+  pointer-events: auto;
+}
+#drop-overlay:not([hidden]) {
+  display: flex;
+}
+#drop-overlay[hidden] {
+  display: none !important;
+}
+.drop-overlay-card {
+  pointer-events: none;
+  text-align: center;
+  max-width: min(320px, 90vw);
+  padding: 16px 20px;
+  border-radius: var(--radius-lg);
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+}
+.drop-overlay-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.drop-overlay-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  opacity: 0.95;
+}
+.drop-overlay-hint kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+  font: inherit;
+  font-weight: 700;
+  font-size: 11px;
+}
+/* In-webview toast when VS Code steals the drop (no Shift) */
+#drop-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%) translateY(12px);
+  z-index: 9600;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--vscode-notificationsInfoIcon-foreground, var(--fg));
+  background: var(
+    --vscode-notifications-background,
+    color-mix(in srgb, var(--bg) 92%, var(--fg))
+  );
+  border: 1px solid var(--vscode-notifications-border, var(--border));
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+#drop-toast:not([hidden]) {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  #drop-toast {
+    transition: none;
+  }
+}
+.chip.chip-image {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chip-thumb {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 4px;
+}
 #empty .empty-actions button {
   width: 100%;
   justify-content: center;
@@ -1261,6 +1531,7 @@ header button.linkish:focus-visible {
 
 /* ── Footer / composer ── */
 footer {
+  position: relative;
   padding: 10px 12px 12px;
   flex-shrink: 0;
   display: flex;
@@ -1754,14 +2025,18 @@ footer {
 }
 
 .composer-shell {
+  --composer-radius: 20px;
+  --composer-pad: 12px;
+  /* Nested controls (thumbs) use outer radius − pad for concentric corners */
+  --composer-inner-radius: calc(var(--composer-radius) - var(--composer-pad));
   display: flex;
   flex-direction: column;
   gap: 10px;
   background: var(--input-bg);
   border: none;
   /* Fixed radius — not pill: 999px turns a tall multi-line shell into an oval */
-  border-radius: 20px;
-  padding: 12px;
+  border-radius: var(--composer-radius);
+  padding: var(--composer-pad);
   box-shadow: var(--shadow-soft);
   transition:
     box-shadow var(--ease),

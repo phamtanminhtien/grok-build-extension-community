@@ -15,6 +15,14 @@ import {
   isAutoAttachEnabled,
   type ContextChip,
 } from "../context/editorContext";
+import {
+  AttachImageError,
+  AttachedImageStore,
+  decodeBase64ToBytes,
+  isAllowedImagePath,
+  parseImagePathsFromText,
+  type AttachedImage,
+} from "../context/promptImages";
 import { searchContextSuggestions } from "../context/contextPicker";
 import { getSettings } from "../config/settings";
 import {
@@ -84,12 +92,24 @@ import {
 } from "../agent/exitPlanMode";
 import { bannerTextForEvent } from "../agent/xaiSessionNotification";
 
+/** Image shown in user bubble (live session thumbs). */
+export interface MessageImage {
+  displayNumber: number;
+  mimeType: string;
+  thumbUri?: string;
+  openPath?: string;
+  width?: number;
+  height?: number;
+  fileName?: string;
+}
+
 type UiMessage =
   | {
       type: "user";
       id: string;
       text: string;
       chips?: string[];
+      images?: MessageImage[];
       /** Shell prompt index for edit-and-resubmit rewind (TUI parity). */
       promptIndex?: number;
     }
@@ -118,6 +138,7 @@ interface SerializedMessage {
   text?: string;
   html?: string;
   chips?: string[];
+  images?: MessageImage[];
   promptIndex?: number;
   /** Ordered timeline: thoughts, text, tools in stream order. */
   items?: SerializedTimelineItem[];
@@ -139,6 +160,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private messages: UiMessage[] = [];
   private currentAssistantId: string | undefined;
   private stickyChips: ContextChip[] = [];
+  private imageStore: AttachedImageStore;
+  /** Staged files kept after send for history thumbs (session lifetime). */
+  private historyImagePaths = new Set<string>();
   private messagesFlushTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly disposables: vscode.Disposable[] = [];
   private diffs: DiffReviewService | undefined;
@@ -191,9 +215,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private readonly extensionUri: vscode.Uri,
     private readonly agent: AgentService,
     private readonly auth: AuthService,
-    options?: { supportsSecondarySidebar?: boolean },
+    options?: {
+      supportsSecondarySidebar?: boolean;
+      globalStorageUri?: vscode.Uri;
+    },
   ) {
     this.supportsSecondarySidebar = options?.supportsSecondarySidebar ?? true;
+    const storageRoot =
+      options?.globalStorageUri ??
+      vscode.Uri.joinPath(this.extensionUri, ".prompt-images-staging");
+    this.imageStore = new AttachedImageStore(
+      vscode.Uri.joinPath(storageRoot, "prompt-images").fsPath,
+    );
     this.agent.setPermissionPromptUi((p) => this.showPermissionPrompt(p));
     this.agent.setQuestionPromptUi((p) => this.showQuestionPrompt(p));
     this.agent.setPlanApprovalUi((p) => this.showPlanApproval(p));
@@ -321,7 +354,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.options = {
       enableScripts: true,
-      localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, "media")],
+      localResourceRoots: this.webviewLocalRoots(),
     };
     webviewView.webview.html = this.getHtml(webviewView.webview);
 
@@ -496,6 +529,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       clearTimeout(this.messagesFlushTimer);
     }
     this.endTurnStatusClock();
+    void this.clearAllImages();
     this.agent.setPermissionPromptUi(undefined);
     this.agent.setQuestionPromptUi(undefined);
     this.agent.setPlanApprovalUi(undefined);
@@ -814,6 +848,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     orderedIds?: string[];
     newText?: string;
     feedback?: string;
+    dataBase64?: string;
+    mimeType?: string;
+    byteLength?: number;
+    fileName?: string;
+    paths?: string[];
   }): Promise<void> {
     switch (msg.type) {
       case "ready":
@@ -823,9 +862,56 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       case "ensureModels":
         await this.ensureModelsLoaded();
         break;
-      case "send":
-        if (msg.text?.trim()) {
-          await this.handleSend(msg.text.trim());
+      case "send": {
+        const text = typeof msg.text === "string" ? msg.text : "";
+        if (text.trim() || this.imageStore.count() > 0) {
+          await this.handleSend(text);
+        }
+        break;
+      }
+      case "attachImageBytes":
+        await this.handleAttachImageBytes(msg);
+        break;
+      case "attachImagePaths":
+        if (Array.isArray(msg.paths)) {
+          await this.handleAttachImagePaths(
+            msg.paths.filter((p): p is string => typeof p === "string"),
+            "drop",
+          );
+        }
+        break;
+      case "dropShiftHint":
+        // VS Code steals OS/explorer drops unless Shift is held over webviews.
+        void vscode.window.showInformationMessage(
+          "Hold Shift while dropping images into Grok chat. Without Shift, VS Code intercepts the drop.",
+        );
+        break;
+      case "attachImagePathsFromPaste":
+        if (typeof msg.text === "string" && msg.text.trim()) {
+          const paths = parseImagePathsFromText(msg.text);
+          if (paths?.length) {
+            await this.handleAttachImagePaths(
+              paths.filter(isAllowedImagePath),
+              "path",
+            );
+          }
+        }
+        break;
+      case "removeImage":
+        if (msg.id) {
+          await this.handleRemoveImage(msg.id);
+        }
+        break;
+      case "openImage":
+        if (msg.path && typeof msg.path === "string") {
+          try {
+            await vscode.commands.executeCommand(
+              "vscode.open",
+              vscode.Uri.file(msg.path),
+            );
+          } catch (err) {
+            this.pushSystem(errMessage(err));
+          }
         }
         break;
       case "queueRemove":
@@ -1353,16 +1439,42 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    const { blocks, chips } = buildPromptBlocks(text, {
-      stickyChips: this.stickyChips,
-    });
+    // Snapshot images for this send (detach from composer; keep files for thumbs).
+    const sendImages = this.imageStore.takeForSend();
+    for (const img of sendImages) {
+      this.historyImagePaths.add(img.stagedPath);
+    }
+    this.postImageAttachments();
+
+    let blocks;
+    let chips;
+    let finalText = text;
+    try {
+      const built = await buildPromptBlocks(text, {
+        stickyChips: this.stickyChips,
+        images: sendImages,
+      });
+      blocks = built.blocks;
+      chips = built.chips;
+      finalText = built.text;
+    } catch (err) {
+      // Re-attach images on build failure so user can retry.
+      for (const img of sendImages) {
+        this.historyImagePaths.delete(img.stagedPath);
+      }
+      // Cannot put back into store easily after take — leave files; push error.
+      this.pushSystem(errMessage(err));
+      return;
+    }
+
+    const msgImages = this.toMessageImages(sendImages);
     const promptId = newPromptId();
     const queueWhileBusy = this.agent.isBusy();
 
     // Mid-turn: enqueue server-side (TUI immediate send) — do not paint user
     // bubble until the prompt starts running (queue/changed runningPromptId).
     if (queueWhileBusy) {
-      this.agent.pushOptimisticQueueEntry(promptId, text, "prompt");
+      this.agent.pushOptimisticQueueEntry(promptId, finalText, "prompt");
       this.turnProcess = "Working…";
       this.beginTurnStatus();
       this.post({ type: "busy", busy: true });
@@ -1370,7 +1482,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         await this.agent.ensureStarted();
         // Do not await end of turn — other in-flight prompts may still run.
         void this.agent
-          .sendPrompt(blocks, { promptId, queueText: text })
+          .sendPrompt(blocks, { promptId, queueText: finalText })
           .catch(async (err) => {
             await this.showStartError(err);
             this.pushSystem(errMessage(err));
@@ -1386,8 +1498,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.messages.push({
       type: "user",
       id: userId,
-      text,
+      text: finalText,
       chips: chips.map((c) => c.label),
+      images: msgImages,
       promptIndex: nextPromptIndex(this.messages),
     });
     this.shownPromptIds.add(promptId);
@@ -1402,13 +1515,162 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     try {
       await this.agent.ensureStarted();
-      await this.agent.sendPrompt(blocks, { promptId, queueText: text });
+      await this.agent.sendPrompt(blocks, {
+        promptId,
+        queueText: finalText,
+      });
     } catch (err) {
       this.currentAssistantId = undefined;
       this.post({ type: "busy", busy: false });
       await this.showStartError(err);
       this.pushSystem(errMessage(err));
     }
+  }
+
+  /** Open-file dialog attach (command palette). */
+  async attachImagesFromDialog(): Promise<void> {
+    const uris = await vscode.window.showOpenDialog({
+      canSelectMany: true,
+      openLabel: "Attach",
+      filters: {
+        Images: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif"],
+      },
+    });
+    if (!uris?.length) {
+      return;
+    }
+    await this.handleAttachImagePaths(
+      uris.map((u) => u.fsPath),
+      "dialog",
+    );
+  }
+
+  private webviewLocalRoots(): vscode.Uri[] {
+    return [
+      vscode.Uri.joinPath(this.extensionUri, "media"),
+      // Staging root so asWebviewUri can load image thumbs
+      vscode.Uri.file(this.imageStore.stagingRoot),
+    ];
+  }
+
+  private toMessageImages(images: AttachedImage[]): MessageImage[] {
+    return images.map((img) => ({
+      displayNumber: img.displayNumber,
+      mimeType: img.mimeType,
+      thumbUri: this.thumbUriForPath(img.stagedPath),
+      openPath: img.stagedPath,
+      width: img.width,
+      height: img.height,
+      fileName: img.fileName,
+    }));
+  }
+
+  private thumbUriForPath(fsPath: string): string | undefined {
+    const view = this.view ?? this.views.values().next().value;
+    if (!view) {
+      return undefined;
+    }
+    try {
+      return view.webview.asWebviewUri(vscode.Uri.file(fsPath)).toString();
+    } catch {
+      return undefined;
+    }
+  }
+
+  private postImageAttachments(): void {
+    // Extension UI uses image cards only — no TUI `[Image #N]` composer tokens.
+    const images = this.imageStore.getAll().map((img) => ({
+      id: img.id,
+      displayNumber: img.displayNumber,
+      mimeType: img.mimeType,
+      thumbUri: this.thumbUriForPath(img.stagedPath),
+      openPath: img.stagedPath,
+      width: img.width,
+      height: img.height,
+      fileName: img.fileName,
+      label: img.fileName || `Image ${img.displayNumber}`,
+    }));
+    this.post({
+      type: "imageAttachments",
+      images,
+      count: images.length,
+    });
+  }
+
+  private async handleAttachImageBytes(msg: {
+    dataBase64?: string;
+    mimeType?: string;
+    byteLength?: number;
+    fileName?: string;
+    source?: string;
+  }): Promise<void> {
+    if (!msg.dataBase64) {
+      return;
+    }
+    try {
+      const bytes = decodeBase64ToBytes(msg.dataBase64);
+      if (
+        typeof msg.byteLength === "number" &&
+        msg.byteLength > 0 &&
+        bytes.length !== msg.byteLength
+      ) {
+        // Prefer decoded length; webview may report original size.
+      }
+      const source =
+        msg.source === "drop"
+          ? "drop"
+          : msg.source === "dialog"
+            ? "dialog"
+            : "clipboard";
+      const img = await this.imageStore.attachBytes(bytes, {
+        source,
+        fileName: msg.fileName,
+        fromWebviewTransfer: true,
+      });
+      logInfo(
+        `image attached ${source} #${img.displayNumber} ${img.mimeType} ${img.byteLen}b`,
+      );
+      this.postImageAttachments();
+    } catch (err) {
+      this.pushSystem(
+        err instanceof AttachImageError ? err.message : errMessage(err),
+      );
+    }
+  }
+
+  private async handleAttachImagePaths(
+    paths: string[],
+    source: "path" | "dialog" | "drop",
+  ): Promise<void> {
+    let attached = 0;
+    for (const p of paths) {
+      if (!isAllowedImagePath(p)) {
+        continue;
+      }
+      try {
+        const img = await this.imageStore.attachFromPath(
+          p,
+          source === "dialog" ? "dialog" : source === "drop" ? "drop" : "path",
+        );
+        attached += 1;
+        logInfo(
+          `image attached ${source} #${img.displayNumber} ${img.fileName}`,
+        );
+        this.postImageAttachments();
+      } catch (err) {
+        this.pushSystem(
+          err instanceof AttachImageError ? err.message : errMessage(err),
+        );
+      }
+    }
+    if (attached === 0 && paths.length > 0) {
+      this.pushSystem("No supported images found to attach.");
+    }
+  }
+
+  private async handleRemoveImage(id: string): Promise<void> {
+    await this.imageStore.remove(id);
+    this.postImageAttachments();
   }
 
   /**
@@ -1681,6 +1943,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.sessionUsage = {};
         this.endTurnStatusClock();
         this.diffs?.clear();
+        await this.clearAllImages();
         this.scheduleMessagesPost(true);
         this.postTurnStatus();
       } catch (err) {
@@ -1688,6 +1951,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
       await this.pushFullState();
     });
+  }
+
+  private async clearAllImages(): Promise<void> {
+    await this.imageStore.clearComposerAttachments();
+    for (const p of this.historyImagePaths) {
+      try {
+        await vscode.workspace.fs.delete(vscode.Uri.file(p));
+      } catch {
+        /* ignore */
+      }
+    }
+    this.historyImagePaths.clear();
+    this.postImageAttachments();
   }
 
   private handleSessionUpdate(n: SessionNotification): void {
@@ -2012,6 +2288,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           id: m.id,
           text: m.text,
           chips: m.chips,
+          images: (m.images ?? []).map((img) => ({
+            ...img,
+            // Refresh webview URI each serialize (webview can re-resolve).
+            thumbUri:
+              img.openPath != null
+                ? (this.thumbUriForPath(img.openPath) ?? img.thumbUri)
+                : img.thumbUri,
+          })),
           promptIndex: m.promptIndex,
         };
       }
@@ -2224,6 +2508,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       modeLabel: modeButtonLabel(modeState.mode),
       modeCss: modeCssClass(modeState.mode),
       modeTitle: `Mode: ${modeLabel(modeState.mode)} — ${modeDescription(modeState.mode)} (Shift+Tab)`,
+      imageAttachments: this.imageStore.getAll().map((img) => ({
+        id: img.id,
+        displayNumber: img.displayNumber,
+        mimeType: img.mimeType,
+        thumbUri: this.thumbUriForPath(img.stagedPath),
+        openPath: img.stagedPath,
+        width: img.width,
+        height: img.height,
+        fileName: img.fileName,
+        label: img.fileName || `Image ${img.displayNumber}`,
+      })),
       stickyChips: this.stickyChips.map((c) => ({
         id: c.id,
         label: c.label,
@@ -2301,6 +2596,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       `default-src 'none'`,
       `style-src ${webview.cspSource}`,
       `font-src ${webview.cspSource}`,
+      `img-src ${webview.cspSource} data: blob:`,
       `script-src 'nonce-${nonce}' ${webview.cspSource}`,
     ].join("; ");
 
@@ -2321,6 +2617,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     <span class="bl-label" id="blocking-load-label">Loading…</span>
   </div>
 </div>
+<div id="drop-overlay" hidden aria-hidden="true">
+  <div class="drop-overlay-card">
+    <div class="drop-overlay-title">Drop images to attach</div>
+    <div class="drop-overlay-hint">Hold <kbd>Shift</kbd> while releasing · VS Code intercepts drops without Shift</div>
+  </div>
+</div>
+<div id="drop-toast" role="status" aria-live="polite" hidden></div>
 <div id="app">
   <header>
     <div class="brand">
@@ -2493,6 +2796,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         </span>
       </div>
       <div class="composer-shell">
+        <div id="image-previews" class="image-previews" hidden aria-label="Attached images"></div>
         <textarea id="composer" placeholder="Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)" rows="1"></textarea>
         <div class="actions">
           <button id="btn-mode" class="secondary mode-normal" type="button" title="Mode: Normal — Ask before running tools (Shift+Tab)" aria-label="Cycle session mode">

@@ -150,6 +150,12 @@
         "category": "Grok Build"
       },
       {
+        "command": "grok.attachImage",
+        "title": "Grok Build: Attach Image…",
+        "category": "Grok Build",
+        "icon": "$(file-media)"
+      },
+      {
         "command": "grok.clearApiKey",
         "title": "Grok Build: Clear API Key",
         "category": "Grok Build"

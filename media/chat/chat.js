@@ -2450,13 +2450,25 @@ function renderOneMessage(m, isNew) {
     wrap.classList.add("streaming");
   }
   if (m.type === "user") {
+    if (m.images && m.images.length) {
+      wrap.appendChild(renderMsgImages(m.images));
+    }
     if (m.chips && m.chips.length) {
       const chips = document.createElement("div");
       chips.className = "chips";
       chips.innerHTML = m.chips
-        .map(
-          (c) => '<span class="chip">' + icon(chipIcon(c)) + esc(c) + "</span>",
-        )
+        .map((c) => {
+          const label = String(c || "");
+          return (
+            '<span class="chip" title="' +
+            escAttr(label) +
+            '">' +
+            icon(chipIcon(label)) +
+            '<span class="chip-label">' +
+            esc(label) +
+            "</span></span>"
+          );
+        })
         .join("");
       wrap.appendChild(chips);
     }
@@ -2856,14 +2868,140 @@ function setBusy(b) {
   updateSendStopButton();
 }
 
+/** Composer image attachments (host-authoritative list for previews). */
+let imageAttachments = [];
+
+/** UI label for an attachment — never TUI `[Image #N]` chips (preview cards are enough). */
+function imageUiLabel(img) {
+  if (img && img.fileName) return String(img.fileName);
+  if (img && img.label && !/^\[Image #\d+\]$/.test(String(img.label))) {
+    return String(img.label);
+  }
+  const n = img && img.displayNumber != null ? img.displayNumber : "?";
+  return "Image " + n;
+}
+
+function renderMsgImages(images) {
+  const row = document.createElement("div");
+  row.className = "msg-images";
+  for (const img of images) {
+    const fig = document.createElement("figure");
+    fig.className = "msg-image";
+    const label = imageUiLabel(img);
+    if (img.thumbUri) {
+      const el = document.createElement("img");
+      el.src = img.thumbUri;
+      el.alt = label;
+      el.loading = "lazy";
+      if (img.openPath) {
+        el.style.cursor = "pointer";
+        el.addEventListener("click", () =>
+          vscode.postMessage({ type: "openImage", path: img.openPath }),
+        );
+      }
+      fig.appendChild(el);
+    }
+    const cap = document.createElement("figcaption");
+    cap.textContent = label;
+    cap.title = label; // full name on hover when truncated to 1 line
+    fig.appendChild(cap);
+    row.appendChild(fig);
+  }
+  return row;
+}
+
+function renderImagePreviews() {
+  const el = document.getElementById("image-previews");
+  if (!el) return;
+  if (!imageAttachments.length) {
+    el.hidden = true;
+    el.innerHTML = "";
+    return;
+  }
+  el.hidden = false;
+  // Compact thumbs above the textarea (no caption row — label via title).
+  el.innerHTML = imageAttachments
+    .map((img) => {
+      const label = imageUiLabel(img);
+      const title = escAttr(
+        [label, img.width && img.height ? img.width + "×" + img.height : ""]
+          .filter(Boolean)
+          .join(" · "),
+      );
+      const src = img.thumbUri ? ' src="' + escAttr(img.thumbUri) + '"' : "";
+      return (
+        '<figure class="image-card" data-image-id="' +
+        escAttr(img.id) +
+        '">' +
+        '<button type="button" class="image-card-open" data-open-path="' +
+        escAttr(img.openPath || "") +
+        '" title="' +
+        title +
+        '">' +
+        (src
+          ? '<img class="image-card-img"' +
+            src +
+            ' alt="' +
+            escAttr(label) +
+            '" />'
+          : '<span class="image-card-missing">' + esc(label) + "</span>") +
+        "</button>" +
+        '<button type="button" class="image-card-remove" data-image-id="' +
+        escAttr(img.id) +
+        '" title="Remove ' +
+        escAttr(label) +
+        '" aria-label="Remove ' +
+        escAttr(label) +
+        '">×</button>' +
+        "</figure>"
+      );
+    })
+    .join("");
+}
+
+function escAttr(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;");
+}
+
+/**
+ * Strip legacy TUI `[Image #N]` chips from composer text.
+ * Extension has visual image cards — tokens are redundant and confusing.
+ */
+function stripComposerImageTokens() {
+  const v = composer.value;
+  if (!/\[Image #\d+\]/.test(v)) return;
+  const start = composer.selectionStart;
+  const end = composer.selectionEnd;
+  const next = v.replace(/\s*\[Image #\d+\]/g, "").replace(/[ \t]{2,}/g, " ");
+  if (next === v) return;
+  composer.value = next;
+  const pos = Math.min(start, next.length);
+  const endPos = Math.min(end, next.length);
+  composer.selectionStart = pos;
+  composer.selectionEnd = endPos;
+  autosizeComposer();
+}
+
+function applyImageAttachments(msg) {
+  imageAttachments = msg.images || [];
+  // Never insert/renumber `[Image #N]` in the composer (UI cards only).
+  stripComposerImageTokens();
+  renderImagePreviews();
+  updateSendStopButton();
+}
+
 /**
  * Primary action button modes (no inject/send-now here — that lives on queue rows):
  * - idle + text → Send
  * - busy + empty → Stop
  * - busy + text → Queue
+ * - idle + images only → Send
  */
 function updateSendStopButton() {
-  const empty = !composer.value.trim();
+  const empty = !composer.value.trim() && imageAttachments.length === 0;
   const asStop = busy && empty && !cliMissing && !queueEditActive && !planOpen;
   const asQueue =
     busy &&
@@ -3077,9 +3215,11 @@ sendBtn.addEventListener("click", () => {
   if (trySubmitPendingEdit()) return;
   const text = composer.value.trim();
   // Allow send while busy: host queues a follow-up (TUI mid-turn Enter).
-  if (!text) return;
+  // Image-only send when attachments present.
+  if (!text && imageAttachments.length === 0) return;
   vscode.postMessage({ type: "send", text });
   composer.value = "";
+  // Host clears attachments via imageAttachments message after takeForSend.
   autosizeComposer();
   updateSendStopButton();
 });
@@ -3500,6 +3640,403 @@ if (queueEditCancelBtn) {
 autosizeComposer();
 updateSendStopButton();
 
+// ── Image paste + drop ──────────────────────────────────────────
+// Full-view overlay pattern (Dropzone/Gmail):
+//   1) document detects file drag → show a single full-screen overlay
+//   2) overlay is the only hit target (no nested children → no flicker)
+//   3) VS Code steals OS/explorer drops without Shift → toast hint
+// Refs: SO counter/overlay patterns; VS Code #182449 / discussions #2820
+
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i;
+const FILE_DRAG_TYPES = [
+  "Files",
+  "text/uri-list",
+  "application/vnd.code.uri-list",
+  "ResourceURLs",
+];
+const DROP_SHIFT_HINT =
+  "Drop was intercepted — hold Shift while dropping images into the chat";
+
+const dropOverlay = document.getElementById("drop-overlay");
+const dropToastEl = document.getElementById("drop-toast");
+
+function arrayBufferToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function looksLikeImageFile(file) {
+  if (!file) return false;
+  if (file.type && file.type.startsWith("image/")) return true;
+  return IMAGE_EXT_RE.test(file.name || "");
+}
+
+function mimeFromFileName(name) {
+  const m = String(name || "")
+    .toLowerCase()
+    .match(IMAGE_EXT_RE);
+  if (!m) return "image/png";
+  switch (m[1]) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "bmp":
+      return "image/bmp";
+    case "tif":
+    case "tiff":
+      return "image/tiff";
+    default:
+      return "image/png";
+  }
+}
+
+/** True when the drag payload may contain files / image paths. */
+function isFileDrag(dt) {
+  if (!dt || !dt.types) return false;
+  try {
+    const types = Array.from(dt.types);
+    if (FILE_DRAG_TYPES.some((t) => types.includes(t))) return true;
+    // Some VS Code / Electron builds only expose generic items mid-drag
+    return types.some(
+      (t) =>
+        /^image\//i.test(t) ||
+        /uri-list/i.test(t) ||
+        t === "Files" ||
+        t === "public.file-url",
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {File} file
+ * @param {"clipboard" | "drop"} source
+ */
+async function attachFileAsImage(file, source) {
+  if (!looksLikeImageFile(file)) return false;
+  try {
+    const buf = await file.arrayBuffer();
+    if (!buf || buf.byteLength === 0) return false;
+    vscode.postMessage({
+      type: "attachImageBytes",
+      mimeType: file.type || mimeFromFileName(file.name),
+      dataBase64: arrayBufferToBase64(buf),
+      byteLength: buf.byteLength,
+      fileName: file.name || "image.png",
+      source: source === "drop" ? "drop" : "clipboard",
+    });
+    return true;
+  } catch (err) {
+    console.warn("attachFileAsImage failed", err);
+    return false;
+  }
+}
+
+function pathsFromUriList(raw) {
+  if (!raw || !String(raw).trim()) return [];
+  const out = [];
+  for (const line of String(raw).split(/\r?\n/)) {
+    let t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    try {
+      if (t.startsWith("file:")) {
+        let p = decodeURIComponent(t.replace(/^file:\/\/(localhost)?/i, ""));
+        if (/^\/[A-Za-z]:\//.test(p)) p = p.slice(1);
+        out.push(p);
+      } else if (t.startsWith("vscode-file://")) {
+        let p = decodeURIComponent(t.replace(/^vscode-file:\/\/[^/]*/i, ""));
+        if (/^\/[A-Za-z]:\//.test(p)) p = p.slice(1);
+        out.push(p);
+      } else if (t.startsWith("vscode-resource:")) {
+        let p = decodeURIComponent(t.replace(/^vscode-resource:/i, ""));
+        if (p.startsWith("//file")) {
+          p = p.replace(/^\/\/file/, "");
+        }
+        if (/^\/[A-Za-z]:\//.test(p)) p = p.slice(1);
+        out.push(p);
+      } else if (
+        t.startsWith("/") ||
+        /^[A-Za-z]:[\\/]/.test(t) ||
+        t.startsWith("\\\\")
+      ) {
+        out.push(t);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return out.filter((p) => IMAGE_EXT_RE.test(p));
+}
+
+function collectDropPaths(dt) {
+  const keys = [
+    "text/uri-list",
+    "application/vnd.code.uri-list",
+    "ResourceURLs",
+    "text/plain",
+  ];
+  const paths = [];
+  for (const k of keys) {
+    try {
+      paths.push(...pathsFromUriList(dt.getData(k)));
+    } catch {
+      /* ignore */
+    }
+  }
+  return [...new Set(paths)];
+}
+
+/**
+ * Snapshot transfer data synchronously, then attach async.
+ * @param {DataTransfer | null} dt
+ * @returns {Promise<number>} number of images / paths queued
+ */
+async function handleImageDrop(dt) {
+  if (!dt) return 0;
+  // Sync snapshot first — DataTransfer can be cleared after the event returns.
+  const paths = collectDropPaths(dt);
+  const files = [];
+  if (dt.files && dt.files.length) {
+    for (let i = 0; i < dt.files.length; i++) {
+      const f = dt.files[i];
+      if (f) files.push(f);
+    }
+  } else if (dt.items && dt.items.length) {
+    for (let i = 0; i < dt.items.length; i++) {
+      if (dt.items[i].kind !== "file") continue;
+      const f = dt.items[i].getAsFile();
+      if (f) files.push(f);
+    }
+  }
+
+  if (paths.length) {
+    vscode.postMessage({ type: "attachImagePaths", paths });
+    return paths.length;
+  }
+  let n = 0;
+  for (const file of files) {
+    if (await attachFileAsImage(file, "drop")) n += 1;
+  }
+  return n;
+}
+
+// Clipboard paste
+composer.addEventListener(
+  "paste",
+  (e) => {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    let found = false;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.type && it.type.startsWith("image/")) {
+        found = true;
+        const file = it.getAsFile();
+        if (file) void attachFileAsImage(file, "clipboard");
+      }
+    }
+    if (found) {
+      e.preventDefault();
+      return;
+    }
+    const text = e.clipboardData.getData("text/plain") || "";
+    if (text.trim() && IMAGE_EXT_RE.test(text)) {
+      vscode.postMessage({ type: "attachImagePathsFromPaste", text });
+    }
+  },
+  true,
+);
+
+// ── Full-view overlay drop (single hit target) ──────────────────
+// Document only detects file drags and shows the overlay.
+// Overlay (no interactive children) owns leave/drop — no nested flicker.
+// VS Code steals OS/explorer drops unless Shift is held → toast on lost drop.
+
+let fileDragActive = false;
+let fileDropSucceeded = false;
+/** Drop event received; ignore trailing dragleave while we process. */
+let fileDropInFlight = false;
+let dropToastTimer = 0;
+let lastShiftToastAt = 0;
+
+function showDropToast(message) {
+  if (!dropToastEl) return;
+  const now = Date.now();
+  // Avoid spam if user drags in/out repeatedly.
+  if (now - lastShiftToastAt < 3500) return;
+  lastShiftToastAt = now;
+  dropToastEl.textContent = message;
+  dropToastEl.hidden = false;
+  if (dropToastTimer) clearTimeout(dropToastTimer);
+  dropToastTimer = window.setTimeout(() => {
+    dropToastEl.hidden = true;
+  }, 4500);
+  // Host notification as well (visible outside webview).
+  vscode.postMessage({ type: "dropShiftHint" });
+}
+
+function setDropOverlayVisible(visible) {
+  if (!dropOverlay) return;
+  if (visible) {
+    dropOverlay.hidden = false;
+    dropOverlay.setAttribute("aria-hidden", "false");
+    document.body.classList.add("is-drop-target");
+  } else {
+    dropOverlay.hidden = true;
+    dropOverlay.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("is-drop-target");
+  }
+}
+
+/**
+ * @param {{ suggestShift?: boolean }} [opts]
+ */
+function endFileDrag(opts) {
+  const wasActive = fileDragActive;
+  const succeeded = fileDropSucceeded;
+  fileDragActive = false;
+  fileDropSucceeded = false;
+  fileDropInFlight = false;
+  setDropOverlayVisible(false);
+  if (wasActive && !succeeded && opts && opts.suggestShift) {
+    showDropToast(DROP_SHIFT_HINT);
+  }
+}
+
+function beginFileDrag() {
+  if (fileDragActive) return;
+  fileDragActive = true;
+  fileDropSucceeded = false;
+  fileDropInFlight = false;
+  setDropOverlayVisible(true);
+}
+
+async function completeDrop(transfer) {
+  fileDropInFlight = true;
+  try {
+    const n = await handleImageDrop(transfer);
+    if (n > 0) {
+      fileDropSucceeded = true;
+      endFileDrag();
+    } else {
+      // Empty payload usually means VS Code intercepted without Shift.
+      endFileDrag({ suggestShift: true });
+    }
+  } catch (err) {
+    console.warn("completeDrop failed", err);
+    endFileDrag({ suggestShift: true });
+  }
+}
+
+function preventAndAllowDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+}
+
+// Document: detect external file drag and keep drop allowed.
+document.addEventListener(
+  "dragenter",
+  (e) => {
+    if (!isFileDrag(e.dataTransfer)) return;
+    preventAndAllowDrop(e);
+    beginFileDrag();
+  },
+  true,
+);
+
+document.addEventListener(
+  "dragover",
+  (e) => {
+    if (fileDragActive) {
+      // Keep drop allowed while overlay is up even if types flicker.
+      preventAndAllowDrop(e);
+      return;
+    }
+    if (!isFileDrag(e.dataTransfer)) return;
+    preventAndAllowDrop(e);
+    beginFileDrag();
+  },
+  true,
+);
+
+// Overlay owns leave/drop once visible (single full-screen hit target).
+if (dropOverlay) {
+  dropOverlay.addEventListener("dragenter", (e) => {
+    preventAndAllowDrop(e);
+  });
+
+  dropOverlay.addEventListener("dragover", (e) => {
+    preventAndAllowDrop(e);
+  });
+
+  dropOverlay.addEventListener("dragleave", (e) => {
+    if (fileDropInFlight) return;
+    // Ignore leave into the card label (pointer-events:none usually avoids this).
+    const related = e.relatedTarget;
+    if (related instanceof Node && dropOverlay.contains(related)) return;
+    // Leaving the overlay = pointer left the webview (or VS Code stole the drag).
+    endFileDrag({ suggestShift: true });
+  });
+
+  dropOverlay.addEventListener("drop", (e) => {
+    preventAndAllowDrop(e);
+    void completeDrop(e.dataTransfer);
+  });
+}
+
+// Fallback document drop if overlay missed the event.
+document.addEventListener(
+  "drop",
+  (e) => {
+    if (!fileDragActive && !isFileDrag(e.dataTransfer)) return;
+    // Overlay handler already ran for overlay-targeted drops.
+    if (dropOverlay && e.target === dropOverlay) return;
+    if (dropOverlay && dropOverlay.contains(/** @type {Node} */ (e.target)))
+      return;
+    preventAndAllowDrop(e);
+    void completeDrop(e.dataTransfer);
+  },
+  true,
+);
+
+// Esc / focus loss cancels drag without a drop event.
+window.addEventListener("blur", () => {
+  if (fileDragActive && !fileDropInFlight) endFileDrag({ suggestShift: true });
+});
+window.addEventListener("dragend", () => {
+  if (fileDragActive && !fileDropInFlight) endFileDrag({ suggestShift: true });
+});
+
+const imagePreviewsEl = document.getElementById("image-previews");
+if (imagePreviewsEl) {
+  imagePreviewsEl.addEventListener("click", (e) => {
+    const t = e.target;
+    if (!(t instanceof Element)) return;
+    const rem = t.closest(".image-card-remove");
+    if (rem) {
+      const id = rem.getAttribute("data-image-id");
+      if (id) vscode.postMessage({ type: "removeImage", id });
+      return;
+    }
+    const open = t.closest(".image-card-open");
+    if (open) {
+      const p = open.getAttribute("data-open-path");
+      if (p) vscode.postMessage({ type: "openImage", path: p });
+    }
+  });
+}
+
 window.addEventListener("message", (event) => {
   const msg = event.data;
   if (!msg || !msg.type) return;
@@ -3534,6 +4071,11 @@ window.addEventListener("message", (event) => {
     );
     // Always show empty install panel when CLI missing (even with leftover messages).
     emptyEl.hidden = msg.cliFound !== false && (msg.messages || []).length > 0;
+    if (msg.imageAttachments) {
+      applyImageAttachments({ images: msg.imageAttachments });
+    }
+  } else if (msg.type === "imageAttachments") {
+    applyImageAttachments(msg);
   } else if (msg.type === "messages") {
     renderMessages(msg.messages || []);
   } else if (msg.type === "queue") {

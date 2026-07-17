@@ -102,12 +102,12 @@ Optional `_meta` (from upstream docs):
 
 Prompt is an array of **content blocks**:
 
-| Block type      | Extension use                                              |
-| --------------- | ---------------------------------------------------------- |
-| `text`          | User message                                               |
-| `resource_link` | File paths, with optional editor `_meta` (selection, etc.) |
-| `resource`      | Embedded resource content when needed                      |
-| `image`         | Pasted / attached images (phase L2+)                       |
+| Block type      | Extension use                                                                                            |
+| --------------- | -------------------------------------------------------------------------------------------------------- |
+| `text`          | User message                                                                                             |
+| `resource_link` | File paths, with optional editor `_meta` (selection, etc.)                                               |
+| `resource`      | Embedded resource content when needed                                                                    |
+| `image`         | Pasted / dropped / Attach Image… (base64 + mimeType + optional uri + `_meta.xai.dev/imageDisplayNumber`) |
 
 Active editor context (recommended MVP shape):
 

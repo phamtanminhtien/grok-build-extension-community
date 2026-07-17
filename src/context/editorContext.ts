@@ -2,6 +2,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import type { ContentBlock } from "@agentclientprotocol/sdk";
 import { getSettings } from "../config/settings";
+import { loadImageBlocksFromDisk, type AttachedImage } from "./promptImages";
 
 export interface ContextChip {
   id: string;
@@ -113,17 +114,33 @@ export function getAutoAttachChip(
 }
 
 /**
- * Build ACP content blocks: user text + sticky chips + optional active editor.
+ * Build ACP content blocks: user text + images + sticky chips + optional editor.
+ * Order: text → image* → resource_link* (TUI text+images, then extension context).
+ *
+ * Extension UI shows image cards — do **not** inject TUI `[Image #N]` chips into
+ * the text block or transcript. Images travel as dedicated content blocks only.
  */
-export function buildPromptBlocks(
+export async function buildPromptBlocks(
   userText: string,
   options?: {
     includeEditorContext?: boolean;
     stickyChips?: ContextChip[];
+    images?: AttachedImage[];
   },
-): { blocks: ContentBlock[]; chips: ContextChip[] } {
+): Promise<{
+  blocks: ContentBlock[];
+  chips: ContextChip[];
+  text: string;
+  images: AttachedImage[];
+}> {
   const settings = getSettings();
-  const blocks: ContentBlock[] = [{ type: "text", text: userText }];
+  const images = options?.images ?? [];
+  // Keep user text as typed (no `[Image #N]` placeholders).
+  const text = userText;
+  const blocks: ContentBlock[] = [{ type: "text", text }];
+  if (images.length > 0) {
+    blocks.push(...(await loadImageBlocksFromDisk(images)));
+  }
   const chips: ContextChip[] = [];
   const seen = new Set<string>();
 
@@ -144,7 +161,7 @@ export function buildPromptBlocks(
   }
 
   if (options?.includeEditorContext === false) {
-    return { blocks, chips };
+    return { blocks, chips, text, images };
   }
 
   const auto = getAutoAttachChip(settings);
@@ -152,7 +169,7 @@ export function buildPromptBlocks(
     addChip(auto);
   }
 
-  return { blocks, chips };
+  return { blocks, chips, text, images };
 }
 
 export function chipToBlock(c: ContextChip): ContentBlock {
