@@ -1891,6 +1891,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   @keyframes ti-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) {
     .ti-spin { animation: none; }
+    .stream-shimmer .shimmer-line,
+    .thought.thought-running .thought-label,
+    .tool-row.tool-running.tool-latest .tool-title,
+    .tool-group.running.tool-latest .tool-group-label {
+      animation: none !important;
+    }
+    .thought.thought-running .thought-label {
+      background: none;
+      color: var(--fg);
+      -webkit-text-fill-color: unset;
+    }
+    .tool-row.tool-running.tool-latest .tool-title {
+      background: none;
+      color: var(--fg);
+      -webkit-text-fill-color: unset;
+    }
+    .tool-group.running.tool-latest .tool-group-label {
+      background: none;
+      color: var(--vscode-charts-blue, var(--link));
+      -webkit-text-fill-color: unset;
+    }
     button, .chip, .tool, #composer, header button.linkish {
       transition: none !important;
     }
@@ -2117,8 +2138,36 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     background: var(--bubble-asst);
     border-radius: var(--radius-md) var(--radius-md) var(--radius-md) var(--radius-xs);
   }
+  /* MD assistant: no bubble fill. Fenced pre + inline code use --code-bg only. */
+  .msg.assistant .bubble.md {
+    background: transparent;
+    padding: 2px 0;
+    border-radius: 0;
+  }
   .msg.assistant .bubble.md p { margin: 0 0 0.65em; }
-  .msg.assistant .bubble.md p:last-child { margin-bottom: 0; }
+  .msg.assistant .bubble.md > :last-child { margin-bottom: 0; }
+  /* Quote: left rule only — no fill on blockquote or its p (same bug as bubble tint). */
+  .msg.assistant .bubble.md blockquote {
+    margin: 0.55em 0;
+    padding: 0 0 0 12px;
+    border: none;
+    border-left: 3px solid var(--vscode-textBlockQuote-border, color-mix(in srgb, var(--muted) 45%, transparent));
+    background: transparent;
+    color: var(--muted);
+  }
+  .msg.assistant .bubble.md blockquote p {
+    background: transparent;
+    margin: 0 0 0.45em;
+  }
+  .msg.assistant .bubble.md blockquote p:last-child { margin-bottom: 0; }
+  /* --- rule: muted hairline (UA hr is too bright on dark themes). */
+  .msg.assistant .bubble.md hr {
+    border: none;
+    height: 1px;
+    margin: 0.85em 0;
+    background: color-mix(in srgb, var(--muted) 22%, transparent);
+    color: transparent;
+  }
   .msg.assistant .bubble.md pre {
     position: relative; background: var(--code-bg); padding: 12px 14px;
     border-radius: var(--radius-sm); overflow: auto; margin: 0.55em 0;
@@ -2127,6 +2176,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   .msg.assistant .bubble.md code {
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: 0.92em;
+  }
+  /* Fence body: no second fill on top of pre (avoids double line tint). */
+  .msg.assistant .bubble.md pre code {
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
   }
   .msg.assistant .bubble.md :not(pre) > code {
     background: var(--code-bg); padding: 0.15em 0.45em; border-radius: 6px;
@@ -2414,6 +2469,66 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   /* Thoughts inside the assistant timeline (not only at the top) */
   .assistant-timeline > .thought {
     margin-bottom: 2px;
+  }
+
+  /*
+   * Stream shimmer — skeleton lines while the live assistant has no
+   * visible content yet (waiting for first thought / tool / token).
+   */
+  .stream-shimmer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 6px 0 4px;
+    max-width: min(92%, 28em);
+    pointer-events: none;
+    user-select: none;
+  }
+  .stream-shimmer .shimmer-line {
+    height: 11px;
+    border-radius: 6px;
+    background: linear-gradient(
+      100deg,
+      color-mix(in srgb, var(--muted) 10%, transparent) 0%,
+      color-mix(in srgb, var(--muted) 10%, transparent) 35%,
+      color-mix(in srgb, var(--fg) 14%, transparent) 50%,
+      color-mix(in srgb, var(--muted) 10%, transparent) 65%,
+      color-mix(in srgb, var(--muted) 10%, transparent) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer-sweep 1.35s ease-in-out infinite;
+  }
+  .stream-shimmer .shimmer-line:nth-child(1) { width: 68%; }
+  .stream-shimmer .shimmer-line:nth-child(2) { width: 94%; }
+  .stream-shimmer .shimmer-line:nth-child(3) { width: 42%; animation-delay: 0.08s; }
+  @keyframes shimmer-sweep {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+  }
+  /*
+   * Live-stream text shimmer — Thinking… and the latest in-progress tool line
+   * (single tool-row or verb-group summary). Same sweep as skeleton.
+   */
+  .thought.thought-running .thought-label,
+  .tool-row.tool-running.tool-latest .tool-title,
+  .tool-group.running.tool-latest .tool-group-label {
+    background: linear-gradient(
+      100deg,
+      var(--muted) 0%,
+      var(--muted) 35%,
+      var(--fg) 50%,
+      var(--muted) 65%,
+      var(--muted) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    animation: shimmer-sweep 1.5s ease-in-out infinite;
+  }
+  .tool-row.tool-running.tool-latest .tool-title {
+    opacity: 1;
   }
 
   /* ── Empty state ── */
@@ -4159,10 +4274,67 @@ function fillTextBubble(b, text, html, _opts) {
   } else if (nextPlain) {
     b.textContent = nextPlain;
   } else {
-    // No placeholder — empty assistant waits silently (TUI turn-status / Thinking).
+    // Empty text segment — timeline-level shimmer covers the wait state.
     b.textContent = '';
   }
 }
+
+/** Skeleton shimmer while a live assistant has no timeline content yet. */
+function renderStreamShimmer() {
+  const el = document.createElement('div');
+  el.className = 'stream-shimmer';
+  el.setAttribute('aria-hidden', 'true');
+  el.innerHTML =
+    '<div class="shimmer-line"></div>' +
+    '<div class="shimmer-line"></div>' +
+    '<div class="shimmer-line"></div>';
+  return el;
+}
+
+/**
+ * Show/hide skeleton shimmer on a timeline based on busy + empty content.
+ * Keeps an existing shimmer node so the CSS animation does not restart.
+ */
+function ensureStreamShimmer(timeline, m) {
+  if (!timeline) return;
+  const empty = visibleGroupedTimeline(m).length === 0;
+  const existing = timeline.querySelector(':scope > .stream-shimmer');
+  if (busy && empty) {
+    // Drop any leftover content nodes; keep shimmer if already mounted.
+    Array.from(timeline.children).forEach((child) => {
+      if (!child.classList.contains('stream-shimmer')) child.remove();
+    });
+    if (!existing) timeline.appendChild(renderStreamShimmer());
+    return;
+  }
+  if (existing) existing.remove();
+}
+
+
+/**
+ * Only the latest running tool/group line gets shimmer (one live line, like Thinking…).
+ * Scans top-level timeline children first, then nested tool-rows inside groups.
+ */
+function markLatestRunningTool(timeline) {
+  if (!timeline) return;
+  timeline.querySelectorAll('.tool-latest').forEach((el) => {
+    el.classList.remove('tool-latest');
+  });
+  // Prefer the last top-level running tool or verb-group in stream order.
+  const top = Array.from(timeline.children).filter(
+    (el) =>
+      (el.classList.contains('tool-row') && el.classList.contains('tool-running')) ||
+      (el.classList.contains('tool-group') && el.classList.contains('running')),
+  );
+  if (top.length) {
+    top[top.length - 1].classList.add('tool-latest');
+    return;
+  }
+  // Fallback: last nested running tool-row (e.g. only members updated).
+  const nested = timeline.querySelectorAll('.tool-row.tool-running');
+  if (nested.length) nested[nested.length - 1].classList.add('tool-latest');
+}
+
 
 /** TUI ThinkingBlock header: Thinking… / Thought for Xs / Thought */
 function thoughtHeaderLabel(t) {
@@ -4216,7 +4388,8 @@ function renderThoughtRow(t, forceOpen) {
 
 function renderToolRow(t, open) {
   const d = document.createElement('details');
-  d.className = 'tool-row';
+  const running = isToolStatusRunning(t && t.status);
+  d.className = 'tool-row' + (running ? ' tool-running' : '');
   d.dataset.toolId = t.id || '';
   d.dataset.streamKey =
     (t.status || '') +
@@ -4442,13 +4615,15 @@ function timelineNodeSig(node) {
 }
 
 function domTimelineSig(timeline) {
-  return Array.from(timeline.children).map((el) => {
-    if (el.classList.contains('bubble')) return 't';
-    if (el.classList.contains('tool-row')) return 'tool:' + (el.dataset.toolId || '');
-    if (el.classList.contains('tool-group')) return 'tg:' + (el.dataset.groupId || '');
-    if (el.classList.contains('thought')) return 'th:' + (el.dataset.thoughtId || '');
-    return '?';
-  }).join('|');
+  return Array.from(timeline.children)
+    .filter((el) => !el.classList.contains('stream-shimmer'))
+    .map((el) => {
+      if (el.classList.contains('bubble')) return 't';
+      if (el.classList.contains('tool-row')) return 'tool:' + (el.dataset.toolId || '');
+      if (el.classList.contains('tool-group')) return 'tg:' + (el.dataset.groupId || '');
+      if (el.classList.contains('thought')) return 'th:' + (el.dataset.thoughtId || '');
+      return '?';
+    }).join('|');
 }
 
 function nodesTimelineSig(nodes) {
@@ -4532,10 +4707,13 @@ function renderTimelineNode(node, openToolIds, openThoughtIds, openGroupIds, str
 function patchTimelineInPlace(timeline, m, openToolIds, openThoughtIds, openGroupIds) {
   const nodes = visibleGroupedTimeline(m);
   if (nodesTimelineSig(nodes) !== domTimelineSig(timeline)) return false;
+  const contentChildren = Array.from(timeline.children).filter(
+    (el) => !el.classList.contains('stream-shimmer'),
+  );
 
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
-    const el = timeline.children[i];
+    const el = contentChildren[i];
     if (!el) return false;
     if (node.type === 'text' && node.item) {
       // Only the live tail text node streams per-character.
@@ -4589,6 +4767,7 @@ function patchTimelineInPlace(timeline, m, openToolIds, openThoughtIds, openGrou
     }
   }
   timeline.classList.add('stream-settled');
+  markLatestRunningTool(timeline);
   return true;
 }
 
@@ -4604,6 +4783,9 @@ function renderAssistantTimeline(m, openToolIds, openThoughtIds, openGroupIds) {
     );
     if (el) timeline.appendChild(el);
   }
+  // Waiting for first token / thought / tool — skeleton shimmer.
+  ensureStreamShimmer(timeline, m);
+  markLatestRunningTool(timeline);
   // After first frame, only newly appended blocks (class tl-new) animate.
   requestAnimationFrame(() => timeline.classList.add('stream-settled'));
   return timeline;
@@ -4616,7 +4798,11 @@ function renderAssistantTimeline(m, openToolIds, openThoughtIds, openGroupIds) {
  */
 function appendTimelineDelta(timeline, m, openToolIds, openThoughtIds, openGroupIds) {
   const nodes = visibleGroupedTimeline(m);
-  const domCount = timeline.children.length;
+  // Ignore shimmer placeholder when measuring existing DOM length / signature.
+  const contentChildren = Array.from(timeline.children).filter(
+    (el) => !el.classList.contains('stream-shimmer'),
+  );
+  const domCount = contentChildren.length;
   if (domCount === 0 || nodes.length <= domCount) return false;
   const prefixNodes = nodes.slice(0, domCount);
   if (nodesTimelineSig(prefixNodes) !== domTimelineSig(timeline)) return false;
@@ -4624,7 +4810,7 @@ function appendTimelineDelta(timeline, m, openToolIds, openThoughtIds, openGroup
   // Patch prefix content without requiring full-list signature match.
   for (let i = 0; i < prefixNodes.length; i++) {
     const node = prefixNodes[i];
-    const el = timeline.children[i];
+    const el = contentChildren[i];
     if (!el) return false;
     if (node.type === 'text' && node.item) {
       // Prefix nodes are never the growing tail when we append after them.
@@ -4670,6 +4856,8 @@ function appendTimelineDelta(timeline, m, openToolIds, openThoughtIds, openGroup
       el.open = forceOpen;
     }
   }
+  // Drop shimmer before appending real content so it never sits under nodes.
+  timeline.querySelectorAll(':scope > .stream-shimmer').forEach((el) => el.remove());
   for (let i = domCount; i < nodes.length; i++) {
     const streamText = busy && i === nodes.length - 1 && nodes[i].type === 'text';
     const el = renderTimelineNode(
@@ -4680,6 +4868,7 @@ function appendTimelineDelta(timeline, m, openToolIds, openThoughtIds, openGroup
     timeline.appendChild(el);
   }
   timeline.classList.add('stream-settled');
+  markLatestRunningTool(timeline);
   return true;
 }
 
@@ -5174,6 +5363,14 @@ function patchLastAssistant(m) {
 
   const oldTimeline = wrap.querySelector(':scope > .assistant-timeline');
   if (oldTimeline) {
+    // Empty live assistant → shimmer only (avoid thrashing rebuilds).
+    if (visibleGroupedTimeline(m).length === 0) {
+      ensureStreamShimmer(oldTimeline, m);
+      markLatestRunningTool(oldTimeline);
+      return true;
+    }
+    // Real content arriving — drop shimmer, then patch/append/rebuild.
+    oldTimeline.querySelectorAll(':scope > .stream-shimmer').forEach((el) => el.remove());
     if (patchTimelineInPlace(oldTimeline, m, openToolIds, openThoughtIds, openGroupIds)) {
       return true;
     }
@@ -5363,9 +5560,19 @@ function setBusy(b) {
   if (b) {
     const nodes = messagesEl.querySelectorAll('.msg.assistant');
     const last = nodes.length ? nodes[nodes.length - 1] : null;
-    if (last) last.classList.add('streaming');
+    if (last) {
+      last.classList.add('streaming');
+      // If the optimistic empty assistant is already mounted, show shimmer.
+      const lastMsg =
+        allMessages.length > 0 ? allMessages[allMessages.length - 1] : null;
+      if (lastMsg && lastMsg.type === 'assistant') {
+        const tl = last.querySelector(':scope > .assistant-timeline');
+        if (tl) ensureStreamShimmer(tl, lastMsg);
+      }
+    }
   } else if (wasBusy) {
-    // Turn ended: re-render tail so plain stream chars become full markdown.
+    // Turn ended: drop any leftover shimmer + re-render tail to full markdown.
+    messagesEl.querySelectorAll('.stream-shimmer').forEach((el) => el.remove());
     const lastMsg =
       allMessages.length > 0 ? allMessages[allMessages.length - 1] : null;
     if (lastMsg && lastMsg.type === 'assistant') {
