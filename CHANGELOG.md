@@ -2,6 +2,19 @@
 
 All notable changes to **Grok Build - Community** are documented in this file.
 
+## [0.3.5](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.4...v0.3.5) (2026-07-17)
+
+
+### Features
+
+* add Fix with Grok from diagnostics hover and Quick Fix ([b85a535](https://github.com/phamtanminhtien/grok-build-extension-community/commit/b85a53556a5f22a2e180030a32b71e38cc490d8c))
+* attach images in chat via paste, drop, and dialog ([3330397](https://github.com/phamtanminhtien/grok-build-extension-community/commit/33303975277391c6edf591e462ae6c8bab463bcc))
+* Enhance authentication flow and subscription management ([c7c5370](https://github.com/phamtanminhtien/grok-build-extension-community/commit/c7c53702063ac74a4c551022f7239ecbbfcb91f5))
+* icon-only copy button on markdown code blocks ([013ac61](https://github.com/phamtanminhtien/grok-build-extension-community/commit/013ac614ba2e5f776fae53c26e5f3b5136efc719))
+* plan approval UI, session_notification banners, session admin ([c6f281b](https://github.com/phamtanminhtien/grok-build-extension-community/commit/c6f281bd3cc28b2b8b70384b6f91825d939922ea))
+* sync permission mode and model defaults with CLI config.toml ([6395f8f](https://github.com/phamtanminhtien/grok-build-extension-community/commit/6395f8fa85e1ebc792833193a51a388df64823fd))
+* update chat command icons and add editor title integration ([02097b5](https://github.com/phamtanminhtien/grok-build-extension-community/commit/02097b5eb5af22e19737b49c43bef334214af2b5))
+
 ## [0.3.4](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.3...v0.3.4) (2026-07-17)
 
 
