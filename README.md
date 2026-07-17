@@ -3,19 +3,26 @@
 Community VS Code host for **Grok Build**: a thin TypeScript client
 that speaks **ACP** to `grok agent stdio`. The agent runtime stays in Rust.
 
-| Phase | Status |
-|-------|--------|
-| Design docs | Done (`docs/`) |
-| L0 — Protocol wire-up | Done |
-| L1 — MVP chat | Done |
-| L2 — IDE-native polish | Implemented |
-| L3 — Depth & productization | Not started |
+| Phase                       | Status         |
+| --------------------------- | -------------- |
+| Design docs                 | Done (`docs/`) |
+| L0 — Protocol wire-up       | Done           |
+| L1 — MVP chat               | Done           |
+| L2 — IDE-native polish      | Implemented    |
+| L3 — Depth & productization | Not started    |
 
 > Do not reimplement the agent. Spawn `grok agent stdio`, speak ACP, map VS Code primitives.
 
 ---
 
 ## Install (users)
+
+| Store                              | Link                                                                                                                               |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| **VS Code Marketplace**            | [tienpham.grok-build-community-edition](https://marketplace.visualstudio.com/items?itemName=tienpham.grok-build-community-edition) |
+| **Open VSX** (Cursor, VSCodium, …) | [tienpham/grok-build-community-edition](https://open-vsx.org/extension/tienpham/grok-build-community-edition)                      |
+
+Or in the editor: Extensions → search **“Grok Build Community Edition”** (publisher `tienpham`).
 
 ### Prerequisites
 
@@ -36,10 +43,6 @@ yarn package   # → grok-build-community-edition-0.3.1.vsix
 
 Then in VS Code: **Extensions → ⋯ → Install from VSIX…** and pick the `.vsix`.
 
-### From Marketplace (when published)
-
-Search **“Grok Build Community Edition”** (publisher id: `tienpham`) and install.
-
 ### First run
 
 1. Open a **trusted** workspace (Workspace Trust is required to start the agent)
@@ -53,12 +56,12 @@ The extension host runs **on the remote**. Install `grok` **on the remote**, not
 
 ### Troubleshooting
 
-| Symptom | What to try |
-|---------|-------------|
-| Binary not found | Install CLI; set `grok.binaryPath`; check Output → **Grok Build** |
-| Workspace not trusted | Command Palette → **Manage Workspace Trust** |
-| Auth / 401 | **Grok Build: Login** or **Set API Key**; or `grok login` in a terminal |
-| Stuck / hung agent | **Grok Build: Restart Agent** |
+| Symptom               | What to try                                                             |
+| --------------------- | ----------------------------------------------------------------------- |
+| Binary not found      | Install CLI; set `grok.binaryPath`; check Output → **Grok Build**       |
+| Workspace not trusted | Command Palette → **Manage Workspace Trust**                            |
+| Auth / 401            | **Grok Build: Login** or **Set API Key**; or `grok login` in a terminal |
+| Stuck / hung agent    | **Grok Build: Restart Agent**                                           |
 
 ---
 
@@ -80,10 +83,10 @@ yarn smoke:cli   # requires `grok` on PATH
 
 ### Extension Development Host
 
-1. Open this folder in VS Code / Cursor  
-2. Press **F5** (Run Extension)  
-3. **Activity Bar** (left) and/or **Secondary Side Bar** (right, VS Code ≥ 1.106)  
-4. Send a prompt  
+1. Open this folder in VS Code / Cursor
+2. Press **F5** (Run Extension)
+3. **Activity Bar** (left) and/or **Secondary Side Bar** (right, VS Code ≥ 1.106)
+4. Send a prompt
 
 Full checklist: `docs/L0-manual-test.md`
 
@@ -111,51 +114,51 @@ Use commit prefixes: `feat:`, `fix:`, `feat!:` / `BREAKING CHANGE:`.
 
 **Secrets** (repo → Settings → Secrets → Actions):
 
-| Secret | Purpose |
-|--------|---------|
+| Secret     | Purpose                                                                                                     |
+| ---------- | ----------------------------------------------------------------------------------------------------------- |
 | `OVSX_PAT` | Token from [open-vsx.org/user-settings/tokens](https://open-vsx.org/user-settings/tokens) (published first) |
-| `VSCE_PAT` | Azure DevOps PAT with **Marketplace** (Acquire + Publish) for publisher `tienpham` |
+| `VSCE_PAT` | Azure DevOps PAT with **Marketplace** (Acquire + Publish) for publisher `tienpham`                          |
 
 ---
 
 ## Commands
 
-| Command | Action |
-|---------|--------|
-| `Grok Build: Open Chat` | Focus sidebar chat |
-| `Grok Build: Open Output` | Show Output channel `Grok Build` |
-| `Grok Build: Start Agent` | Spawn → `initialize` → `session/new` |
-| `Grok Build: New Session` | New ACP session + clear UI |
-| `Grok Build: Cancel Turn` | `session/cancel` |
-| `Grok Build: Add Context…` | `@` sticky context picker |
-| `Grok Build: Select Model` | QuickPick → `grok.model` + agent restart |
-| `Grok Build: Resume Session…` | Session history + `session/load` when available |
-| `Grok Build: Review Edits…` | Multi-file diff review |
-| `Grok Build: Login / Set API Key` | Browser login or SecretStorage API key |
-| `Grok Build: Smoke Test (L0)` | Headless-style prompt via agent |
-| `Grok Build: Restart / Stop Agent` | Process lifecycle |
+| Command                            | Action                                          |
+| ---------------------------------- | ----------------------------------------------- |
+| `Grok Build: Open Chat`            | Focus sidebar chat                              |
+| `Grok Build: Open Output`          | Show Output channel `Grok Build`                |
+| `Grok Build: Start Agent`          | Spawn → `initialize` → `session/new`            |
+| `Grok Build: New Session`          | New ACP session + clear UI                      |
+| `Grok Build: Cancel Turn`          | `session/cancel`                                |
+| `Grok Build: Add Context…`         | `@` sticky context picker                       |
+| `Grok Build: Select Model`         | QuickPick → `grok.model` + agent restart        |
+| `Grok Build: Resume Session…`      | Session history + `session/load` when available |
+| `Grok Build: Review Edits…`        | Multi-file diff review                          |
+| `Grok Build: Login / Set API Key`  | Browser login or SecretStorage API key          |
+| `Grok Build: Smoke Test (L0)`      | Headless-style prompt via agent                 |
+| `Grok Build: Restart / Stop Agent` | Process lifecycle                               |
 
 ### Slash commands (chat composer)
 
 Type `/` in the chat (same names as Grok Build TUI):
 
-| Layer | Examples | Behavior |
-|-------|----------|----------|
-| **Host** | `/new`, `/resume`, `/model`, `/help`, `/settings`, `/copy`, `/export`, `/always-approve`, `/login`… | Run in the extension |
-| **Agent** | `/compact`, `/loop`, `/plan`, skills, hooks/plugins… | Pass-through as prompt |
-| **TUI-only** | `/vim-mode`, `/theme`, `/dashboard`, `/minimal`… | Listed for parity; not available in VS Code |
+| Layer        | Examples                                                                                            | Behavior                                    |
+| ------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| **Host**     | `/new`, `/resume`, `/model`, `/help`, `/settings`, `/copy`, `/export`, `/always-approve`, `/login`… | Run in the extension                        |
+| **Agent**    | `/compact`, `/loop`, `/plan`, skills, hooks/plugins…                                                | Pass-through as prompt                      |
+| **TUI-only** | `/vim-mode`, `/theme`, `/dashboard`, `/minimal`…                                                    | Listed for parity; not available in VS Code |
 
 ---
 
 ## Settings
 
-| Setting | Description |
-|---------|-------------|
-| `grok.binaryPath` | Absolute path to `grok` (empty = PATH / `~/.grok/bin`) |
-| `grok.model` | Optional `--model` |
-| `grok.alwaysApprove` | Pass `--always-approve` (dangerous; confirm on enable) |
-| `grok.cwd` | Session cwd (empty = first workspace folder) |
-| `grok.initializeTimeoutMs` | Spawn/init timeout (default 30s) |
+| Setting                    | Description                                            |
+| -------------------------- | ------------------------------------------------------ |
+| `grok.binaryPath`          | Absolute path to `grok` (empty = PATH / `~/.grok/bin`) |
+| `grok.model`               | Optional `--model`                                     |
+| `grok.alwaysApprove`       | Pass `--always-approve` (dangerous; confirm on enable) |
+| `grok.cwd`                 | Session cwd (empty = first workspace folder)           |
+| `grok.initializeTimeoutMs` | Spawn/init timeout (default 30s)                       |
 
 ---
 
@@ -188,14 +191,14 @@ Chat UI uses **[@tabler/icons-webfont](https://tabler.io/icons)** (`yarn build` 
 
 Start here: `docs/README.md` (design docs in the repo; not shipped inside the VSIX).
 
-| Doc | Topic |
-|-----|--------|
-| `docs/01-overview.md` | Goals / non-goals |
-| `docs/02-architecture.md` | Process model & modules |
-| `docs/03-acp-integration.md` | Protocol integration |
-| `docs/08-security.md` | Trust, permissions, secrets |
-| `docs/09-roadmap.md` | L0–L3 phases |
-| `CHANGELOG.md` | Release notes |
+| Doc                          | Topic                       |
+| ---------------------------- | --------------------------- |
+| `docs/01-overview.md`        | Goals / non-goals           |
+| `docs/02-architecture.md`    | Process model & modules     |
+| `docs/03-acp-integration.md` | Protocol integration        |
+| `docs/08-security.md`        | Trust, permissions, secrets |
+| `docs/09-roadmap.md`         | L0–L3 phases                |
+| `CHANGELOG.md`               | Release notes               |
 
 ## License
 
