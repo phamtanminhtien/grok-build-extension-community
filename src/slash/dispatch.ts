@@ -48,6 +48,11 @@ export interface DispatchDeps {
   /** Optional host wrappers (loading indicator, system lines). */
   startAgent?: () => Promise<void>;
   restartAgent?: () => Promise<void>;
+  /**
+   * Centered chat loading overlay for long host ops (`/compact`, etc.).
+   * Same UX as start / new session blocking load.
+   */
+  withHostLoading?: <T>(message: string, fn: () => Promise<T>) => Promise<T>;
   /** Session/load history replay (TUI `/resume` parity) for `/fork`. */
   beginHistoryLoad?: (sessionId?: string, title?: string) => void;
   endHistoryLoad?: () => void;
@@ -356,10 +361,15 @@ async function runHostAction(
     case "compact": {
       await deps.agent.ensureStarted();
       const ctx = inv.args.trim();
-      await deps.agent.compactConversation(ctx || undefined);
-      return ctx
-        ? `Compaction requested (preserve: ${ctx})`
-        : "Compaction requested";
+      const run = () => deps.agent.compactConversation(ctx || undefined);
+      if (deps.withHostLoading) {
+        await deps.withHostLoading("Compacting conversation…", run);
+      } else {
+        await run();
+      }
+      // Success banner comes from agent `auto_compact_completed` (+ host started).
+      // Avoid a redundant "Compaction requested" system line after the await.
+      return undefined;
     }
     case "rename": {
       const title = inv.args.trim();

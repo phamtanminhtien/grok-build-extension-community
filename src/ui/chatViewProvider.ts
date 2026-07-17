@@ -1602,6 +1602,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         restartAgent: async () => {
           await this.runRestartAgent();
         },
+        withHostLoading: (message, fn) => this.withBlockingLoad(message, fn),
         beginHistoryLoad: (sessionId, title) => {
           this.beginHistoryLoad(sessionId, title);
         },

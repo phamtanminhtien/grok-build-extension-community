@@ -1380,6 +1380,11 @@ export class AgentService implements vscode.Disposable {
   /**
    * On-demand compact — `x.ai/compact_conversation` (TUI `/compact`).
    * Optional `userContext` preserves specific details during summarization.
+   *
+   * Manual compact does not emit `auto_compact_started` from the agent (only
+   * `auto_compact_completed` on success), so the host surfaces immediate
+   * loading feedback: a started banner + VS Code progress notification.
+   * Chat also wraps this with a blocking-load overlay via slash dispatch.
    */
   async compactConversation(userContext?: string): Promise<void> {
     const sessionId = this.requireSessionId();
@@ -1387,13 +1392,37 @@ export class AgentService implements vscode.Disposable {
     logInfo(
       `compact_conversation session=${sessionId} context=${params.userContext ? "yes" : "no"}`,
     );
-    const raw = await this.requestExt(
-      "x.ai/compact_conversation",
-      compactRequestBody(params),
+
+    // Immediate banner — shell only notifies on completion for manual compact.
+    this._onXaiSessionEvent.fire({
+      sessionId,
+      events: [
+        {
+          kind: "auto_compact",
+          phase: "started",
+          message: "Compacting conversation…",
+        },
+      ],
+    });
+
+    // Errors surface via slash dispatch / caller; avoid a second failed banner.
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "Grok Build",
+        cancellable: false,
+      },
+      async (progress) => {
+        progress.report({ message: "Compacting conversation…" });
+        const raw = await this.requestExt(
+          "x.ai/compact_conversation",
+          compactRequestBody(params),
+        );
+        if (!parseSuccessFlag(raw)) {
+          throw new Error("Compaction failed");
+        }
+      },
     );
-    if (!parseSuccessFlag(raw)) {
-      throw new Error("Compaction failed");
-    }
   }
 
   /**
