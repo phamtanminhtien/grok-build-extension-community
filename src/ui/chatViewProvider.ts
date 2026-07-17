@@ -1114,6 +1114,50 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       case "reviewEdits":
         await this.diffs?.pickAndOpen();
         break;
+      case "acceptAllEdits": {
+        if (!this.diffs || this.diffs.getEntries().length === 0) {
+          void vscode.window.showInformationMessage("No Grok edits to accept");
+          break;
+        }
+        try {
+          const n = this.diffs.getEntries().length;
+          await this.diffs.acceptAll();
+          void vscode.window.showInformationMessage(
+            n === 1 ? "Accepted 1 Grok edit" : `Accepted ${n} Grok edits`,
+          );
+        } catch (err) {
+          void vscode.window.showErrorMessage(
+            `Accept failed: ${errMessage(err)}`,
+          );
+        }
+        break;
+      }
+      case "rejectAllEdits": {
+        if (!this.diffs || this.diffs.getEntries().length === 0) {
+          void vscode.window.showInformationMessage("No Grok edits to reject");
+          break;
+        }
+        const n = this.diffs.getEntries().length;
+        const choice = await vscode.window.showWarningMessage(
+          `Reject all ${n} Grok edit(s)? Disk files will be reverted.`,
+          { modal: true },
+          "Reject all",
+        );
+        if (choice !== "Reject all") {
+          break;
+        }
+        try {
+          await this.diffs.rejectAll();
+          void vscode.window.showInformationMessage(
+            n === 1 ? "Rejected 1 Grok edit" : `Rejected ${n} Grok edits`,
+          );
+        } catch (err) {
+          void vscode.window.showErrorMessage(
+            `Reject failed: ${errMessage(err)}`,
+          );
+        }
+        break;
+      }
       case "login": {
         const status = await this.auth.getStatus();
         const choice = await pickLoginMethod(status);
@@ -2957,7 +3001,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   <div id="review-bar">
     <i class="ti ti-file-diff" aria-hidden="true"></i>
     <span id="review-label">Review edits</span>
-    <button type="button" class="secondary" id="btn-review">Open</button>
+    <div class="review-actions">
+      <button type="button" class="secondary" id="btn-review">Open</button>
+      <button type="button" class="secondary review-accept" id="btn-review-accept" title="Accept all edits (update agent baselines)">Accept</button>
+      <button type="button" class="secondary review-reject" id="btn-review-reject" title="Reject all edits (revert disk)">Reject</button>
+    </div>
   </div>
   <div id="messages"></div>
   <section id="plan-panel" hidden role="region" aria-label="Plan approval">

@@ -296,11 +296,32 @@ header button.linkish:focus-visible {
 #review-bar.visible {
   display: flex;
 }
-#review-bar #btn-review {
+#review-bar .review-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#review-bar .review-actions button {
   padding: 4px 12px;
   font-size: 11px;
   min-height: 26px;
+}
+#review-bar .review-accept {
+  color: var(--vscode-testing-iconPassed, #3fb950);
+  border-color: color-mix(
+    in srgb,
+    var(--vscode-testing-iconPassed, #3fb950) 35%,
+    transparent
+  );
+}
+#review-bar .review-reject {
+  color: var(--vscode-testing-iconFailed, #f85149);
+  border-color: color-mix(
+    in srgb,
+    var(--vscode-testing-iconFailed, #f85149) 35%,
+    transparent
+  );
 }
 
 /* ── Messages ── */

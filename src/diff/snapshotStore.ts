@@ -27,6 +27,11 @@ export class SnapshotStore {
     return this.map.has(this.normalizePath(path));
   }
 
+  /** Drop a single path baseline (e.g. after accept/reject). */
+  delete(path: string): boolean {
+    return this.map.delete(this.normalizePath(path));
+  }
+
   clear(): void {
     this.map.clear();
   }

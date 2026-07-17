@@ -20,4 +20,13 @@ describe("SnapshotStore", () => {
     s.capture("/f", "0123456789ABCDEF");
     assert.equal(s.get("/f"), "0123456789");
   });
+
+  it("deletes a single path", () => {
+    const s = new SnapshotStore();
+    s.capture("/a.ts", "a");
+    s.capture("/b.ts", "b");
+    assert.equal(s.delete("/a.ts"), true);
+    assert.equal(s.has("/a.ts"), false);
+    assert.equal(s.get("/b.ts"), "b");
+  });
 });

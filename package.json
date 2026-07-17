@@ -202,6 +202,18 @@
         "icon": "$(diff)"
       },
       {
+        "command": "grok.acceptAllEdits",
+        "title": "Grok Build: Accept All Edits",
+        "category": "Grok Build",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "grok.rejectAllEdits",
+        "title": "Grok Build: Reject All Edits",
+        "category": "Grok Build",
+        "icon": "$(discard)"
+      },
+      {
         "command": "grok.openExtensions",
         "title": "Grok Build: Extensions…",
         "category": "Grok Build",

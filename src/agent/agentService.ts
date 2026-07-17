@@ -73,6 +73,20 @@ import {
   sortSessionsNewestFirst,
   type GrokSession,
 } from "../session/grokSession";
+import {
+  HUNK_TRACKER_METHODS,
+  allActionParams,
+  fileActionParams,
+  getFilesParams,
+  getHunksParams,
+  hunkActionParams,
+  parseGetFilesResponse,
+  parseHunkActionResponse,
+  turnActionParams,
+  type HunkActionKind,
+  type HunkActionResult,
+  type HunkFileSummary,
+} from "../diff/hunkTracker";
 import { toAcpExtWireMethod } from "./acpExtMethod";
 import { buildInitializeClientCapabilities } from "./clientCapabilities";
 import { BinaryNotFoundError } from "./binaryResolver";
@@ -1417,6 +1431,87 @@ export class AgentService implements vscode.Disposable {
       throw new Error("Fork failed: invalid agent response");
     }
     return result;
+  }
+
+  // ── Hunk tracker (x.ai/hunk-tracker/*) ─────────────────────────────
+
+  /** List tracked files with hunk counts (`get-files`). */
+  async hunkTrackerGetFiles(): Promise<HunkFileSummary[]> {
+    const sessionId = this.requireSessionId();
+    const raw = await this.requestExt(
+      HUNK_TRACKER_METHODS.getFiles,
+      getFilesParams(sessionId),
+    );
+    return parseGetFilesResponse(raw);
+  }
+
+  /** Hunks for the session or a single path (`get-hunks`). */
+  async hunkTrackerGetHunks(opts?: {
+    path?: string;
+    source?: "agent" | "external" | "all";
+  }): Promise<unknown> {
+    const sessionId = this.requireSessionId();
+    return this.requestExt(
+      HUNK_TRACKER_METHODS.getHunks,
+      getHunksParams(sessionId, opts),
+    );
+  }
+
+  /** Accept or reject one hunk by id. */
+  async hunkTrackerHunkAction(
+    hunkId: string,
+    action: HunkActionKind,
+  ): Promise<HunkActionResult> {
+    const sessionId = this.requireSessionId();
+    logInfo(`hunk-tracker/hunk-action id=${hunkId} action=${action}`);
+    const raw = await this.requestExt(
+      HUNK_TRACKER_METHODS.hunkAction,
+      hunkActionParams(sessionId, hunkId, action),
+    );
+    return parseHunkActionResponse(raw);
+  }
+
+  /** Accept or reject all hunks for a file path. */
+  async hunkTrackerFileAction(
+    path: string,
+    action: HunkActionKind,
+  ): Promise<HunkActionResult> {
+    const sessionId = this.requireSessionId();
+    logInfo(`hunk-tracker/file-action path=${path} action=${action}`);
+    const raw = await this.requestExt(
+      HUNK_TRACKER_METHODS.fileAction,
+      fileActionParams(sessionId, path, action),
+    );
+    return parseHunkActionResponse(raw);
+  }
+
+  /** Accept or reject all hunks for a prompt turn. */
+  async hunkTrackerTurnAction(
+    promptIndex: number,
+    action: HunkActionKind,
+  ): Promise<HunkActionResult> {
+    const sessionId = this.requireSessionId();
+    logInfo(
+      `hunk-tracker/turn-action promptIndex=${promptIndex} action=${action}`,
+    );
+    const raw = await this.requestExt(
+      HUNK_TRACKER_METHODS.turnAction,
+      turnActionParams(sessionId, promptIndex, action),
+    );
+    return parseHunkActionResponse(raw);
+  }
+
+  /** Accept or reject every tracked hunk in the session. */
+  async hunkTrackerAllAction(
+    action: HunkActionKind,
+  ): Promise<HunkActionResult> {
+    const sessionId = this.requireSessionId();
+    logInfo(`hunk-tracker/all-action action=${action}`);
+    const raw = await this.requestExt(
+      HUNK_TRACKER_METHODS.allAction,
+      allActionParams(sessionId, action),
+    );
+    return parseHunkActionResponse(raw);
   }
 
   /**

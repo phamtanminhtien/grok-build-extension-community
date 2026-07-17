@@ -3639,6 +3639,18 @@ document
 document
   .getElementById("btn-review")
   .addEventListener("click", () => vscode.postMessage({ type: "reviewEdits" }));
+const btnReviewAccept = document.getElementById("btn-review-accept");
+if (btnReviewAccept) {
+  btnReviewAccept.addEventListener("click", () =>
+    vscode.postMessage({ type: "acceptAllEdits" }),
+  );
+}
+const btnReviewReject = document.getElementById("btn-review-reject");
+if (btnReviewReject) {
+  btnReviewReject.addEventListener("click", () =>
+    vscode.postMessage({ type: "rejectAllEdits" }),
+  );
+}
 
 mentionList.addEventListener("mousedown", (e) => {
   // Prevent composer blur before click completes.

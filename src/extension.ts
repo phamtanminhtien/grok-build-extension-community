@@ -42,6 +42,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(auth);
 
   const diffs = new DiffReviewService();
+  diffs.setHunkTracker({
+    fileAction: (filePath, action) =>
+      agentService!.hunkTrackerFileAction(filePath, action),
+    allAction: (action) => agentService!.hunkTrackerAllAction(action),
+  });
 
   setBeforeWriteHook(async (filePath) => {
     await diffs.captureIfMissing(filePath, async () => {
@@ -334,6 +339,50 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand("grok.reviewEdits", async () => {
       await diffs.pickAndOpen();
+    }),
+
+    vscode.commands.registerCommand("grok.acceptAllEdits", async () => {
+      const n = diffs.getEntries().length;
+      if (n === 0) {
+        void vscode.window.showInformationMessage("No Grok edits to accept");
+        return;
+      }
+      try {
+        await diffs.acceptAll();
+        void vscode.window.showInformationMessage(
+          n === 1 ? "Accepted 1 Grok edit" : `Accepted ${n} Grok edits`,
+        );
+      } catch (err) {
+        void vscode.window.showErrorMessage(
+          `Accept failed: ${errMessage(err)}`,
+        );
+      }
+    }),
+
+    vscode.commands.registerCommand("grok.rejectAllEdits", async () => {
+      const n = diffs.getEntries().length;
+      if (n === 0) {
+        void vscode.window.showInformationMessage("No Grok edits to reject");
+        return;
+      }
+      const choice = await vscode.window.showWarningMessage(
+        `Reject all ${n} Grok edit(s)? Disk files will be reverted.`,
+        { modal: true },
+        "Reject all",
+      );
+      if (choice !== "Reject all") {
+        return;
+      }
+      try {
+        await diffs.rejectAll();
+        void vscode.window.showInformationMessage(
+          n === 1 ? "Rejected 1 Grok edit" : `Rejected ${n} Grok edits`,
+        );
+      } catch (err) {
+        void vscode.window.showErrorMessage(
+          `Reject failed: ${errMessage(err)}`,
+        );
+      }
     }),
 
     vscode.commands.registerCommand(
