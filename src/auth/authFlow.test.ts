@@ -3,9 +3,15 @@ import { describe, it } from "node:test";
 import {
   describeAuthPresence,
   extractUserCode,
+  formatAuthInfoSummary,
+  formatGateBanner,
   formatLogoutMessage,
+  isAccessGated,
   isSafeAuthUrl,
+  needsManualAuthCodePaste,
+  parseAuthInfoResponse,
   parseAuthUrlResponse,
+  parseCheckSubscriptionResponse,
   parseLogoutResponse,
   pickInteractiveAuthMethodId,
 } from "./authFlow.ts";
@@ -145,5 +151,108 @@ describe("describeAuthPresence", () => {
       }),
       "Not signed in",
     );
+  });
+});
+
+describe("needsManualAuthCodePaste", () => {
+  it("requires paste for loopback and unknown modes", () => {
+    assert.equal(needsManualAuthCodePaste("loopback", false), true);
+    assert.equal(needsManualAuthCodePaste(undefined, false), true);
+  });
+
+  it("skips paste for device, command, and external provider", () => {
+    assert.equal(needsManualAuthCodePaste("device", false), false);
+    assert.equal(needsManualAuthCodePaste("command", false), false);
+    assert.equal(needsManualAuthCodePaste("loopback", true), false);
+  });
+});
+
+describe("parseAuthInfoResponse", () => {
+  it("parses camelCase profile", () => {
+    const info = parseAuthInfoResponse({
+      methodId: "grok.com",
+      email: "a@x.ai",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      teamName: "xAI",
+      teamRole: "member",
+      teamBlockedReasons: [],
+      codingDataRetentionOptOut: false,
+    });
+    assert.equal(info.email, "a@x.ai");
+    assert.equal(info.methodId, "grok.com");
+    assert.equal(info.teamName, "xAI");
+    assert.equal(info.firstName, "Ada");
+  });
+
+  it("accepts snake_case and result envelope", () => {
+    const info = parseAuthInfoResponse({
+      result: {
+        method_id: "oidc",
+        email: "b@x.ai",
+        user_blocked_reason: "suspended",
+        team_blocked_reasons: ["billing"],
+        coding_data_retention_opt_out: true,
+      },
+    });
+    assert.equal(info.methodId, "oidc");
+    assert.equal(info.userBlockedReason, "suspended");
+    assert.deepEqual(info.teamBlockedReasons, ["billing"]);
+    assert.equal(info.codingDataRetentionOptOut, true);
+  });
+});
+
+describe("parseCheckSubscriptionResponse / gate helpers", () => {
+  it("parses gated meta", () => {
+    const r = parseCheckSubscriptionResponse({
+      authenticated: true,
+      meta: {
+        email: "a@x.ai",
+        subscription_tier: "Free",
+        gate: {
+          message: "Upgrade required",
+          url: "https://x.ai/pricing",
+          label: "Upgrade",
+        },
+      },
+    });
+    assert.equal(r.authenticated, true);
+    assert.equal(r.meta?.subscriptionTier, "Free");
+    assert.equal(isAccessGated(r.meta), true);
+    assert.match(formatGateBanner(r.meta?.gate) ?? "", /Upgrade required/);
+  });
+
+  it("ungated when no gate message", () => {
+    const r = parseCheckSubscriptionResponse({
+      authenticated: true,
+      meta: { email: "a@x.ai", subscription_tier: "Pro" },
+    });
+    assert.equal(isAccessGated(r.meta), false);
+    assert.equal(formatGateBanner(r.meta?.gate), undefined);
+  });
+});
+
+describe("formatAuthInfoSummary", () => {
+  it("builds profile line with team and gate", () => {
+    const s = formatAuthInfoSummary(
+      {
+        email: "a@x.ai",
+        firstName: "Ada",
+        lastName: "L",
+        teamName: "xAI",
+        teamRole: "admin",
+        methodId: "grok.com",
+        teamBlockedReasons: [],
+        codingDataRetentionOptOut: false,
+      },
+      {
+        subscriptionTier: "Pro",
+        gate: { message: "Paywall" },
+      },
+    );
+    assert.match(s ?? "", /Ada L <a@x\.ai>/);
+    assert.match(s ?? "", /team xAI \(admin\)/);
+    assert.match(s ?? "", /Pro/);
+    assert.match(s ?? "", /gate: Paywall/);
   });
 });

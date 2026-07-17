@@ -280,6 +280,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           void this.pushFullState();
         }
       }),
+      // Profile / gate from agent (auth/info + check_subscription).
+      this.agent.onAuthProfileChange(() => {
+        void this.pushFullState();
+      }),
       // Keep empty-state Sign in / Log out + account label in sync when the
       // CLI mutates ~/.grok/auth.json (grok login / grok logout).
       this.auth.onDidChange((status) => {
@@ -954,11 +958,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             await this.agent.interactiveBrowserLogin();
             await this.auth.refresh();
             const after = await this.auth.getStatus();
-            this.pushSystem(
+            const profile = this.agent.formatAuthProfileSummary(
               after.cliEmail
-                ? `Signed in with browser as ${after.cliEmail} (CLI session)`
-                : "Signed in with browser (CLI session)",
+                ? `CLI session (${after.cliEmail})`
+                : "CLI session",
             );
+            this.pushSystem(`Signed in with browser — ${profile}`);
+            const gate = this.agent.getAccessGate();
+            if (gate?.message) {
+              this.pushSystem(
+                `Access gate: ${gate.message}` +
+                  (gate.url ? ` — ${gate.url}` : ""),
+              );
+            }
           } catch (err) {
             await this.showStartError(err);
           }
@@ -966,6 +978,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         await this.pushFullState();
         break;
       }
+      case "pasteAuthCode":
+        try {
+          await this.agent.pasteAuthCode();
+        } catch (err) {
+          await this.showStartError(err);
+        }
+        break;
+      case "checkSubscription":
+        await this.runCheckSubscription();
+        break;
       case "logout": {
         const status = await this.auth.getStatus();
         if (!status.hasAny && this.agent.getState().kind !== "ready") {
@@ -2080,6 +2102,44 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     await this.pushFullState();
   }
 
+  /** Re-check paywall / subscription gate (TUI retry button). */
+  async runCheckSubscription(): Promise<void> {
+    try {
+      await this.agent.ensureStarted();
+      this.pushSystem("Checking subscription…");
+      const result = await this.agent.checkSubscription();
+      if (!result.authenticated) {
+        this.pushSystem(
+          "Subscription check: not authenticated — sign in again.",
+        );
+      } else if (result.meta?.gate?.message) {
+        const g = result.meta.gate;
+        this.pushSystem(
+          `Still gated: ${g.message}` + (g.url ? ` — ${g.url}` : ""),
+        );
+        if (g.url && g.url.startsWith("https://")) {
+          const open = await vscode.window.showWarningMessage(
+            g.message,
+            g.label?.trim() || "Open link",
+            "Dismiss",
+          );
+          if (open && open !== "Dismiss") {
+            await vscode.env.openExternal(vscode.Uri.parse(g.url));
+          }
+        }
+      } else {
+        this.pushSystem(
+          result.meta?.subscriptionTier
+            ? `Access OK · tier ${result.meta.subscriptionTier}`
+            : "Access OK — subscription check passed",
+        );
+      }
+    } catch (err) {
+      await this.showStartError(err);
+    }
+    await this.pushFullState();
+  }
+
   private async pushFullState(): Promise<void> {
     const authStatus = await this.auth.getStatus();
     const hasAuth = authStatus.hasAny;
@@ -2129,12 +2189,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       catalog.currentEffortLabel ||
       effortDisplayLabel(efforts, currentEffortId);
     const modeState = this.agent.getModeState();
+    const gate = this.agent.getAccessGate();
+    const authSummary = this.agent.formatAuthProfileSummary(authStatus.summary);
     this.post({
       type: "init",
       messages: this.serializeMessages(this.messages),
       busy,
       hasAuth,
-      authSummary: authStatus.summary,
+      authSummary,
+      accessGated: !!gate?.message,
+      gateMessage: gate?.message ?? "",
+      gateUrl: gate?.url ?? "",
+      gateLabel: gate?.label ?? "",
       cliFound: probe.found,
       cliPath: probe.found ? probe.path : "",
       installCommand: install.command,
@@ -2306,9 +2372,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       <h2>Grok Build - Community</h2>
       <p>Ask about this workspace. Use / for commands, @ for files. The focused file can auto-attach (toggle on the chip).</p>
       <p id="empty-hint"></p>
+      <p id="empty-gate" class="empty-gate" hidden></p>
       <div class="empty-actions">
         <button id="empty-start" type="button"><i class="ti ti-player-play"></i> Start agent</button>
         <button id="empty-auth" class="secondary" type="button" data-action="login" title="Sign in with browser or API key (same as grok login)"><i class="ti ti-login-2"></i> Sign in</button>
+        <button id="empty-check-sub" class="secondary" type="button" data-action="checkSubscription" hidden title="Re-check subscription / paywall (same as TUI)"><i class="ti ti-refresh"></i> Check subscription</button>
       </div>
     </div>
     <div id="empty-cli-missing" hidden>

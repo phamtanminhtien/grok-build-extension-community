@@ -4,14 +4,28 @@ const emptyEl = document.getElementById("empty");
 const emptyReady = document.getElementById("empty-ready");
 const emptyCliMissing = document.getElementById("empty-cli-missing");
 const emptyHint = document.getElementById("empty-hint");
+const emptyGate = document.getElementById("empty-gate");
 const emptyAuthBtn = document.getElementById("empty-auth");
+const emptyCheckSubBtn = document.getElementById("empty-check-sub");
 const emptyInstallCmd = document.getElementById("empty-install-cmd");
 const emptyInstallPath = document.getElementById("empty-install-path");
 /** Toggle empty-state auth CTA: Sign in when logged out, Log out when signed in (CLI/API). */
-function updateEmptyAuthUi(hasAuth, authSummary) {
+function updateEmptyAuthUi(hasAuth, authSummary, accessGated, gateMessage) {
   emptyHint.textContent = hasAuth
     ? authSummary || "Signed in. You can start chatting."
     : "Not signed in — use Sign in (browser OAuth or API key), same as grok login.";
+  if (emptyGate) {
+    if (hasAuth && accessGated && gateMessage) {
+      emptyGate.hidden = false;
+      emptyGate.textContent = gateMessage;
+    } else {
+      emptyGate.hidden = true;
+      emptyGate.textContent = "";
+    }
+  }
+  if (emptyCheckSubBtn) {
+    emptyCheckSubBtn.hidden = !(hasAuth && accessGated);
+  }
   if (!emptyAuthBtn) return;
   if (hasAuth) {
     emptyAuthBtn.setAttribute("data-action", "logout");
@@ -3086,6 +3100,12 @@ document.getElementById("empty-auth").addEventListener("click", () => {
   const action = (btn && btn.getAttribute("data-action")) || "login";
   vscode.postMessage({ type: action === "logout" ? "logout" : "login" });
 });
+const emptyCheckSubEl = document.getElementById("empty-check-sub");
+if (emptyCheckSubEl) {
+  emptyCheckSubEl.addEventListener("click", () =>
+    vscode.postMessage({ type: "checkSubscription" }),
+  );
+}
 document
   .getElementById("empty-copy-install")
   ?.addEventListener("click", () =>
@@ -3501,7 +3521,12 @@ window.addEventListener("message", (event) => {
     if (msg.turnStatus) renderTurnStatus(msg.turnStatus);
     if (msg.context) renderContextBar(msg.context);
     if (msg.queue) renderQueue(msg.queue.entries || []);
-    updateEmptyAuthUi(!!msg.hasAuth, msg.authSummary || "");
+    updateEmptyAuthUi(
+      !!msg.hasAuth,
+      msg.authSummary || "",
+      !!msg.accessGated,
+      msg.gateMessage || "",
+    );
     updateEmptyCliUi(
       msg.cliFound !== false,
       msg.installCommand || "",

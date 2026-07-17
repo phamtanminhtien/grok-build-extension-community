@@ -84,8 +84,8 @@ Verified headless 2026-07-16: `initialize` + `session/new` + prompt → `L0 OK` 
 - [x] Richer `@` context picker
 - [x] Model QuickPick (settings + restart; curated list + free text)
 - [ ] Better terminal story (per [04](04-host-capabilities.md) decision)
-- [ ] `x.ai/auth/*` polished browser login
-- [ ] Select `x.ai/session` ops: compact, rewind (if stable)
+- [x] `x.ai/auth/*` polished browser login (`get_url`, `submit_code`, `info`, `check_subscription`, `logout`)
+- [x] Select `x.ai/session` ops: compact, rewind (if stable)
 - [x] Virtualized message list / performance
 - [ ] Remote-SSH/WSL documentation + fixes
 
@@ -93,7 +93,7 @@ Verified headless 2026-07-16: `initialize` + `session/new` + prompt → `L0 OK` 
 
 - [x] Multi-file edit review via diffs (host FS snapshots + tool-path best effort)
 - [x] Resume previous session from picker (capability-gated full load; local history always)
-- [ ] Browser login works without pre-existing CLI auth
+- [x] Browser login works without pre-existing CLI auth (loopback paste via `submit_code` + openExternal)
 - [x] No major jank on 30+ message threads (windowed DOM + host markdown throttle)
 
 Spec: [superpowers/specs/2026-07-16-l2-full-polish-design.md](superpowers/specs/2026-07-16-l2-full-polish-design.md)

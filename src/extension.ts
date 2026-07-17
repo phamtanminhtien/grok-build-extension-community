@@ -160,6 +160,63 @@ export function activate(context: vscode.ExtensionContext): void {
       await runLogoutFlow(agentService!, auth, chat);
     }),
 
+    vscode.commands.registerCommand("grok.pasteAuthCode", async () => {
+      try {
+        await agentService!.pasteAuthCode();
+      } catch (err) {
+        await showStartError(err);
+      }
+    }),
+
+    vscode.commands.registerCommand("grok.checkSubscription", async () => {
+      try {
+        await chat.openChat();
+        await chat.runCheckSubscription();
+      } catch (err) {
+        await showStartError(err);
+      }
+    }),
+
+    vscode.commands.registerCommand("grok.accountInfo", async () => {
+      try {
+        await agentService!.ensureStarted();
+        const info = await agentService!.refreshAuthInfo();
+        let meta = agentService!.getAuthMeta();
+        try {
+          const sub = await agentService!.checkSubscription();
+          meta = sub.meta ?? meta;
+        } catch {
+          /* optional */
+        }
+        const summary =
+          agentService!.formatAuthProfileSummary(
+            (await auth.getStatus()).summary,
+          ) || "No account details";
+        const lines = [summary];
+        if (info?.email) {
+          lines.push(`Email: ${info.email}`);
+        }
+        if (info?.methodId) {
+          lines.push(`Method: ${info.methodId}`);
+        }
+        if (meta?.subscriptionTier) {
+          lines.push(`Tier: ${meta.subscriptionTier}`);
+        }
+        if (meta?.gate?.message) {
+          lines.push(`Gate: ${meta.gate.message}`);
+        }
+        if (info?.teamName) {
+          lines.push(
+            `Team: ${info.teamName}${info.teamRole ? ` (${info.teamRole})` : ""}`,
+          );
+        }
+        void vscode.window.showInformationMessage(lines.join(" · "));
+        await chat.refreshState();
+      } catch (err) {
+        await showStartError(err);
+      }
+    }),
+
     vscode.commands.registerCommand("grok.addSelectionToChat", async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor || editor.selection.isEmpty) {
@@ -326,9 +383,30 @@ async function runLoginFlow(
   try {
     await agent.interactiveBrowserLogin();
     const after = await auth.refresh();
-    void vscode.window.showInformationMessage(
-      `Grok Build: signed in${after.cliEmail ? ` as ${after.cliEmail}` : ""} (CLI session)`,
+    const summary = agent.formatAuthProfileSummary(
+      after.cliEmail ? `CLI session (${after.cliEmail})` : "CLI session",
     );
+    void vscode.window.showInformationMessage(
+      `Grok Build: signed in — ${summary}`,
+    );
+    const gate = agent.getAccessGate();
+    if (gate?.message) {
+      const action = gate.url?.startsWith("https://")
+        ? await vscode.window.showWarningMessage(
+            gate.message,
+            gate.label?.trim() || "Open link",
+            "Check subscription",
+          )
+        : await vscode.window.showWarningMessage(
+            gate.message,
+            "Check subscription",
+          );
+      if (action === "Check subscription") {
+        await chat.runCheckSubscription();
+      } else if (action && action !== "Check subscription" && gate.url) {
+        await vscode.env.openExternal(vscode.Uri.parse(gate.url));
+      }
+    }
     await chat.refreshState();
   } catch (err) {
     await showStartError(err);

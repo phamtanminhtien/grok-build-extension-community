@@ -32,10 +32,22 @@ User: Grok Build: Login  (or /login, or empty-state Sign in)
     1. ensure agent started (initialize + session/new)
     2. authenticate(methodId=grok.com|oidc, _meta.force_interactive=true)
     3. concurrent x.ai/auth/get_url → vscode.env.openExternal(https only)
-    4. wait for authenticate; toast + refresh hasAuth
+    4. if mode is loopback (or unknown): InputBox paste → x.ai/auth/submit_code
+       (also: command “Paste Auth Code” if the box was dismissed)
+    5. wait for authenticate; x.ai/auth/info + check_subscription
+    6. toast + empty-state profile / gate banner
   API key path:
     → SecretStorage prompt (existing)
 ```
+
+### Account / subscription
+
+| Command / UI                                | ACP                                                |
+| ------------------------------------------- | -------------------------------------------------- |
+| Grok Build: Show Account Info               | `x.ai/auth/info` (+ optional `check_subscription`) |
+| Grok Build: Check Subscription              | `x.ai/auth/check_subscription`                     |
+| Empty-state “Check subscription” when gated | same                                               |
+| Grok Build: Paste Auth Code                 | `x.ai/auth/submit_code`                            |
 
 ### Logout
 

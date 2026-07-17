@@ -130,6 +130,21 @@
         "category": "Grok Build"
       },
       {
+        "command": "grok.pasteAuthCode",
+        "title": "Grok Build: Paste Auth Code",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.checkSubscription",
+        "title": "Grok Build: Check Subscription",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.accountInfo",
+        "title": "Grok Build: Show Account Info",
+        "category": "Grok Build"
+      },
+      {
         "command": "grok.setApiKey",
         "title": "Grok Build: Set API Key",
         "category": "Grok Build"

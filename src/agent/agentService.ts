@@ -12,11 +12,21 @@ import * as vscode from "vscode";
 import type { AuthService } from "../auth/authService";
 import {
   extractUserCode,
+  formatAuthInfoSummary,
+  formatGateBanner,
+  isAccessGated,
   isSafeAuthUrl,
+  needsManualAuthCodePaste,
+  parseAuthInfoResponse,
   parseAuthUrlResponse,
+  parseCheckSubscriptionResponse,
   parseLogoutResponse,
   pickInteractiveAuthMethodId,
+  type AuthInfo,
+  type AuthMeta,
   type AuthMethodLike,
+  type CheckSubscriptionResult,
+  type GateInfo,
   type LogoutResult,
 } from "../auth/authFlow";
 import {
@@ -191,6 +201,18 @@ export class AgentService implements vscode.Disposable {
   private authMethods: AuthMethodLike[] = [];
   /** Prevent concurrent interactive login flows. */
   private loginInFlight: Promise<void> | undefined;
+  /** True while `authenticate` is in-flight (allows concurrent submit_code). */
+  private authAuthenticateActive = false;
+  /** Latest profile from `x.ai/auth/info` (cleared on logout/stop). */
+  private authInfo: AuthInfo | undefined;
+  /** Latest AuthMeta (from check_subscription / login refresh). */
+  private authMeta: AuthMeta | undefined;
+  private readonly _onAuthProfileChange = new vscode.EventEmitter<{
+    info?: AuthInfo;
+    meta?: AuthMeta;
+  }>();
+  /** Fires when auth/info or subscription gate meta updates. */
+  readonly onAuthProfileChange = this._onAuthProfileChange.event;
 
   private readonly _onStateChange = new vscode.EventEmitter<AgentState>();
   readonly onStateChange = this._onStateChange.event;
@@ -1285,6 +1307,7 @@ export class AgentService implements vscode.Disposable {
    *
    * Runs ACP `authenticate` with `force_interactive` + concurrent
    * `x.ai/auth/get_url` poll; opens a safe `https:` URL via `openExternal`.
+   * Loopback mode also prompts for a paste token → `x.ai/auth/submit_code`.
    */
   async interactiveBrowserLogin(): Promise<void> {
     if (this.loginInFlight) {
@@ -1294,6 +1317,134 @@ export class AgentService implements vscode.Disposable {
       this.loginInFlight = undefined;
     });
     return this.loginInFlight;
+  }
+
+  /**
+   * Paste auth token during an in-flight login (`x.ai/auth/submit_code`).
+   * Also usable via command palette if the auto InputBox was dismissed.
+   */
+  async pasteAuthCode(): Promise<boolean> {
+    const code = await vscode.window.showInputBox({
+      title: "Grok Build — Paste auth token",
+      prompt:
+        "Paste the token / code from the browser (loopback sign-in). Same as TUI auth paste.",
+      ignoreFocusOut: true,
+      placeHolder: "token or code",
+      password: false,
+    });
+    if (!code?.trim()) {
+      return false;
+    }
+    await this.submitAuthCode(code.trim());
+    void vscode.window.showInformationMessage(
+      "Grok Build: auth token submitted — finish approval if still waiting",
+    );
+    return true;
+  }
+
+  /**
+   * Submit a pasted auth code to the agent (`x.ai/auth/submit_code`).
+   * Must run while `authenticate` is pending (agent holds the oneshot).
+   */
+  async submitAuthCode(code: string): Promise<void> {
+    if (!this.connection) {
+      throw new Error("No agent connection — start login first");
+    }
+    const trimmed = code.trim();
+    if (!trimmed) {
+      throw new Error("Auth code is empty");
+    }
+    logInfo("x.ai/auth/submit_code");
+    await this.requestExtOnConnection("x.ai/auth/submit_code", {
+      code: trimmed,
+    });
+  }
+
+  /**
+   * Fetch profile via `x.ai/auth/info` and cache for empty-state / status.
+   */
+  async refreshAuthInfo(): Promise<AuthInfo | undefined> {
+    if (!this.connection) {
+      return this.authInfo;
+    }
+    try {
+      const raw = await this.requestExtOnConnection("x.ai/auth/info", {});
+      this.authInfo = parseAuthInfoResponse(raw);
+      logInfo(
+        `x.ai/auth/info email=${this.authInfo.email ?? ""} method=${this.authInfo.methodId ?? ""}`,
+      );
+      this._onAuthProfileChange.fire({
+        info: this.authInfo,
+        meta: this.authMeta,
+      });
+      return this.authInfo;
+    } catch (err) {
+      logWarn(`x.ai/auth/info failed: ${formatUserError(err)}`);
+      return this.authInfo;
+    }
+  }
+
+  /**
+   * Re-check subscription / paywall gate (`x.ai/auth/check_subscription`).
+   */
+  async checkSubscription(): Promise<CheckSubscriptionResult> {
+    if (!this.connection) {
+      await this.ensureStarted();
+    }
+    if (!this.connection) {
+      throw new Error("No agent connection");
+    }
+    logInfo("x.ai/auth/check_subscription");
+    const raw = await this.requestExtOnConnection(
+      "x.ai/auth/check_subscription",
+      {},
+    );
+    const result = parseCheckSubscriptionResponse(raw);
+    if (result.meta) {
+      this.authMeta = result.meta;
+    } else if (!result.authenticated) {
+      this.authMeta = undefined;
+    }
+    this._onAuthProfileChange.fire({
+      info: this.authInfo,
+      meta: this.authMeta,
+    });
+    const gate = this.authMeta?.gate;
+    logInfo(
+      `check_subscription authenticated=${result.authenticated} gated=${isAccessGated(this.authMeta)}` +
+        (gate?.message ? ` gate="${gate.message.slice(0, 80)}"` : ""),
+    );
+    return result;
+  }
+
+  getAuthInfo(): AuthInfo | undefined {
+    return this.authInfo;
+  }
+
+  getAuthMeta(): AuthMeta | undefined {
+    return this.authMeta;
+  }
+
+  getAccessGate(): GateInfo | undefined {
+    return this.authMeta?.gate;
+  }
+
+  /**
+   * Best summary for empty-state: auth/info + gate > AuthService presence.
+   */
+  formatAuthProfileSummary(fallbackPresence: string): string {
+    const rich = formatAuthInfoSummary(this.authInfo, {
+      gate: this.authMeta?.gate,
+      subscriptionTier: this.authMeta?.subscriptionTier,
+    });
+    if (rich) {
+      return rich;
+    }
+    const gateOnly = formatGateBanner(this.authMeta?.gate);
+    if (gateOnly && fallbackPresence !== "Not signed in") {
+      return `${fallbackPresence} · ${gateOnly}`;
+    }
+    return fallbackPresence;
   }
 
   /**
@@ -1345,6 +1496,8 @@ export class AgentService implements vscode.Disposable {
       clearedSecretKey = true;
     }
 
+    this.clearAuthProfileCache();
+
     try {
       await this.stop();
     } catch (err) {
@@ -1356,6 +1509,12 @@ export class AgentService implements vscode.Disposable {
 
   getAuthMethods(): AuthMethodLike[] {
     return this.authMethods.slice();
+  }
+
+  private clearAuthProfileCache(): void {
+    this.authInfo = undefined;
+    this.authMeta = undefined;
+    this._onAuthProfileChange.fire({});
   }
 
   private async runInteractiveBrowserLogin(): Promise<void> {
@@ -1372,18 +1531,25 @@ export class AgentService implements vscode.Disposable {
       {
         location: vscode.ProgressLocation.Notification,
         title: "Grok Build: Sign in",
-        cancellable: false,
+        cancellable: true,
       },
-      async (progress) => {
+      async (progress, cancelToken) => {
         progress.report({ message: "Starting browser sign-in…" });
 
-        // Concurrent with authenticate (pager PollAuthUrl + Authenticate).
-        // get_url must race authenticate so the oneshot URL is opened ASAP.
-        const urlPromise = this.pollAndOpenAuthUrl(progress).catch((err) => {
-          logWarn(`auth URL poll: ${formatUserError(err)}`);
+        // Concurrent with authenticate (pager PollAuthUrl + Authenticate +
+        // optional submit_code for loopback paste).
+        this.authAuthenticateActive = true;
+        const urlPromise = this.pollOpenUrlAndMaybeSubmitCode(
+          progress,
+          cancelToken,
+        ).catch((err) => {
+          logWarn(`auth URL / submit_code path: ${formatUserError(err)}`);
         });
 
         try {
+          if (cancelToken.isCancellationRequested) {
+            throw new Error("Sign-in cancelled");
+          }
           await this.connection!.agent.request(acp.methods.agent.authenticate, {
             methodId,
             _meta: {
@@ -1396,20 +1562,38 @@ export class AgentService implements vscode.Disposable {
           logError("interactive login failed", err);
           throw new Error(msg || "Sign-in failed");
         } finally {
+          this.authAuthenticateActive = false;
           // Auth finished (success or fail); don't hang on a stuck get_url.
-          await Promise.race([urlPromise, sleep(1_000)]);
+          await Promise.race([urlPromise, sleep(1_500)]);
         }
       },
     );
 
     logInfo("interactive login completed");
+    // Profile + gate for empty-state (parity with pager apply_auth_meta).
+    await this.refreshAuthInfo();
+    try {
+      await this.checkSubscription();
+    } catch (err) {
+      logWarn(`post-login check_subscription: ${formatUserError(err)}`);
+    }
   }
 
-  private async pollAndOpenAuthUrl(
+  /**
+   * Poll `get_url`, open browser, and for loopback prompt paste → submit_code.
+   */
+  private async pollOpenUrlAndMaybeSubmitCode(
     progress: vscode.Progress<{ message?: string }>,
+    cancelToken: vscode.CancellationToken,
   ): Promise<void> {
-    // Match pager: up to ~60 attempts × 50ms while waiting for channel setup.
+    // Match pager: poll until URL channel is ready.
     for (let i = 0; i < 120; i++) {
+      if (cancelToken.isCancellationRequested) {
+        return;
+      }
+      if (!this.authAuthenticateActive) {
+        return;
+      }
       if (i > 0) {
         await sleep(100);
       }
@@ -1438,20 +1622,67 @@ export class AgentService implements vscode.Disposable {
         logWarn(`Rejected non-https auth URL: ${info.authUrl.slice(0, 32)}…`);
         return;
       }
-      const code = extractUserCode(info.authUrl);
+      const deviceCode = extractUserCode(info.authUrl);
       progress.report({
-        message: code
-          ? `Open browser and enter code ${code}…`
+        message: deviceCode
+          ? `Open browser and enter code ${deviceCode}…`
           : "Opening browser for approval…",
       });
       logInfo(`Opening auth URL (mode=${info.mode ?? "?"})`);
       await vscode.env.openExternal(vscode.Uri.parse(info.authUrl));
-      progress.report({ message: "Waiting for approval in browser…" });
+
+      if (
+        needsManualAuthCodePaste(info.mode, info.externalProvider) &&
+        this.authAuthenticateActive
+      ) {
+        progress.report({
+          message:
+            "If the browser shows a token to paste, use the input box (or command Paste Auth Code)…",
+        });
+        await this.promptSubmitAuthCodeWhileLogin(progress);
+      } else {
+        progress.report({ message: "Waiting for approval in browser…" });
+      }
       return;
     }
     progress.report({
-      message: "Waiting for sign-in (check browser or terminal)…",
+      message: "Waiting for sign-in (check browser or Paste Auth Code)…",
     });
+  }
+
+  private async promptSubmitAuthCodeWhileLogin(
+    progress: vscode.Progress<{ message?: string }>,
+  ): Promise<void> {
+    if (!this.authAuthenticateActive) {
+      return;
+    }
+    const code = await vscode.window.showInputBox({
+      title: "Grok Build — Auth token (loopback)",
+      prompt:
+        "Paste the token from the browser if shown. Leave empty to wait for automatic browser completion. You can also run “Grok Build: Paste Auth Code” later.",
+      ignoreFocusOut: true,
+      placeHolder: "Paste token / leave empty to skip",
+    });
+    if (!code?.trim()) {
+      progress.report({
+        message:
+          "Waiting for browser… (Paste Auth Code from Command Palette if needed)",
+      });
+      return;
+    }
+    if (!this.authAuthenticateActive) {
+      // Authenticate already finished — ignore late paste.
+      return;
+    }
+    try {
+      await this.submitAuthCode(code.trim());
+      progress.report({ message: "Token submitted — finishing sign-in…" });
+    } catch (err) {
+      logWarn(`submit_code failed: ${formatUserError(err)}`);
+      progress.report({
+        message: `Could not submit token: ${formatUserError(err)}`,
+      });
+    }
   }
 
   private async requestExtOnConnection<T = unknown>(
@@ -1563,6 +1794,9 @@ export class AgentService implements vscode.Disposable {
     this._onModelsChange.dispose();
     this._onModeChange.dispose();
     this._onXaiSessionEvent.dispose();
+    this.authInfo = undefined;
+    this.authMeta = undefined;
+    this._onAuthProfileChange.dispose();
   }
 
   /**
@@ -1991,6 +2225,11 @@ export class AgentService implements vscode.Disposable {
     await this.applyPermissionModeFromDisk();
     this.ingestSessionModes(session);
 
+    // Profile + subscription gate for empty-state (best-effort; non-blocking).
+    void this.refreshAuthInfo()
+      .then(() => this.checkSubscription())
+      .catch((err) => logWarn(`startup auth profile: ${formatUserError(err)}`));
+
     void this.pumpSessionUpdates(session);
   }
 
@@ -2358,6 +2597,14 @@ export class AgentService implements vscode.Disposable {
 
   private async stopInternal(): Promise<void> {
     this.authMethods = [];
+    // Drop live profile; next ensureStarted re-fetches. Do not fire UI events
+    // here if already disposing — logout path clears explicitly with fire.
+    if (!this.disposed) {
+      this.clearAuthProfileCache();
+    } else {
+      this.authInfo = undefined;
+      this.authMeta = undefined;
+    }
     this.teardownConnectionOnly();
     if (this.spawned) {
       const s = this.spawned;

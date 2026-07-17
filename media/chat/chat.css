@@ -1065,6 +1065,26 @@ header button.linkish:focus-visible {
 #empty p {
   margin: 0 0 6px;
 }
+#empty .empty-gate {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--vscode-inputValidation-warningBorder, #cca700) 70%,
+      transparent
+    );
+  background: color-mix(
+    in srgb,
+    var(--vscode-inputValidation-warningBackground, #5a4b00) 35%,
+    transparent
+  );
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+}
 #empty .empty-actions {
   display: flex;
   flex-direction: column;
