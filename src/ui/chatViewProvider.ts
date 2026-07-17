@@ -3464,7 +3464,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     </div>
   </div>
   <footer>
-    <div id="sticky"></div>
     <div id="tasks-pane" aria-label="Background tasks and subagents">
       <div id="tasks-head">
         <span class="th-left">
@@ -3594,6 +3593,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             </svg>
             <span class="ctx-usage-text" id="ctx-usage-text">—</span>
           </div>
+          <div id="sticky" class="composer-sticky is-empty" aria-label="Attached context" aria-hidden="true"></div>
           <div class="actions-right">
             <button id="btn-model" class="secondary" type="button" title="Select model (same catalog as TUI)" aria-label="Select model" aria-haspopup="dialog" aria-expanded="false">
               <i class="ti ti-cpu" aria-hidden="true"></i>

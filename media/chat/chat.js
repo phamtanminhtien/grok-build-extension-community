@@ -3502,35 +3502,29 @@ function settleNonLiveAssistantStreams() {
 }
 
 function renderSticky() {
+  if (!stickyEl) return;
   let html = "";
-  // Always use the same chip shell for auto on/off (same icons + label + action slot)
-  // so toggling does not reflow the sticky row.
+  // Auto-attach: whole chip toggles on/off (no focus/± icons) so layout stays stable.
   if (autoChip) {
     const on = !!autoAttachEnabled;
     const title = on
-      ? "Auto-attached from focused editor — click × to disable"
-      : "Auto-attach off — click to enable for focused file";
-    const action = on
-      ? '<button type="button" data-auto-toggle="0" title="Disable auto-attach">×</button>'
-      : '<button type="button" data-auto-toggle="1" title="Enable auto-attach">' +
-        icon("plus") +
-        "</button>";
+      ? "Attached from focused editor — click to unselect"
+      : "Not attached — click to select focused file";
     html +=
       '<span class="chip chip-auto' +
-      (on ? "" : " chip-auto-off") +
+      (on ? " is-selected" : " chip-auto-off is-unselected") +
+      '" role="button" tabindex="0"' +
+      ' data-auto-toggle="' +
+      (on ? "0" : "1") +
+      '" aria-pressed="' +
+      (on ? "true" : "false") +
       '" title="' +
       esc(title) +
-      '"' +
-      (on ? "" : ' data-auto-toggle="1" role="button" tabindex="0"') +
-      ">" +
-      '<span class="chip-badge" aria-hidden="true">' +
-      icon("focus-2") +
-      "</span>" +
+      '">' +
       icon(chipIcon(autoChip.label)) +
       '<span class="chip-label">' +
       esc(autoChip.label) +
       "</span>" +
-      action +
       "</span>";
   }
   html += stickyChips
@@ -3547,6 +3541,11 @@ function renderSticky() {
     )
     .join("");
   stickyEl.innerHTML = html;
+  // Keep the slot visible as a flex spacer so model/send stay right-aligned
+  // even with no chips; only mark empty for a11y/styling.
+  stickyEl.hidden = false;
+  stickyEl.classList.toggle("is-empty", !html);
+  stickyEl.setAttribute("aria-hidden", html ? "false" : "true");
 }
 
 function setMeta(text, spinning) {
@@ -4039,21 +4038,33 @@ messagesEl.addEventListener("click", (e) => {
   }
 });
 
-stickyEl.addEventListener("click", (e) => {
-  const toggle = e.target.closest("[data-auto-toggle]");
-  if (toggle) {
+if (stickyEl) {
+  stickyEl.addEventListener("click", (e) => {
+    const toggle = e.target.closest("[data-auto-toggle]");
+    if (toggle) {
+      e.preventDefault();
+      const enabled = toggle.getAttribute("data-auto-toggle") === "1";
+      vscode.postMessage({ type: "setAutoAttach", enabled });
+      return;
+    }
+    const btn = e.target.closest("[data-chip-id]");
+    if (btn) {
+      vscode.postMessage({
+        type: "removeChip",
+        id: btn.getAttribute("data-chip-id"),
+      });
+    }
+  });
+  // Whole-chip select/unselect via keyboard (Enter / Space).
+  stickyEl.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const toggle = e.target.closest("[data-auto-toggle]");
+    if (!toggle || !stickyEl.contains(toggle)) return;
+    e.preventDefault();
     const enabled = toggle.getAttribute("data-auto-toggle") === "1";
     vscode.postMessage({ type: "setAutoAttach", enabled });
-    return;
-  }
-  const btn = e.target.closest("[data-chip-id]");
-  if (btn) {
-    vscode.postMessage({
-      type: "removeChip",
-      id: btn.getAttribute("data-chip-id"),
-    });
-  }
-});
+  });
+}
 
 sendBtn.addEventListener("click", () => {
   if (mentionOpen) closeMention();

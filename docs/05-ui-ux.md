@@ -34,11 +34,10 @@ Layout (top → bottom):
 │  - errors                           │
 │                                     │
 ├─────────────────────────────────────┤
-│ [@ context chips]                   │
 │ [ tasks: N running (when any)   ] │  bg tasks / subagents / loops
 │ [ queue pane: #1 … #N  (when any) ] │  follow-ups (TUI-like)
 │ [ textarea                      ⏎ ] │  composer (Enter queues while busy)
-│ [ Send / Stop / Queue ]             │  primary button (no inject here)
+│ [ Mode | ctx window | @chips … ⏎ ] │  action row: usage + sticky context
 └─────────────────────────────────────┘
 ```
 
