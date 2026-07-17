@@ -117,8 +117,25 @@ const planBody = document.getElementById("plan-body");
 const planAbandon = document.getElementById("plan-abandon");
 const planRequest = document.getElementById("plan-request");
 const planApprove = document.getElementById("plan-approve");
+const subagentPanel = document.getElementById("subagent-panel");
+const subagentTypeEl = document.getElementById("subagent-type");
+const subagentStatusEl = document.getElementById("subagent-status");
+const subagentDescEl = document.getElementById("subagent-desc");
+const subagentChipsEl = document.getElementById("subagent-chips");
+const subagentBody = document.getElementById("subagent-body");
+const subagentTimeline = document.getElementById("subagent-timeline");
+const subagentSnapshotWrap = document.getElementById("subagent-snapshot-wrap");
+const subagentClose = document.getElementById("subagent-close");
+const subagentDone = document.getElementById("subagent-done");
+const subagentRefresh = document.getElementById("subagent-refresh");
+const subagentKill = document.getElementById("subagent-kill");
 const appRoot = document.getElementById("app");
 let busy = false;
+/** In-chat subagent detail panel (plan-panel twin). */
+let subagentOpen = false;
+let subagentActiveId = "";
+/** Last rendered live messages for patch-in-place. */
+let subagentLiveMessages = [];
 let currentMode = "normal";
 let allMessages = [];
 let stickyChips = [];
@@ -127,6 +144,8 @@ let autoChip = null; // { id, label, kind, fsPath } | null
 /** Shared prompt queue rows (TUI queue pane). */
 let queueEntries = [];
 let queueEditActive = false;
+/** Background tasks / subagents / loops (extension Tasks panel). */
+let taskItems = [];
 /** Agent catalog — same source as TUI ModelsManager.available(). */
 let modelItems = [];
 let currentModelId = "";
@@ -638,8 +657,241 @@ function closePlanPanel(send) {
   }
 }
 
+function closeSubagentPanel(notifyHost) {
+  if (!subagentOpen && (!subagentPanel || subagentPanel.hidden)) return;
+  const id = subagentActiveId;
+  subagentOpen = false;
+  subagentActiveId = "";
+  subagentLiveMessages = [];
+  if (subagentPanel) {
+    subagentPanel.hidden = true;
+    subagentPanel.classList.remove("live");
+  }
+  if (appRoot) appRoot.classList.remove("subagent-open");
+  if (subagentBody) subagentBody.innerHTML = "";
+  if (subagentTimeline) subagentTimeline.innerHTML = "";
+  if (subagentSnapshotWrap) subagentSnapshotWrap.hidden = true;
+  if (subagentChipsEl) {
+    subagentChipsEl.innerHTML = "";
+    subagentChipsEl.hidden = true;
+  }
+  if (subagentDescEl) subagentDescEl.textContent = "";
+  if (subagentKill) subagentKill.hidden = true;
+  if (notifyHost && id) {
+    vscode.postMessage({ type: "subagentPanelClose", id });
+  }
+}
+
+function applySubagentMeta(msg) {
+  if (subagentTypeEl) {
+    subagentTypeEl.textContent = msg.typeLabel
+      ? "Subagent · " + msg.typeLabel
+      : "Subagent";
+  }
+  if (subagentStatusEl) {
+    const st = msg.statusLabel || msg.status || "unknown";
+    subagentStatusEl.textContent = st;
+    subagentStatusEl.className =
+      "subagent-badge status-" + String(st).replace(/\s+/g, "-");
+  }
+  if (subagentDescEl) {
+    subagentDescEl.textContent = msg.description || "";
+    subagentDescEl.title = msg.description || "";
+  }
+  if (subagentChipsEl) {
+    const chips = Array.isArray(msg.chips) ? msg.chips : [];
+    subagentChipsEl.innerHTML = "";
+    if (chips.length === 0) {
+      subagentChipsEl.hidden = true;
+    } else {
+      subagentChipsEl.hidden = false;
+      chips.forEach((c) => {
+        const span = document.createElement("span");
+        span.className = "subagent-chip";
+        span.textContent = String(c);
+        subagentChipsEl.appendChild(span);
+      });
+    }
+  }
+  if (subagentKill) {
+    subagentKill.hidden = !msg.canKill;
+  }
+  if (subagentPanel) {
+    subagentPanel.classList.toggle("live", !!msg.live);
+  }
+}
+
+/**
+ * Render live child timeline into #subagent-timeline using the same assistant
+ * timeline builder as main chat (thoughts / tools / text).
+ */
+function renderSubagentTimeline(messages, stickBottom) {
+  if (!subagentTimeline) return;
+  const list = Array.isArray(messages) ? messages : [];
+  const scroll = document.getElementById("subagent-scroll");
+  const nearBottom =
+    !scroll ||
+    scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 80;
+  subagentTimeline.innerHTML = "";
+  const openToolIds = new Set();
+  const openThoughtIds = new Set();
+  const openGroupIds = new Set();
+  list.forEach((m) => {
+    if (!m) return;
+    if (m.type === "user") {
+      const el = document.createElement("div");
+      el.className = "msg user";
+      el.dataset.id = m.id || "";
+      const bubble = document.createElement("div");
+      bubble.className = "bubble md";
+      if (m.html) {
+        bubble.innerHTML = m.html;
+        if (typeof attachCopyButtons === "function") attachCopyButtons(bubble);
+      } else {
+        bubble.textContent = m.text || "";
+      }
+      el.appendChild(bubble);
+      subagentTimeline.appendChild(el);
+      return;
+    }
+    if (m.type === "system") {
+      const el = document.createElement("div");
+      el.className = "msg system";
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = m.text || "";
+      el.appendChild(bubble);
+      subagentTimeline.appendChild(el);
+      return;
+    }
+    if (m.type === "assistant") {
+      const el = document.createElement("div");
+      el.className = "msg assistant subagent-msg";
+      el.dataset.id = m.id || "";
+      // Reuse main-chat timeline renderer (thinking / tools / text).
+      // Do NOT force stream-shimmer here: parent `busy` + empty assistant
+      // skeleton looks wrong inside the subagent panel while the child works.
+      if (typeof renderAssistantTimeline === "function") {
+        const timeline = renderAssistantTimeline(
+          m,
+          openToolIds,
+          openThoughtIds,
+          openGroupIds,
+        );
+        if (timeline) {
+          // Strip main-chat live skeleton if the renderer attached one.
+          timeline
+            .querySelectorAll(":scope > .stream-shimmer")
+            .forEach((s) => s.remove());
+          timeline.classList.add("stream-settled");
+          el.appendChild(timeline);
+        }
+      } else {
+        const bubble = document.createElement("div");
+        bubble.className = "bubble md";
+        if (m.html) bubble.innerHTML = m.html;
+        else bubble.textContent = m.text || "";
+        el.appendChild(bubble);
+      }
+      // Skip empty assistant shells (no visible timeline content yet).
+      const tl = el.querySelector(".assistant-timeline");
+      const hasContent =
+        (tl &&
+          Array.from(tl.children).some(
+            (c) => !c.classList.contains("stream-shimmer"),
+          )) ||
+        el.querySelector(".bubble");
+      if (!hasContent) {
+        return;
+      }
+      subagentTimeline.appendChild(el);
+    }
+  });
+  subagentLiveMessages = list;
+  if (scroll && (stickBottom || nearBottom)) {
+    scroll.scrollTop = scroll.scrollHeight;
+  }
+}
+
+function openSubagentPanel(msg) {
+  closeOtherDropdowns();
+  // Don't stack with plan approval.
+  if (planOpen) closePlanPanel(null);
+  subagentOpen = true;
+  subagentActiveId = msg.subagentId || msg.id || "";
+  if (appRoot) appRoot.classList.add("subagent-open");
+  applySubagentMeta(msg);
+
+  const hasLiveMsgs = Array.isArray(msg.messages) && msg.messages.length > 0;
+  if (hasLiveMsgs || msg.live) {
+    if (subagentSnapshotWrap) subagentSnapshotWrap.hidden = true;
+    renderSubagentTimeline(msg.messages || [], true);
+  } else {
+    if (subagentTimeline) subagentTimeline.innerHTML = "";
+    if (subagentSnapshotWrap) subagentSnapshotWrap.hidden = false;
+    if (subagentBody) {
+      subagentBody.className = "bubble md";
+      if (msg.bodyHtml) {
+        subagentBody.innerHTML = msg.bodyHtml;
+        if (typeof attachCopyButtons === "function") {
+          attachCopyButtons(subagentBody);
+        }
+      } else {
+        subagentBody.textContent = msg.bodyMarkdown
+          ? String(msg.bodyMarkdown)
+          : "";
+      }
+    }
+  }
+
+  // Optional snapshot footer when hybrid finished view sends snapshotHtml.
+  if (msg.snapshotHtml && subagentSnapshotWrap && subagentBody) {
+    subagentSnapshotWrap.hidden = false;
+    subagentBody.className = "bubble md";
+    subagentBody.innerHTML = msg.snapshotHtml;
+    if (typeof attachCopyButtons === "function") {
+      attachCopyButtons(subagentBody);
+    }
+  }
+
+  const scroll = document.getElementById("subagent-scroll");
+  if (scroll && !hasLiveMsgs) scroll.scrollTop = 0;
+  if (subagentPanel) subagentPanel.hidden = false;
+}
+
+function updateSubagentPanel(msg) {
+  if (!subagentOpen) {
+    openSubagentPanel(msg);
+    return;
+  }
+  if (msg.subagentId) subagentActiveId = msg.subagentId;
+  applySubagentMeta(msg);
+  if (Array.isArray(msg.messages)) {
+    if (subagentSnapshotWrap && !msg.snapshotHtml) {
+      subagentSnapshotWrap.hidden = true;
+    }
+    renderSubagentTimeline(msg.messages, false);
+  }
+  if (msg.snapshotHtml && subagentSnapshotWrap && subagentBody) {
+    subagentSnapshotWrap.hidden = false;
+    subagentBody.className = "bubble md";
+    subagentBody.innerHTML = msg.snapshotHtml;
+    if (typeof attachCopyButtons === "function") {
+      attachCopyButtons(subagentBody);
+    }
+  } else if (msg.bodyHtml && !msg.live && subagentBody) {
+    if (subagentSnapshotWrap) subagentSnapshotWrap.hidden = false;
+    subagentBody.className = "bubble md";
+    subagentBody.innerHTML = msg.bodyHtml;
+    if (typeof attachCopyButtons === "function") {
+      attachCopyButtons(subagentBody);
+    }
+  }
+}
+
 function openPlanPanel(msg) {
   closeOtherDropdowns();
+  if (subagentOpen) closeSubagentPanel(false);
   planOpen = true;
   planPromptId = msg.promptId || 0;
   if (appRoot) appRoot.classList.add("plan-open");
@@ -690,6 +942,30 @@ function submitPlanRequestChanges() {
 if (planAbandon) {
   planAbandon.addEventListener("click", () => {
     closePlanPanel({ outcome: "abandoned" });
+  });
+}
+if (subagentClose) {
+  subagentClose.addEventListener("click", () => closeSubagentPanel(true));
+}
+if (subagentDone) {
+  subagentDone.addEventListener("click", () => closeSubagentPanel(true));
+}
+if (subagentRefresh) {
+  subagentRefresh.addEventListener("click", () => {
+    if (!subagentActiveId) return;
+    vscode.postMessage({
+      type: "subagentPanelRefresh",
+      id: subagentActiveId,
+    });
+  });
+}
+if (subagentKill) {
+  subagentKill.addEventListener("click", () => {
+    if (!subagentActiveId) return;
+    vscode.postMessage({
+      type: "subagentPanelKill",
+      id: subagentActiveId,
+    });
   });
 }
 if (planRequest) {
@@ -3077,6 +3353,79 @@ function syncComposerPlaceholder() {
   composer.placeholder = defaultComposerPlaceholder();
 }
 
+function renderTasks(items, runningCount) {
+  taskItems = Array.isArray(items) ? items.slice() : [];
+  const pane = document.getElementById("tasks-pane");
+  const list = document.getElementById("tasks-list");
+  const title = document.getElementById("tasks-title");
+  if (!pane || !list || !title) return;
+  const n = taskItems.length;
+  const run =
+    typeof runningCount === "number"
+      ? runningCount
+      : taskItems.filter(
+          (t) => t.status === "running" || t.status === "stopping",
+        ).length;
+  if (n === 0) {
+    pane.classList.remove("visible");
+    list.innerHTML = "";
+    title.textContent = "Background";
+    return;
+  }
+  pane.classList.add("visible");
+  if (run > 0) {
+    title.textContent =
+      run === 1
+        ? "1 running"
+        : run + " running" + (n > run ? " · " + n + " total" : "");
+  } else {
+    title.textContent = n === 1 ? "1 finished" : n + " finished";
+  }
+  list.innerHTML = "";
+  taskItems.forEach((t) => {
+    const row = document.createElement("div");
+    const st = t.status || "running";
+    row.className = "task-row " + st + " kind-" + (t.kind || "task");
+    row.dataset.id = t.id;
+    row.dataset.kind = t.kind || "task";
+    row.setAttribute("role", "listitem");
+    const detail = t.detail || t.statusLabel || "";
+    const elapsed = t.elapsed || "";
+    const canKill =
+      t.canKill !== false && (st === "running" || st === "stopping");
+    const canView = t.canView !== false;
+    row.innerHTML =
+      '<span class="t-status" title="' +
+      esc(t.statusLabel || st) +
+      '" aria-hidden="true"></span>' +
+      '<span class="t-body" title="' +
+      esc([t.tag, t.label, detail].filter(Boolean).join(" — ")) +
+      '">' +
+      '<span class="t-main">' +
+      '<span class="t-tag">' +
+      esc(t.tag || "Task") +
+      "</span>" +
+      '<span class="t-label">' +
+      esc(t.label || t.id) +
+      "</span>" +
+      "</span>" +
+      (detail ? '<span class="t-detail">' + esc(detail) + "</span>" : "") +
+      "</span>" +
+      '<span class="t-meta">' +
+      esc(elapsed) +
+      "</span>" +
+      '<span class="t-actions">' +
+      '<button type="button" data-t-act="view" title="View output" aria-label="View output" ' +
+      (canView ? "" : "disabled") +
+      '><i class="ti ti-eye" aria-hidden="true"></i></button>' +
+      '<button type="button" data-t-act="kill" title="Stop" aria-label="Stop" ' +
+      (canKill ? "" : "disabled") +
+      '><i class="ti ti-x" aria-hidden="true"></i></button>' +
+      "</span>";
+    list.appendChild(row);
+  });
+}
+
 function renderQueue(entries) {
   queueEntries = Array.isArray(entries) ? entries.slice() : [];
   const pane = document.getElementById("queue-pane");
@@ -3427,6 +3776,13 @@ window.addEventListener(
         return;
       }
     }
+    if (subagentOpen) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeSubagentPanel(true);
+        return;
+      }
+    }
     if (modelOpen) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -3590,6 +3946,31 @@ composer.addEventListener("keydown", (e) => {
     vscode.postMessage({ type: "cancel" });
   }
 });
+
+// Tasks pane actions (background work / subagents)
+const tasksListEl = document.getElementById("tasks-list");
+const tasksRefreshBtn = document.getElementById("tasks-refresh");
+if (tasksListEl) {
+  tasksListEl.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-t-act]");
+    if (!btn || btn.disabled) return;
+    const row = btn.closest(".task-row");
+    if (!row) return;
+    const id = row.dataset.id;
+    const kind = row.dataset.kind || "task";
+    const act = btn.getAttribute("data-t-act");
+    if (act === "kill") {
+      vscode.postMessage({ type: "taskKill", id, kind });
+    } else if (act === "view") {
+      vscode.postMessage({ type: "taskView", id, kind });
+    }
+  });
+}
+if (tasksRefreshBtn) {
+  tasksRefreshBtn.addEventListener("click", () => {
+    vscode.postMessage({ type: "tasksRefresh" });
+  });
+}
 
 // Queue pane actions
 const queueListEl = document.getElementById("queue-list");
@@ -4068,6 +4449,9 @@ window.addEventListener("message", (event) => {
     if (msg.turnStatus) renderTurnStatus(msg.turnStatus);
     if (msg.context) renderContextBar(msg.context);
     if (msg.queue) renderQueue(msg.queue.entries || []);
+    if (msg.tasks) {
+      renderTasks(msg.tasks.items || [], msg.tasks.runningCount);
+    }
     updateEmptyAuthUi(
       !!msg.hasAuth,
       msg.authSummary || "",
@@ -4090,6 +4474,8 @@ window.addEventListener("message", (event) => {
     renderMessages(msg.messages || []);
   } else if (msg.type === "queue") {
     renderQueue(msg.entries || []);
+  } else if (msg.type === "tasks") {
+    renderTasks(msg.items || [], msg.runningCount);
   } else if (msg.type === "streamTail") {
     // New turn injected — keep shimmer only on the live assistant tail.
     settleNonLiveAssistantStreams();
@@ -4180,6 +4566,12 @@ window.addEventListener("message", (event) => {
     openPlanPanel(msg);
   } else if (msg.type === "closePlanApproval") {
     closePlanPanel(null);
+  } else if (msg.type === "subagentPanel") {
+    openSubagentPanel(msg);
+  } else if (msg.type === "subagentPanelUpdate") {
+    updateSubagentPanel(msg);
+  } else if (msg.type === "closeSubagentPanel") {
+    closeSubagentPanel(false);
   }
 });
 

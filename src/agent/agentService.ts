@@ -113,6 +113,24 @@ import {
   type ForkResult,
 } from "./sessionAdmin";
 import {
+  SubagentLiveStore,
+  type LiveSubagentStream,
+} from "./subagentLiveStore";
+import {
+  TasksStore,
+  serializeTasksForWebview,
+  unwrapExtResult,
+  unwrapTaskNotificationParams,
+  type TasksSnapshot,
+  type WorkKind,
+} from "./tasksStore";
+import {
+  buildSubagentPanelModel,
+  parseSubagentGetResponse,
+  type SubagentPanelModel,
+  type SubagentSnapshotWire,
+} from "./subagentTranscript";
+import {
   bannerTextForEvent,
   parseXaiSessionNotification,
   type ParsedXaiSessionNotification,
@@ -191,6 +209,16 @@ export class AgentService implements vscode.Disposable {
   private readonly _onXaiSessionEvent =
     new vscode.EventEmitter<ParsedXaiSessionNotification>();
   readonly onXaiSessionEvent = this._onXaiSessionEvent.event;
+  /** Background tasks / subagents / loops (extension Tasks panel). */
+  private readonly tasksStore = new TasksStore();
+  private readonly _onTasksChange = new vscode.EventEmitter<TasksSnapshot>();
+  readonly onTasksChange = this._onTasksChange.event;
+  private tasksPruneTimer: ReturnType<typeof setInterval> | undefined;
+  /** Live child-session transcripts (TUI subagent_views equivalent). */
+  private readonly liveSubagents = new SubagentLiveStore();
+  private readonly _onLiveSubagentChange =
+    new vscode.EventEmitter<LiveSubagentStream>();
+  readonly onLiveSubagentChange = this._onLiveSubagentChange.event;
   private auth: AuthService | undefined;
   private caps: AgentCaps = {
     loadSession: false,
@@ -351,6 +379,108 @@ export class AgentService implements vscode.Disposable {
       runningPromptId: this.queue.runningPromptId,
       entries: this.queue.entries.map((e) => ({ ...e })),
     };
+  }
+
+  /** Background work snapshot for the Tasks webview panel. */
+  getTasks(): TasksSnapshot {
+    return this.tasksStore.snapshot();
+  }
+
+  /** Lookup one background work row (including finished within TTL). */
+  getTask(id: string): import("./tasksStore").BackgroundWorkItem | undefined {
+    return this.tasksStore.get(id);
+  }
+
+  /** Webview-ready tasks payload (elapsed labels, etc.). */
+  getTasksForWebview(): ReturnType<typeof serializeTasksForWebview> {
+    return serializeTasksForWebview(this.tasksStore.snapshot());
+  }
+
+  /**
+   * Fetch a subagent snapshot (`x.ai/subagent/get`).
+   * Does not block the agent turn; optional `block` waits for completion.
+   */
+  async getSubagentSnapshot(
+    subagentId: string,
+    options?: { block?: boolean; timeoutMs?: number },
+  ): Promise<SubagentSnapshotWire | null> {
+    const id = subagentId.trim();
+    if (!id) {
+      return null;
+    }
+    const raw = await this.requestExt<unknown>("x.ai/subagent/get", {
+      subagentId: id,
+      block: options?.block === true,
+      timeoutMs: options?.timeoutMs,
+    });
+    return parseSubagentGetResponse(raw);
+  }
+
+  /**
+   * Fetch + shape a subagent panel model for the chat webview
+   * (same chrome language as the plan panel — not a separate editor tab).
+   */
+  async getSubagentPanelModel(subagentId: string): Promise<SubagentPanelModel> {
+    const snap = await this.getSubagentSnapshot(subagentId);
+    if (!snap) {
+      throw new Error(`Subagent not found: ${subagentId}`);
+    }
+    const model = buildSubagentPanelModel(snap);
+    logInfo(
+      `subagent panel model id=${model.subagentId} status=${model.status}`,
+    );
+    return model;
+  }
+
+  /** True when sessionId is a known live subagent child session. */
+  isSubagentChildSession(sessionId: string): boolean {
+    return this.liveSubagents.isChildSession(sessionId);
+  }
+
+  getLiveSubagent(id: string): LiveSubagentStream | undefined {
+    return this.liveSubagents.resolve(id);
+  }
+
+  /**
+   * Apply a child `session/update` into the live store. Returns true when
+   * consumed (caller must not merge into the parent chat).
+   */
+  applySubagentSessionUpdate(n: SessionNotification): boolean {
+    const applied = this.liveSubagents.applySessionUpdate(n);
+    if (!applied) {
+      return false;
+    }
+    const sid =
+      typeof n.sessionId === "string" ? n.sessionId : String(n.sessionId ?? "");
+    const stream = this.liveSubagents.resolve(sid);
+    if (stream) {
+      // Mirror live activity onto the Tasks pane row.
+      this.tasksStore.upsert({
+        id: stream.subagentId,
+        kind: "subagent",
+        tag: stream.typeLabel,
+        label: stream.description,
+        status:
+          stream.status === "stopping"
+            ? "stopping"
+            : stream.status === "running"
+              ? "running"
+              : stream.status === "failed"
+                ? "failed"
+                : stream.status === "cancelled"
+                  ? "cancelled"
+                  : "done",
+        detail: stream.activity,
+        startedAtMs: stream.startedAtMs,
+        childSessionId: stream.childSessionId,
+        subagentId: stream.subagentId,
+        canKill: stream.status === "running" || stream.status === "stopping",
+        canView: true,
+      });
+      this.fireTasksChange();
+      this._onLiveSubagentChange.fire(stream);
+    }
+    return true;
   }
 
   /** Plain text for a prompt id we submitted (or last known from queue wire). */
@@ -899,9 +1029,11 @@ export class AgentService implements vscode.Disposable {
     const session = await this.connection.agent.buildSession(cwd).start();
     this.session = session;
     this.resetQueueState(session.sessionId);
+    this.resetTasksState(session.sessionId);
     this.ingestSessionModels(session);
     this.ingestSessionModes(session);
     void this.pumpSessionUpdates(session);
+    void this.refreshTasks().catch(() => undefined);
 
     if (this.state.kind === "ready") {
       this.setState({ ...this.state, sessionId: session.sessionId });
@@ -1203,6 +1335,7 @@ export class AgentService implements vscode.Disposable {
       ...loadRes,
     });
     this.session = session;
+    this.resetTasksState(session.sessionId);
     // load response may carry config in result; merge meta when present.
     this.ingestSessionModels(
       session,
@@ -1210,6 +1343,7 @@ export class AgentService implements vscode.Disposable {
     );
     this.ingestSessionModes(session, loadRes as { modes?: unknown });
     void this.pumpSessionUpdates(session);
+    void this.refreshTasks().catch(() => undefined);
 
     if (this.state.kind === "ready") {
       this.setState({ ...this.state, sessionId: session.sessionId });
@@ -1762,6 +1896,137 @@ export class AgentService implements vscode.Disposable {
     this._onQueueChange.fire(this.getQueue());
   }
 
+  private fireTasksChange(): void {
+    this._onTasksChange.fire(this.tasksStore.snapshot());
+  }
+
+  private resetTasksState(sessionId = ""): void {
+    this.tasksStore.reset(sessionId);
+    this.liveSubagents.clear();
+    this.fireTasksChange();
+  }
+
+  private ensureTasksPruneTimer(): void {
+    if (this.tasksPruneTimer) {
+      return;
+    }
+    this.tasksPruneTimer = setInterval(() => {
+      if (this.tasksStore.pruneFinished()) {
+        this.fireTasksChange();
+      }
+      if (
+        this.tasksStore.snapshot().items.length === 0 &&
+        this.tasksPruneTimer
+      ) {
+        clearInterval(this.tasksPruneTimer);
+        this.tasksPruneTimer = undefined;
+      }
+    }, 5_000);
+  }
+
+  /**
+   * Refresh task + subagent lists from the agent (best-effort; old binaries may 404).
+   */
+  async refreshTasks(): Promise<void> {
+    const sessionId = this.getSessionId();
+    if (!sessionId || !this.connection) {
+      return;
+    }
+    this.tasksStore.setSessionId(sessionId);
+    try {
+      const raw = await this.requestExtOnConnection<unknown>("x.ai/task/list", {
+        sessionId,
+      });
+      const body = unwrapExtResult<{ tasks?: unknown[] }>(raw);
+      const tasks = Array.isArray(body?.tasks) ? body.tasks : [];
+      this.tasksStore.mergeTaskList(tasks, true);
+    } catch (err) {
+      logWarn(`x.ai/task/list: ${formatUserError(err)}`);
+    }
+    try {
+      const raw = await this.requestExtOnConnection<unknown>(
+        "x.ai/subagent/list_running",
+        { sessionId },
+      );
+      const body = unwrapExtResult<{ subagents?: unknown[] }>(raw);
+      const subs = Array.isArray(body?.subagents) ? body.subagents : [];
+      this.tasksStore.mergeSubagentList(subs);
+    } catch (err) {
+      logWarn(`x.ai/subagent/list_running: ${formatUserError(err)}`);
+    }
+    this.ensureTasksPruneTimer();
+    this.fireTasksChange();
+  }
+
+  /**
+   * Kill a background task, cancel a subagent, or delete a scheduled loop.
+   */
+  async killBackgroundWork(id: string, kind: WorkKind): Promise<void> {
+    const sessionId = this.requireSessionId();
+    this.tasksStore.markStopping(id);
+    if (kind === "subagent") {
+      this.liveSubagents.markStopping(id);
+      const live = this.liveSubagents.resolve(id);
+      if (live) {
+        this._onLiveSubagentChange.fire(live);
+      }
+    }
+    this.fireTasksChange();
+    try {
+      if (kind === "subagent") {
+        const item = this.tasksStore.get(id);
+        const subagentId = item?.subagentId ?? id;
+        await this.requestExt("x.ai/subagent/cancel", { subagentId });
+      } else if (kind === "loop") {
+        await this.requestExt("x.ai/scheduler/delete", {
+          sessionId,
+          taskId: id,
+        });
+        this.tasksStore.remove(id);
+      } else {
+        await this.requestExt("x.ai/task/kill", {
+          sessionId,
+          taskId: id,
+        });
+      }
+    } catch (err) {
+      // Revert stopping state on hard failure
+      const item = this.tasksStore.get(id);
+      if (item?.status === "stopping") {
+        this.tasksStore.upsert({
+          ...item,
+          status: "running",
+          detail: undefined,
+        });
+      }
+      throw err;
+    } finally {
+      this.fireTasksChange();
+      // Reconcile with agent after a short delay (completion notify may lag).
+      void this.refreshTasks().catch(() => undefined);
+    }
+  }
+
+  private handleTaskExtNotification(raw: unknown): void {
+    const parsed = unwrapTaskNotificationParams(raw);
+    if (!parsed) {
+      logWarn("task notification: invalid payload");
+      return;
+    }
+    const active = this.getSessionId();
+    if (active && parsed.sessionId && parsed.sessionId !== active) {
+      return;
+    }
+    const changed = this.tasksStore.applyTaskNotification(
+      parsed.sessionId || active || "",
+      parsed.update,
+    );
+    if (changed) {
+      this.ensureTasksPruneTimer();
+      this.fireTasksChange();
+    }
+  }
+
   /**
    * L0 smoke: start, send a simple prompt, stream session/update to Output.
    */
@@ -1783,6 +2048,10 @@ export class AgentService implements vscode.Disposable {
       return;
     }
     this.disposed = true;
+    if (this.tasksPruneTimer) {
+      clearInterval(this.tasksPruneTimer);
+      this.tasksPruneTimer = undefined;
+    }
     await this.stopInternal();
     this.setBusy(false);
     this._onStateChange.dispose();
@@ -1790,6 +2059,8 @@ export class AgentService implements vscode.Disposable {
     this._onBusyChange.dispose();
     this._onTurnEnd.dispose();
     this._onQueueChange.dispose();
+    this._onTasksChange.dispose();
+    this._onLiveSubagentChange.dispose();
     this._onAvailableCommands.dispose();
     this._onModelsChange.dispose();
     this._onModeChange.dispose();
@@ -2168,6 +2439,35 @@ export class AgentService implements vscode.Disposable {
           this.handleXaiSessionNotification(ctx.params);
         },
       )
+      // Background task lifecycle (Tasks panel).
+      .onNotification(
+        "_x.ai/task_backgrounded",
+        (p: unknown) => p,
+        (ctx) => {
+          this.handleTaskExtNotification(ctx.params);
+        },
+      )
+      .onNotification(
+        "x.ai/task_backgrounded",
+        (p: unknown) => p,
+        (ctx) => {
+          this.handleTaskExtNotification(ctx.params);
+        },
+      )
+      .onNotification(
+        "_x.ai/task_completed",
+        (p: unknown) => p,
+        (ctx) => {
+          this.handleTaskExtNotification(ctx.params);
+        },
+      )
+      .onNotification(
+        "x.ai/task_completed",
+        (p: unknown) => p,
+        (ctx) => {
+          this.handleTaskExtNotification(ctx.params);
+        },
+      )
       .connect(stream);
 
     this.connection = connection;
@@ -2209,6 +2509,7 @@ export class AgentService implements vscode.Disposable {
     this.session = session;
     this.permissions.resetSessionMemory();
     this.resetQueueState(session.sessionId);
+    this.resetTasksState(session.sessionId);
     this.inFlightPrompts = 0;
     this.ingestSessionModels(session);
     logInfo(`session/new ok sessionId=${session.sessionId}`);
@@ -2229,6 +2530,11 @@ export class AgentService implements vscode.Disposable {
     void this.refreshAuthInfo()
       .then(() => this.checkSubscription())
       .catch((err) => logWarn(`startup auth profile: ${formatUserError(err)}`));
+
+    // Seed Tasks panel from live registries (best-effort).
+    void this.refreshTasks().catch((err) =>
+      logWarn(`startup tasks refresh: ${formatUserError(err)}`),
+    );
 
     void this.pumpSessionUpdates(session);
   }
@@ -2378,6 +2684,8 @@ export class AgentService implements vscode.Disposable {
   private handleXaiSessionNotification(raw: unknown): void {
     const parsed = parseXaiSessionNotification(raw);
     if (!parsed) {
+      // Some task/schedule updates may only arrive as session_notification.
+      this.handleTaskExtNotification(raw);
       logWarn("x.ai/session_notification: invalid payload");
       return;
     }
@@ -2388,6 +2696,7 @@ export class AgentService implements vscode.Disposable {
         `session_notification other session=${parsed.sessionId} (active=${active})`,
       );
     }
+    let tasksChanged = false;
     for (const ev of parsed.events) {
       const banner = bannerTextForEvent(ev);
       if (banner) {
@@ -2399,6 +2708,75 @@ export class AgentService implements vscode.Disposable {
           `[session_notification] ${ev.kind}/${"phase" in ev ? ev.phase : "?"}`,
         );
       }
+      if (ev.kind === "subagent") {
+        if (this.tasksStore.applySubagentEvent(ev)) {
+          tasksChanged = true;
+        }
+        // Register / finish live child streams (TUI subagent_views).
+        if (ev.phase === "spawned") {
+          const child = ev.childSessionId || ev.subagentId || "";
+          const sub = ev.subagentId || child;
+          if (child) {
+            const stream = this.liveSubagents.register({
+              subagentId: sub,
+              childSessionId: child,
+              subagentType: ev.subagentType,
+              description: ev.description,
+            });
+            this.liveSubagents.ensureStarted(child);
+            this._onLiveSubagentChange.fire(stream);
+          }
+        } else if (ev.phase === "progress") {
+          const stream = this.liveSubagents.resolve(
+            ev.subagentId || ev.childSessionId || "",
+          );
+          if (stream && ev.message) {
+            // Keep progress text as soft activity when no tool is active.
+            if (
+              !stream.activity ||
+              stream.activity === "Thinking…" ||
+              stream.activity === "Responding…" ||
+              stream.activity.startsWith("Subagent")
+            ) {
+              stream.activity = ev.message;
+              stream.generation += 1;
+              this._onLiveSubagentChange.fire(stream);
+            }
+          }
+        } else if (ev.phase === "finished") {
+          const st = (ev.status ?? "completed").toLowerCase();
+          const status =
+            st === "failed"
+              ? ("failed" as const)
+              : st === "cancelled"
+                ? ("cancelled" as const)
+                : ("done" as const);
+          const stream = this.liveSubagents.finish(
+            ev.subagentId || ev.childSessionId || "",
+            status,
+            ev.message,
+          );
+          if (stream) {
+            this._onLiveSubagentChange.fire(stream);
+          }
+        }
+      }
+    }
+    // scheduled_task_* may be parsed as unknown — try task store on raw update.
+    const taskParsed = unwrapTaskNotificationParams(raw);
+    if (taskParsed) {
+      if (
+        this.tasksStore.applyTaskNotification(
+          taskParsed.sessionId || parsed.sessionId,
+          taskParsed.update,
+        )
+      ) {
+        tasksChanged = true;
+      }
+    }
+    if (tasksChanged) {
+      this.ensureTasksPruneTimer();
+      this.fireTasksChange();
     }
     this._onXaiSessionEvent.fire(parsed);
   }
@@ -2424,6 +2802,44 @@ export class AgentService implements vscode.Disposable {
   private onSessionUpdateNotify(params: SessionNotification): void {
     this.captureAvailableCommands(params);
     this.captureConfigOptionUpdate(params);
+    // Child subagent streams: merge here so ChatView never pollutes parent chat.
+    const sid =
+      typeof params.sessionId === "string"
+        ? params.sessionId
+        : String(params.sessionId ?? "");
+    const parent = this.getSessionId();
+    if (
+      sid &&
+      parent &&
+      sid !== parent &&
+      this.liveSubagents.isChildSession(sid)
+    ) {
+      this.applySubagentSessionUpdate(params);
+      this.logUpdate(params);
+      return;
+    }
+    // Race: child updates can arrive slightly before subagent_spawned is applied.
+    // If session is unknown and not parent, try soft-register from nothing — skip.
+    if (sid && parent && sid !== parent) {
+      // Tentatively hold as live if we know the id from tasks store.
+      const task = this.tasksStore.get(sid);
+      if (task?.kind === "subagent") {
+        this.liveSubagents.register({
+          subagentId: task.subagentId || sid,
+          childSessionId: task.childSessionId || sid,
+          subagentType: task.tag,
+          description: task.label,
+        });
+        this.applySubagentSessionUpdate(params);
+        this.logUpdate(params);
+        return;
+      }
+      logInfo(
+        `session/update for non-parent session=${sid} (ignored for chat)`,
+      );
+      this.logUpdate(params);
+      return;
+    }
     this._onSessionUpdate.fire(params);
     this.logUpdate(params);
   }

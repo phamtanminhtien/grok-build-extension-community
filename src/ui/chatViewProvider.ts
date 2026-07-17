@@ -210,6 +210,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private lastRunningPromptId: string | undefined;
   /** Local queue edit: composer targets this server row instead of a new send. */
   private editingQueueId: string | undefined;
+  /** Subagent panel currently open (live stream id = subagentId or childSessionId). */
+  private openSubagentId: string | undefined;
+  private liveSubagentFlushTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -234,6 +237,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.agent.onSessionUpdate((n) => this.handleSessionUpdate(n)),
       this.agent.onXaiSessionEvent((n) => this.handleXaiSessionEvent(n)),
       this.agent.onQueueChange((q) => this.handleQueueChange(q)),
+      this.agent.onTasksChange(() => this.postTasks()),
+      this.agent.onLiveSubagentChange((stream) => {
+        this.onLiveSubagentStream(stream);
+      }),
       this.agent.onBusyChange((busy) => {
         this.post({ type: "busy", busy });
         if (busy) {
@@ -489,6 +496,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.editingQueueId = undefined;
     this.scheduleMessagesPost(true);
     this.postQueue();
+    this.postTasks();
   }
 
   /**
@@ -848,6 +856,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     text?: string;
     path?: string;
     id?: string;
+    /** Background work kind for taskKill / taskView. */
+    kind?: string;
     query?: string;
     requestId?: number;
     chip?: ContextChip;
@@ -927,6 +937,67 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
               "vscode.open",
               vscode.Uri.file(msg.path),
             );
+          } catch (err) {
+            this.pushSystem(errMessage(err));
+          }
+        }
+        break;
+      case "taskKill":
+        if (msg.id && typeof msg.kind === "string") {
+          try {
+            await this.agent.killBackgroundWork(
+              msg.id,
+              msg.kind as import("../agent/tasksStore").WorkKind,
+            );
+          } catch (err) {
+            this.pushSystem(errMessage(err));
+          }
+        }
+        break;
+      case "taskView":
+        if (msg.id) {
+          await this.handleTaskView(String(msg.id));
+        }
+        break;
+      case "tasksRefresh":
+        try {
+          await this.agent.refreshTasks();
+        } catch (err) {
+          this.pushSystem(errMessage(err));
+        }
+        break;
+      case "subagentPanelClose":
+        this.openSubagentId = undefined;
+        break;
+      case "subagentPanelRefresh":
+        if (msg.id) {
+          try {
+            // Force snapshot refresh even when live is present.
+            this.openSubagentId = String(msg.id);
+            const live = this.agent.getLiveSubagent(String(msg.id));
+            if (
+              live &&
+              (live.status === "running" || live.status === "stopping")
+            ) {
+              this.postLiveSubagentPanel(live, false);
+            } else {
+              await this.openSubagentPanel(String(msg.id));
+            }
+          } catch (err) {
+            this.pushSystem(errMessage(err));
+          }
+        }
+        break;
+      case "subagentPanelKill":
+        if (msg.id) {
+          try {
+            await this.agent.killBackgroundWork(String(msg.id), "subagent");
+            // Refresh panel to show stopping/cancelled state.
+            try {
+              await this.openSubagentPanel(String(msg.id));
+            } catch {
+              this.post({ type: "closeSubagentPanel" });
+            }
           } catch (err) {
             this.pushSystem(errMessage(err));
           }
@@ -1769,6 +1840,233 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  private postTasks(): void {
+    const payload = this.agent.getTasksForWebview();
+    this.post({
+      type: "tasks",
+      sessionId: payload.sessionId,
+      runningCount: payload.runningCount,
+      items: payload.items,
+    });
+  }
+
+  /** Open output file, in-chat subagent panel, or preview for a work item. */
+  private async handleTaskView(id: string): Promise<void> {
+    const item = this.agent.getTask(id);
+    if (!item) {
+      this.pushSystem("That task is no longer listed.");
+      return;
+    }
+
+    // Subagents: in-webview panel (same chrome as plan panel).
+    if (item.kind === "subagent") {
+      const subId = item.subagentId ?? item.id;
+      try {
+        await this.openSubagentPanel(subId);
+      } catch (err) {
+        this.pushSystem(
+          `Subagent ${item.tag}: ${item.label}` +
+            (item.detail ? ` — ${item.detail}` : "") +
+            ` [${item.status}]` +
+            ` — ${errMessage(err)}`,
+        );
+      }
+      return;
+    }
+
+    if (item.outputFile) {
+      try {
+        await vscode.commands.executeCommand(
+          "vscode.open",
+          vscode.Uri.file(item.outputFile),
+        );
+        return;
+      } catch (err) {
+        this.pushSystem(errMessage(err));
+      }
+    }
+    if (item.outputPreview) {
+      const doc = await vscode.workspace.openTextDocument({
+        content: item.outputPreview,
+        language: "log",
+      });
+      await vscode.window.showTextDocument(doc, { preview: true });
+      return;
+    }
+    this.pushSystem(`No output available for “${item.label}”.`);
+  }
+
+  /**
+   * Open the in-chat subagent panel. Prefer **live stream** (TUI-style
+   * thinking/tools/text) when the child is still registered; fall back to
+   * `subagent/get` snapshot markdown when only a finished snapshot exists.
+   */
+  private async openSubagentPanel(subagentId: string): Promise<void> {
+    this.openSubagentId = subagentId;
+    const live = this.agent.getLiveSubagent(subagentId);
+    if (
+      live &&
+      (live.status === "running" ||
+        live.status === "stopping" ||
+        live.messages.length > 0)
+    ) {
+      this.postLiveSubagentPanel(live, true);
+      // Also pull snapshot in background when finished for full output footer.
+      if (live.status !== "running" && live.status !== "stopping") {
+        void this.mergeSnapshotIntoOpenPanel(subagentId).catch(() => undefined);
+      }
+      return;
+    }
+    // Snapshot-only path (completed subagent no longer streaming).
+    try {
+      const model = await this.agent.getSubagentPanelModel(subagentId);
+      const bodyHtml = renderMarkdownToSafeHtml(model.bodyMarkdown);
+      this.post({
+        type: "subagentPanel",
+        subagentId: model.subagentId || subagentId,
+        typeLabel: model.typeLabel,
+        description: model.description,
+        status: model.status,
+        statusLabel: model.statusLabel,
+        duration: model.duration,
+        chips: model.chips,
+        canKill: model.canKill,
+        live: false,
+        bodyHtml,
+        messages: [],
+      });
+    } catch (err) {
+      // Last resort: open empty live shell if still running in tasks store.
+      const item = this.agent.getTask(subagentId);
+      if (item?.kind === "subagent" && item.status === "running") {
+        this.post({
+          type: "subagentPanel",
+          subagentId,
+          typeLabel: item.tag,
+          description: item.label,
+          status: "running",
+          statusLabel: "running",
+          duration: "…",
+          chips: item.detail ? [item.detail] : [],
+          canKill: true,
+          live: true,
+          bodyHtml: "",
+          messages: [],
+        });
+        return;
+      }
+      throw err;
+    }
+  }
+
+  private onLiveSubagentStream(
+    stream: import("../agent/subagentLiveStore").LiveSubagentStream,
+  ): void {
+    const open = this.openSubagentId;
+    if (!open) {
+      return;
+    }
+    if (open !== stream.subagentId && open !== stream.childSessionId) {
+      return;
+    }
+    // Throttle UI posts while streaming chunks.
+    if (this.liveSubagentFlushTimer) {
+      return;
+    }
+    this.liveSubagentFlushTimer = setTimeout(() => {
+      this.liveSubagentFlushTimer = undefined;
+      const latest = this.agent.getLiveSubagent(stream.subagentId);
+      if (latest) {
+        this.postLiveSubagentPanel(latest, false);
+      }
+    }, 50);
+  }
+
+  private postLiveSubagentPanel(
+    stream: import("../agent/subagentLiveStore").LiveSubagentStream,
+    open: boolean,
+  ): void {
+    const now = Date.now();
+    const elapsedMs = Math.max(
+      0,
+      (stream.finishedAtMs ?? now) - stream.startedAtMs,
+    );
+    const elapsed =
+      elapsedMs < 60_000
+        ? `${Math.floor(elapsedMs / 1000)}s`
+        : `${Math.floor(elapsedMs / 60_000)}m ${Math.floor((elapsedMs / 1000) % 60)}s`;
+    const statusLabel =
+      stream.status === "running"
+        ? "running"
+        : stream.status === "stopping"
+          ? "stopping"
+          : stream.status === "failed"
+            ? "failed"
+            : stream.status === "cancelled"
+              ? "cancelled"
+              : "done";
+    const chips: string[] = [elapsed];
+    if (stream.activity) {
+      chips.push(stream.activity);
+    }
+    // Serialize child timeline with the same pipeline as main chat.
+    const messages = this.serializeMessages(
+      stream.messages as unknown as UiMessage[],
+    );
+    this.post({
+      type: open ? "subagentPanel" : "subagentPanelUpdate",
+      subagentId: stream.subagentId,
+      childSessionId: stream.childSessionId,
+      typeLabel: stream.typeLabel,
+      description: stream.description,
+      status: stream.status,
+      statusLabel,
+      duration: elapsed,
+      chips,
+      canKill: stream.status === "running" || stream.status === "stopping",
+      live: true,
+      generation: stream.generation,
+      messages,
+      bodyHtml: "",
+    });
+  }
+
+  private async mergeSnapshotIntoOpenPanel(subagentId: string): Promise<void> {
+    const model = await this.agent.getSubagentPanelModel(subagentId);
+    // Append snapshot output as a system-like footer via bodyHtml only when
+    // live messages already cover the stream — skip if still open live.
+    const live = this.agent.getLiveSubagent(subagentId);
+    if (live && (live.status === "running" || live.status === "stopping")) {
+      return;
+    }
+    if (
+      this.openSubagentId !== subagentId &&
+      this.openSubagentId !== model.subagentId
+    ) {
+      return;
+    }
+    // Re-open as hybrid: keep live messages if any, plus snapshot body for full output.
+    const bodyHtml = renderMarkdownToSafeHtml(model.bodyMarkdown);
+    const messages = live
+      ? this.serializeMessages(live.messages as unknown as UiMessage[])
+      : [];
+    this.post({
+      type: "subagentPanelUpdate",
+      subagentId: model.subagentId || subagentId,
+      typeLabel: model.typeLabel,
+      description: model.description,
+      status: model.status,
+      statusLabel: model.statusLabel,
+      duration: model.duration,
+      chips: model.chips,
+      canKill: model.canKill,
+      live: false,
+      messages,
+      bodyHtml: messages.length ? "" : bodyHtml,
+      snapshotHtml: messages.length ? bodyHtml : undefined,
+    });
+  }
+
   /**
    * Edit a previous user prompt and resubmit (TUI inline-edit parity).
    * Webview owns mode selection popover (Both / Conversation only) and
@@ -2564,6 +2862,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           })),
         };
       })(),
+      tasks: this.agent.getTasksForWebview(),
     });
   }
 
@@ -2689,6 +2988,39 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       </div>
     </div>
   </section>
+  <section id="subagent-panel" hidden role="region" aria-label="Subagent detail">
+    <div id="subagent-head">
+      <div class="subagent-head-left">
+        <i class="ti ti-hierarchy-2" aria-hidden="true"></i>
+        <span id="subagent-type">Subagent</span>
+        <span id="subagent-status" class="subagent-badge">running</span>
+      </div>
+      <button type="button" class="secondary subagent-close" id="subagent-close" title="Close (Esc)" aria-label="Close">
+        <i class="ti ti-x" aria-hidden="true"></i>
+      </button>
+    </div>
+    <div id="subagent-desc" class="subagent-desc"></div>
+    <div id="subagent-chips" class="subagent-chips" hidden></div>
+    <div id="subagent-scroll">
+      <div id="subagent-timeline" class="subagent-timeline" aria-live="polite"></div>
+      <div class="msg assistant subagent-msg" id="subagent-snapshot-wrap" hidden>
+        <div id="subagent-body" class="bubble md" tabindex="0"></div>
+      </div>
+    </div>
+    <div id="subagent-foot">
+      <div id="subagent-actions" role="toolbar" aria-label="Subagent actions">
+        <button type="button" class="secondary" id="subagent-refresh" title="Refresh snapshot">
+          <i class="ti ti-refresh" aria-hidden="true"></i> Refresh
+        </button>
+        <button type="button" class="secondary" id="subagent-kill" title="Stop subagent" hidden>
+          <i class="ti ti-player-stop" aria-hidden="true"></i> Stop
+        </button>
+        <button type="button" class="secondary" id="subagent-done" title="Close panel">
+          Close
+        </button>
+      </div>
+    </div>
+  </section>
   <div id="empty" hidden>
     <div class="hero-icon" aria-hidden="true">${GROK_MARK_SVG}</div>
     <div id="empty-ready">
@@ -2717,6 +3049,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   </div>
   <footer>
     <div id="sticky"></div>
+    <div id="tasks-pane" aria-label="Background tasks and subagents">
+      <div id="tasks-head">
+        <span class="th-left">
+          <i class="ti ti-hierarchy-2" aria-hidden="true"></i>
+          <span id="tasks-title">Background</span>
+        </span>
+        <button type="button" class="secondary" id="tasks-refresh" title="Refresh task list">
+          <i class="ti ti-refresh" aria-hidden="true"></i>
+        </button>
+      </div>
+      <div id="tasks-list" role="list"></div>
+    </div>
     <div id="queue-pane" aria-label="Queued prompts">
       <div id="queue-head">
         <span class="qh-left">

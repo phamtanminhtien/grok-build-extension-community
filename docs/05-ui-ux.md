@@ -35,11 +35,32 @@ Layout (top → bottom):
 │                                     │
 ├─────────────────────────────────────┤
 │ [@ context chips]                   │
+│ [ tasks: N running (when any)   ] │  bg tasks / subagents / loops
 │ [ queue pane: #1 … #N  (when any) ] │  follow-ups (TUI-like)
 │ [ textarea                      ⏎ ] │  composer (Enter queues while busy)
 │ [ Send / Stop / Queue ]             │  primary button (no inject here)
 └─────────────────────────────────────┘
 ```
+
+### Background tasks panel (extension-native)
+
+Shows **running** (and briefly **finished**) background work above the
+composer — IDE list, not a port of the TUI `Ctrl+B` pane:
+
+| Kind           | Source                                               | Actions             |
+| -------------- | ---------------------------------------------------- | ------------------- |
+| Subagent       | `subagent_*` session notifications + `list_running`  | View summary, Kill  |
+| Task / Monitor | `task_backgrounded` / `task_completed` + `task/list` | View log file, Kill |
+| Loop           | `scheduled_task_created` + scheduler delete          | Kill                |
+
+Finished rows are hidden immediately from the list (TUI default `show_done=false`). Refresh re-lists running work from the agent.
+
+| Entry                    | Behavior                                                                                                                                                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Status bar               | When any work is running: `Grok Build · N` with tooltip listing rows                                                                                                                                                                 |
+| `/tasks`                 | Host command: refresh lists, open chat, print a grouped report in chat                                                                                                                                                               |
+| View on **subagent**     | Opens an **in-chat subagent panel**. While running: **live** child `session/update` stream (thinking / tools / text — same timeline as main chat). When done: snapshot fallback via `x.ai/subagent/get`. Refresh · Stop · Esc close. |
+| View on **task/monitor** | Opens `output_file` or a log preview                                                                                                                                                                                                 |
 
 ### Prompt queue (TUI parity)
 

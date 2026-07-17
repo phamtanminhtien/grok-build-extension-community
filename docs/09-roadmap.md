@@ -108,7 +108,7 @@ Spec: [superpowers/specs/2026-07-16-l2-full-polish-design.md](superpowers/specs/
 
 - Worktree UI (`x.ai/git/worktree/*`)
 - Plan mode surface
-- Subagent / background task visualization
+- Subagent / background task visualization (Tasks panel, status bar badge, `/tasks` host, subagent transcript markdown)
 - Fuzzy open bridge
 - Plugin/skills management UI (thin)
 - Binary bundling or first-run download

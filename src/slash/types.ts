@@ -62,7 +62,9 @@ export type HostAction =
   /** `x.ai/session/fork` (+ load forked session) */
   | "fork"
   /** `x.ai/session/rename` */
-  | "rename";
+  | "rename"
+  /** List + refresh background tasks / subagents (Tasks panel). */
+  | "showTasks";
 
 /** Row shown in the slash dropdown. */
 export interface SlashSuggestion {

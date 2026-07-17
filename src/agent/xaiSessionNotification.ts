@@ -29,6 +29,8 @@ export type XaiSessionEvent =
       kind: "subagent";
       phase: "spawned" | "progress" | "finished";
       message: string;
+      /** Coordinator id (use for cancel). Often same as childSessionId. */
+      subagentId?: string;
       childSessionId?: string;
       subagentType?: string;
       description?: string;
@@ -273,11 +275,13 @@ function formatTokens(n: number): string {
 
 function decodeSubagentSpawned(u: Record<string, unknown>): XaiSessionEvent {
   const childSessionId = asString(u.child_session_id ?? u.childSessionId);
+  const subagentId = asString(u.subagent_id ?? u.subagentId) ?? childSessionId;
   const subagentType = asString(u.subagent_type ?? u.subagentType) ?? "agent";
   const description = asString(u.description) ?? "task";
   return {
     kind: "subagent",
     phase: "spawned",
+    subagentId,
     childSessionId,
     subagentType,
     description,
@@ -287,6 +291,7 @@ function decodeSubagentSpawned(u: Record<string, unknown>): XaiSessionEvent {
 
 function decodeSubagentProgress(u: Record<string, unknown>): XaiSessionEvent {
   const childSessionId = asString(u.child_session_id ?? u.childSessionId);
+  const subagentId = asString(u.subagent_id ?? u.subagentId) ?? childSessionId;
   const turns = asNumber(u.turn_count ?? u.turnCount) ?? 0;
   const tools = asNumber(u.tool_call_count ?? u.toolCallCount) ?? 0;
   const pct = asNumber(u.context_usage_pct ?? u.contextUsagePct);
@@ -294,6 +299,7 @@ function decodeSubagentProgress(u: Record<string, unknown>): XaiSessionEvent {
   return {
     kind: "subagent",
     phase: "progress",
+    subagentId,
     childSessionId,
     message: `Subagent running… ${turns} turns, ${tools} tools${pctPart}`,
   };
@@ -301,6 +307,7 @@ function decodeSubagentProgress(u: Record<string, unknown>): XaiSessionEvent {
 
 function decodeSubagentFinished(u: Record<string, unknown>): XaiSessionEvent {
   const childSessionId = asString(u.child_session_id ?? u.childSessionId);
+  const subagentId = asString(u.subagent_id ?? u.subagentId) ?? childSessionId;
   const status = asString(u.status) ?? "completed";
   const error = asString(u.error);
   const desc =
@@ -312,6 +319,7 @@ function decodeSubagentFinished(u: Record<string, unknown>): XaiSessionEvent {
   return {
     kind: "subagent",
     phase: "finished",
+    subagentId,
     childSessionId,
     status,
     message: desc,

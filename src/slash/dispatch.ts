@@ -12,6 +12,7 @@ import { getAlwaysApprove, setAlwaysApprove } from "../config/alwaysApprove";
 import { getSettings, resolveSessionCwd } from "../config/settings";
 import { openOutput } from "../log/output";
 import { tabFromSlashName } from "../extensions/tabs";
+import { formatTasksReport } from "../agent/tasksStore";
 import { parseInvocation } from "./detect";
 import { HOST_COMMANDS } from "./hostCommands";
 import type { SlashRegistry } from "./registry";
@@ -372,6 +373,21 @@ async function runHostAction(
           ? ` (${result.chatMessagesCopied} messages copied)`
           : "";
       return `Forked session → ${result.newSessionId}${msgs}`;
+    }
+    case "showTasks": {
+      await deps.agent.ensureStarted();
+      try {
+        await deps.agent.refreshTasks();
+      } catch {
+        /* list APIs may be missing on older binaries */
+      }
+      // Prefer chat panel focus so the Tasks pane is visible.
+      try {
+        await vscode.commands.executeCommand("grok.openChat");
+      } catch {
+        /* ignore */
+      }
+      return formatTasksReport(deps.agent.getTasks());
     }
     default:
       return `Unhandled host action for /${cmd.name}`;

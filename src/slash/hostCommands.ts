@@ -437,7 +437,8 @@ export const HOST_COMMANDS: SlashCommandDef[] = [
   d({
     name: "tasks",
     description: "List background tasks, subagents, and scheduled tasks",
-    layer: "passthrough",
+    layer: "host",
+    hostAction: "showTasks",
   }),
   d({
     name: "queue",

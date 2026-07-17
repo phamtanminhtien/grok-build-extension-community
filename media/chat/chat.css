@@ -1553,6 +1553,240 @@ header button.linkish:focus-visible {
   border-radius: var(--radius-sm);
 }
 
+/* ── Subagent detail panel (plan-panel chrome — distinct from list panes) ── */
+#subagent-panel {
+  display: none;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(58vh, 560px);
+  margin: 0 12px;
+  /* Subagent accent — green charts (matches task-row kind-subagent tag) */
+  --sa-accent: var(--vscode-charts-green, #89d185);
+  border: 1px solid color-mix(in srgb, var(--sa-accent) 36%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--sa-accent) 7%, var(--input-bg));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--sa-accent) 10%, transparent),
+    0 6px 20px color-mix(in srgb, var(--bg) 45%, #000);
+  overflow: hidden;
+}
+#subagent-panel:not([hidden]) {
+  display: flex;
+}
+#app.subagent-open #messages {
+  flex: 1 1 auto;
+  min-height: 48px;
+}
+#subagent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--sa-accent) 16%, transparent);
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--sa-accent) 12%, transparent);
+}
+#subagent-head .subagent-head-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: -0.01em;
+}
+#subagent-head .subagent-head-left .ti {
+  color: var(--sa-accent);
+  font-size: 1.1em;
+}
+#subagent-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subagent-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  color: var(--sa-accent);
+  background: color-mix(in srgb, var(--sa-accent) 16%, transparent);
+  text-transform: lowercase;
+  flex-shrink: 0;
+}
+.subagent-badge.status-running,
+.subagent-badge.status-starting {
+  color: var(--vscode-charts-blue, #3794ff);
+  background: color-mix(
+    in srgb,
+    var(--vscode-charts-blue, #3794ff) 16%,
+    transparent
+  );
+}
+.subagent-badge.status-done,
+.subagent-badge.status-completed {
+  color: var(--vscode-charts-green, #89d185);
+  background: color-mix(
+    in srgb,
+    var(--vscode-charts-green, #89d185) 16%,
+    transparent
+  );
+}
+.subagent-badge.status-failed {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 14%, transparent);
+}
+.subagent-badge.status-cancelled {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+}
+#subagent-close {
+  padding: 4px 8px;
+  min-height: 28px;
+  min-width: 28px;
+  flex-shrink: 0;
+}
+.subagent-desc {
+  padding: 8px 14px 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.subagent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 14px 0;
+  flex-shrink: 0;
+}
+.subagent-chips[hidden] {
+  display: none !important;
+}
+.subagent-chip {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  color: var(--muted);
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+#subagent-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 14px 12px;
+  scroll-behavior: auto;
+}
+#subagent-scroll .subagent-msg {
+  max-width: 100%;
+  animation: none;
+}
+/* Live transcript — reuse message timeline styles inside the panel */
+.subagent-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.subagent-timeline .msg {
+  max-width: 100%;
+  animation: none;
+  margin: 0;
+}
+.subagent-timeline .msg.user {
+  align-self: stretch;
+}
+.subagent-timeline .msg.user .bubble {
+  /* Task prompt: secondary surface, not full user-pill chrome */
+  background: color-mix(
+    in srgb,
+    var(--sa-accent, var(--link)) 8%,
+    var(--input-bg)
+  );
+  color: var(--fg);
+  border: 1px solid
+    color-mix(in srgb, var(--sa-accent, var(--link)) 18%, transparent);
+  border-radius: var(--radius-sm);
+  max-width: 100%;
+}
+.subagent-timeline .msg.system .bubble {
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  padding: 2px 0;
+}
+/* Quiet empty state — no main-chat skeleton shimmer */
+.subagent-timeline:empty::before {
+  content: "Subagent is running… activity appears as tools and text stream in.";
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+  padding: 8px 2px;
+}
+#subagent-panel .stream-shimmer {
+  display: none !important;
+}
+#subagent-panel.live .subagent-badge.status-running::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 0.05em;
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 28%, transparent);
+}
+#subagent-body.bubble.md:focus {
+  outline: none;
+}
+#subagent-body.bubble.md:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+#subagent-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 10px 12px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--sa-accent) 14%, transparent);
+  background: color-mix(in srgb, var(--sa-accent) 6%, var(--bg));
+  flex-shrink: 0;
+}
+#subagent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+#subagent-actions button {
+  border-radius: var(--radius-sm);
+  min-height: 32px;
+  padding: 7px 12px;
+  font-size: inherit;
+  font-weight: 500;
+}
+#subagent-kill:not([hidden]) {
+  color: color-mix(in srgb, var(--error) 88%, var(--fg));
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+}
+#subagent-kill:not([hidden]):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 20%, transparent);
+}
+
 /* ── Footer / composer ── */
 footer {
   position: relative;
@@ -2251,6 +2485,204 @@ button:disabled {
   background: #f48771;
   box-shadow: 0 2px 6px color-mix(in srgb, #f48771 45%, transparent);
 }
+/* Background tasks / subagents — twin of #queue-pane */
+#tasks-pane {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--btn-bg) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
+  max-height: 160px;
+}
+#tasks-pane.visible {
+  display: flex;
+}
+#tasks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+  font-size: 12px;
+  color: var(--muted);
+}
+#tasks-head .th-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+}
+#tasks-head .th-left .ti {
+  font-size: 14px;
+  color: var(--link);
+  flex-shrink: 0;
+  opacity: 0.95;
+}
+#tasks-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#tasks-refresh {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  min-width: 24px;
+  padding: 0;
+  line-height: 1;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--muted);
+}
+#tasks-refresh:hover:not(:disabled) {
+  background: var(--list-hover);
+  color: var(--fg);
+}
+#tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: 120px;
+}
+.task-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--input-bg) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fg) 6%, transparent);
+  font-size: 12px;
+  line-height: 1.3;
+  min-width: 0;
+}
+.task-row:hover {
+  background: color-mix(in srgb, var(--list-hover) 70%, var(--input-bg));
+}
+.task-row.stopping {
+  opacity: 0.75;
+}
+.task-row.done,
+.task-row.failed,
+.task-row.cancelled {
+  opacity: 0.85;
+}
+.task-row .t-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--vscode-charts-blue, #3794ff);
+}
+.task-row.running .t-status {
+  background: var(--vscode-charts-blue, #3794ff);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--vscode-charts-blue, #3794ff) 25%, transparent);
+}
+.task-row.stopping .t-status {
+  background: var(--vscode-charts-orange, #d18616);
+}
+.task-row.done .t-status {
+  background: var(--vscode-charts-green, #89d185);
+}
+.task-row.failed .t-status {
+  background: var(--vscode-errorForeground, #f14c4c);
+}
+.task-row.cancelled .t-status {
+  background: var(--vscode-descriptionForeground);
+}
+.task-row .t-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.task-row .t-main {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.task-row .t-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: var(--vscode-textLink-foreground, var(--vscode-charts-blue));
+}
+.task-row.kind-monitor .t-tag {
+  color: var(--vscode-charts-purple, #b180d7);
+}
+.task-row.kind-loop .t-tag {
+  color: var(--vscode-charts-orange, #d18616);
+}
+.task-row.kind-subagent .t-tag {
+  color: var(--vscode-charts-green, #89d185);
+}
+.task-row .t-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--vscode-foreground);
+}
+.task-row .t-detail {
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-row .t-meta {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--vscode-descriptionForeground);
+  font-variant-numeric: tabular-nums;
+}
+.task-row .t-actions {
+  display: inline-flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.task-row .t-actions button {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  line-height: 1;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.task-row .t-actions button .ti {
+  font-size: 14px;
+}
+.task-row .t-actions button:hover:not(:disabled) {
+  background: var(--list-hover);
+  color: var(--fg);
+}
+.task-row .t-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.task-row .t-actions button[data-t-act="kill"]:hover:not(:disabled) {
+  color: var(--error);
+}
+
 /* Prompt queue — same visual language as #review-bar / #edit-banner / chips */
 #queue-pane {
   display: none;
