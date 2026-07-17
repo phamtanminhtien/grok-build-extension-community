@@ -8,7 +8,7 @@ import type { AuthService } from "../auth/authService";
 import { pickLoginMethod, promptAndStoreApiKey } from "../auth/authService";
 import { formatLogoutMessage } from "../auth/authFlow";
 import { setModelSetting } from "../config/modelService";
-import { setAlwaysApprove } from "../config/alwaysApprove";
+import { getAlwaysApprove, setAlwaysApprove } from "../config/alwaysApprove";
 import { getSettings, resolveSessionCwd } from "../config/settings";
 import { openOutput } from "../log/output";
 import { tabFromSlashName } from "../extensions/tabs";
@@ -203,7 +203,7 @@ async function runHostAction(
       const arg = inv.args.trim().toLowerCase();
       let next: boolean;
       if (!arg) {
-        next = !getSettings().alwaysApprove;
+        next = !getAlwaysApprove();
       } else if (["off", "false", "0", "no", "disable"].includes(arg)) {
         next = false;
       } else {
@@ -213,9 +213,19 @@ async function runHostAction(
       if (next && !applied) {
         return "always-approve left OFF";
       }
+      // Live session: apply like TUI (disk already written by setAlwaysApprove).
+      if (deps.agent.getState().kind === "ready") {
+        try {
+          await deps.agent.applyCycleMode(
+            applied ? "always-approve" : "normal",
+          );
+        } catch {
+          // applyCycleMode re-persists; ignore if notify fails mid-restart.
+        }
+      }
       return applied
-        ? "always-approve ON — restart agent for spawn flag to apply"
-        : "always-approve OFF — restart agent for spawn flag to apply";
+        ? "always-approve ON — saved to ~/.grok/config.toml (shared with CLI)"
+        : "always-approve OFF — saved to ~/.grok/config.toml (shared with CLI)";
     }
     case "export": {
       const lines = deps.getTranscript();
@@ -257,8 +267,11 @@ async function runHostAction(
       const s = getSettings();
       const parts = [
         `cwd: ${resolveSessionCwd(s)}`,
-        `model: ${s.model || "default"}`,
+        `model: ${s.model || "(config.toml [models].default empty)"}`,
+        `reasoningEffort: ${s.reasoningEffort || "(unset)"}`,
+        `permissionMode: ${s.permissionMode}`,
         `alwaysApprove: ${s.alwaysApprove}`,
+        `(model/effort/permission from ~/.grok/config.toml)`,
         `agent: ${state.kind}`,
         state.kind === "ready"
           ? `sessionId: ${state.sessionId}`

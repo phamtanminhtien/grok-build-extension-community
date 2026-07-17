@@ -223,16 +223,6 @@
           "default": "",
           "markdownDescription": "Absolute path to the `grok` binary. Empty = search PATH then `~/.grok/bin/grok`."
         },
-        "grok.model": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Optional model id passed as `grok agent --model <id> stdio`."
-        },
-        "grok.alwaysApprove": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Pass `--always-approve` to the agent (auto-approve tools). Use only for trusted workspaces."
-        },
         "grok.cwd": {
           "type": "string",
           "default": "",

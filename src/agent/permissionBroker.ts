@@ -29,8 +29,8 @@ export class PermissionBroker {
   private queue: Promise<void> = Promise.resolve();
   /**
    * Session-scoped always-approve from Shift+Tab mode cycle (TUI yolo).
-   * When set, overrides `grok.alwaysApprove` for this process session.
-   * `undefined` → fall back to settings.
+   * When set, overrides disk `permission_mode` for this process session.
+   * `undefined` → fall back to `~/.grok/config.toml` via getSettings().
    */
   private alwaysApproveOverride: boolean | undefined;
   private promptUi: PermissionPromptHandler | undefined;
@@ -49,13 +49,13 @@ export class PermissionBroker {
 
   /**
    * Runtime always-approve (Shift+Tab Always-Approve arm). Pass `undefined`
-   * to use only the VS Code setting.
+   * to use only `~/.grok/config.toml` `[ui].permission_mode`.
    */
   setAlwaysApproveOverride(enabled: boolean | undefined): void {
     this.alwaysApproveOverride = enabled;
   }
 
-  /** Effective always-approve: session override, else settings. */
+  /** Effective always-approve: session override, else config.toml (TUI). */
   isAlwaysApprove(): boolean {
     if (this.alwaysApproveOverride !== undefined) {
       return this.alwaysApproveOverride;
@@ -78,9 +78,7 @@ export class PermissionBroker {
   ): Promise<RequestPermissionResponse> {
     const options = params.options ?? [];
     const title =
-      params.toolCall?.title ??
-      params.toolCall?.toolCallId ??
-      "tool operation";
+      params.toolCall?.title ?? params.toolCall?.toolCallId ?? "tool operation";
 
     logInfo(`[permission] request: ${title}`);
 
@@ -99,7 +97,10 @@ export class PermissionBroker {
     }
 
     for (const o of options) {
-      if (o.kind === "allow_always" && this.alwaysAllowOptionIds.has(o.optionId)) {
+      if (
+        o.kind === "allow_always" &&
+        this.alwaysAllowOptionIds.has(o.optionId)
+      ) {
         logInfo(`[permission] session always → ${o.name}`);
         return selected(o.optionId);
       }
@@ -111,19 +112,21 @@ export class PermissionBroker {
     }
 
     const detail = summarizeTool(params);
-    const viewOptions: PermissionOptionView[] = options.map((o) => {
-      const optionId = String(
-        (o as { optionId?: string; option_id?: string }).optionId ??
-          (o as { option_id?: string }).option_id ??
-          "",
-      );
-      return {
-        optionId,
-        name: o.name,
-        kind: String(o.kind ?? ""),
-        label: permissionOptionLabel(String(o.kind ?? ""), o.name),
-      };
-    }).filter((o) => !!o.optionId);
+    const viewOptions: PermissionOptionView[] = options
+      .map((o) => {
+        const optionId = String(
+          (o as { optionId?: string; option_id?: string }).optionId ??
+            (o as { option_id?: string }).option_id ??
+            "",
+        );
+        return {
+          optionId,
+          name: o.name,
+          kind: String(o.kind ?? ""),
+          label: permissionOptionLabel(String(o.kind ?? ""), o.name),
+        };
+      })
+      .filter((o) => !!o.optionId);
     const timeoutMs = getSettings().permissionTimeoutMs;
     const promptId = this.nextPromptId++;
 

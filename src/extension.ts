@@ -1,10 +1,7 @@
 import * as vscode from "vscode";
 import { AgentService } from "./agent/agentService";
 import { handleMissingCliError } from "./agent/missingCliPrompt";
-import {
-  readTextFileHost,
-  setBeforeWriteHook,
-} from "./agent/hostFs";
+import { readTextFileHost, setBeforeWriteHook } from "./agent/hostFs";
 import {
   AuthService,
   pickLoginMethod,
@@ -14,17 +11,8 @@ import { formatLogoutMessage } from "./auth/authFlow";
 
 import { DiffReviewService } from "./diff/diffReviewService";
 import { ExtensionsPanel } from "./extensions/extensionsPanel";
-import {
-  isExtensionsTab,
-  type ExtensionsTab,
-} from "./extensions/tabs";
-import {
-  disposeOutput,
-  logError,
-  logInfo,
-  openOutput,
-} from "./log/output";
-import { onAlwaysApproveConfigChanged } from "./config/alwaysApprove";
+import { isExtensionsTab, type ExtensionsTab } from "./extensions/tabs";
+import { disposeOutput, logError, logInfo, openOutput } from "./log/output";
 import { resolveSessionCwd } from "./config/settings";
 import { pickGrokSessionToResume } from "./session/sessionPicker";
 import { ChatViewProvider } from "./ui/chatViewProvider";
@@ -35,8 +23,7 @@ let agentService: AgentService | undefined;
 export function activate(context: vscode.ExtensionContext): void {
   // Match Claude Code / Codex: Secondary Side Bar tabs need VS Code ≥ 1.106
   const [major = 0, minor = 0] = vscode.version.split(".").map(Number);
-  const supportsSecondarySidebar =
-    major > 1 || (major === 1 && minor >= 106);
+  const supportsSecondarySidebar = major > 1 || (major === 1 && minor >= 106);
   void vscode.commands.executeCommand(
     "setContext",
     "grok.doesNotSupportSecondarySidebar",
@@ -58,12 +45,9 @@ export function activate(context: vscode.ExtensionContext): void {
     diffs.recordEdit({ path: filePath });
   });
 
-  const chat = new ChatViewProvider(
-    context.extensionUri,
-    agentService,
-    auth,
-    { supportsSecondarySidebar },
-  );
+  const chat = new ChatViewProvider(context.extensionUri, agentService, auth, {
+    supportsSecondarySidebar,
+  });
   chat.setDiffReview(diffs);
 
   const statusBar = new GrokStatusBar(agentService);
@@ -75,12 +59,6 @@ export function activate(context: vscode.ExtensionContext): void {
     chat,
     statusBar,
     diffs,
-    // Security: confirm when alwaysApprove is turned on via Settings UI.
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("grok.alwaysApprove")) {
-        void onAlwaysApproveConfigChanged();
-      }
-    }),
     // Same provider instance for activity-bar fallback + secondary sidebar
     vscode.window.registerWebviewViewProvider(
       ChatViewProvider.viewType,
@@ -268,7 +246,11 @@ export function activate(context: vscode.ExtensionContext): void {
         let tab: ExtensionsTab = "hooks";
         if (typeof args === "string" && isExtensionsTab(args)) {
           tab = args;
-        } else if (args && typeof args === "object" && isExtensionsTab(args.tab)) {
+        } else if (
+          args &&
+          typeof args === "object" &&
+          isExtensionsTab(args.tab)
+        ) {
           tab = args.tab;
         }
         ExtensionsPanel.show(context.extensionUri, agentService!, tab);

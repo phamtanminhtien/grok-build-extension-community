@@ -101,9 +101,14 @@ export async function spawnAgentProcess(options?: {
 
 function buildAgentArgs(settings: GrokSettings): string[] {
   const args = ["agent"];
+  // From `~/.grok/config.toml` [models] (via getSettings) — same as CLI.
   if (settings.model) {
     args.push("--model", settings.model);
   }
+  if (settings.reasoningEffort) {
+    args.push("--reasoning-effort", settings.reasoningEffort);
+  }
+  // From `~/.grok/config.toml` [ui].permission_mode.
   if (settings.alwaysApprove) {
     args.push("--always-approve");
   }

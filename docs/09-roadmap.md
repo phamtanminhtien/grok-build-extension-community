@@ -1,7 +1,7 @@
 # 09 — Roadmap
 
 Phased delivery. Each phase has **entry criteria**, **scope**, and
-**acceptance checks**. Do not start phase *N+1* features until phase *N*
+**acceptance checks**. Do not start phase _N+1_ features until phase _N_
 acceptance passes unless explicitly parallelized.
 
 ## Phase L0 — Protocol wire-up
@@ -49,7 +49,7 @@ Verified headless 2026-07-16: `initialize` + `session/new` + prompt → `L0 OK` 
 - Permission modal (allow / deny / always session)
 - Cancel turn
 - Context: active file + selection
-- Settings: binaryPath, model, alwaysApprove, apiKey (SecretStorage)
+- Settings: binaryPath, apiKey (SecretStorage); model/effort/permission via config.toml
 - Login empty-state + API key path
 - Status bar busy indicator
 - Host FS read/write capabilities **or** explicit deferral documented if
@@ -63,7 +63,7 @@ Verified headless 2026-07-16: `initialize` + `session/new` + prompt → `L0 OK` 
 - [x] Deny stops the tool path cleanly
 - [x] New session clears UI and creates new ACP session
 - [x] Restart recovers after killing the binary externally
-- [ ] Works on macOS; smoke on Linux and Windows *(macOS verified; Win/Linux TBD)*
+- [ ] Works on macOS; smoke on Linux and Windows _(macOS verified; Win/Linux TBD)_
 
 ### Exit artifacts
 
@@ -126,11 +126,11 @@ Spec: [superpowers/specs/2026-07-16-l2-full-polish-design.md](superpowers/specs/
 
 ## Parallel tracks (any phase)
 
-| Track | Notes |
-|-------|-------|
-| Design assets | Icons, empty-state illustrations |
+| Track          | Notes                                                    |
+| -------------- | -------------------------------------------------------- |
+| Design assets  | Icons, empty-state illustrations                         |
 | Docs for users | Install, Remote-SSH, FAQ (separate from this design set) |
-| Upstream fixes | File issues against Grok Build if ACP gaps found |
+| Upstream fixes | File issues against Grok Build if ACP gaps found         |
 
 ## Explicitly deferred forever (unless goals change)
 
@@ -141,11 +141,11 @@ Spec: [superpowers/specs/2026-07-16-l2-full-polish-design.md](superpowers/specs/
 ## Suggested timeline (indicative only)
 
 | Phase | Calendar (1–2 eng) |
-|-------|--------------------|
-| L0 | 2–4 days |
-| L1 | 2–3 weeks |
-| L2 | 4–6 weeks |
-| L3 | ongoing |
+| ----- | ------------------ |
+| L0    | 2–4 days           |
+| L1    | 2–3 weeks          |
+| L2    | 4–6 weeks          |
+| L3    | ongoing            |
 
 ## Next
 

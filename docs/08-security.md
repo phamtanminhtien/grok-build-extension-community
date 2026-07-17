@@ -2,15 +2,15 @@
 
 ## Threat model (summary)
 
-| Threat | Mitigation |
-|--------|------------|
-| Malicious workspace tricks agent into harmful commands | Permission prompts; sandbox (agent); workspace trust |
-| Extension auto-allows tools | Default `alwaysApprove=false`; clear UX warnings |
-| Secret exfiltration via prompt context | excludeGlob; no auto-attach `.env` |
-| Secret leakage in logs / webview | Redaction; SecretStorage; minimal RPC body logging |
-| Arg injection via settings | Validate `agentExtraArgs`; no shell interpolation |
-| Supply chain (deps / binary) | Lockfiles; checksums if bundling; official install only |
-| Prompt injection in webview HTML | Markdown sanitize; no raw HTML from model |
+| Threat                                                 | Mitigation                                                                  |
+| ------------------------------------------------------ | --------------------------------------------------------------------------- |
+| Malicious workspace tricks agent into harmful commands | Permission prompts; sandbox (agent); workspace trust                        |
+| Extension auto-allows tools                            | Default `permission_mode=ask` in config.toml; confirm before Always Approve |
+| Secret exfiltration via prompt context                 | excludeGlob; no auto-attach `.env`                                          |
+| Secret leakage in logs / webview                       | Redaction; SecretStorage; minimal RPC body logging                          |
+| Arg injection via settings                             | Validate `agentExtraArgs`; no shell interpolation                           |
+| Supply chain (deps / binary)                           | Lockfiles; checksums if bundling; official install only                     |
+| Prompt injection in webview HTML                       | Markdown sanitize; no raw HTML from model                                   |
 
 ## Workspace Trust
 
@@ -22,11 +22,11 @@
 
 Default posture: **ask**.
 
-| Mode | Behavior |
-|------|----------|
-| Ask (default) | Modal for tool permission requests |
-| Session always | Remember allow rules until restart |
-| Always approve | Setting or `--always-approve`; confirm on enable |
+| Mode           | Behavior                                                                                                        |
+| -------------- | --------------------------------------------------------------------------------------------------------------- |
+| Ask (default)  | Modal for tool permission requests                                                                              |
+| Session always | Remember allow rules until restart                                                                              |
+| Always approve | `~/.grok/config.toml` `permission_mode = "always-approve"` / mode button / `/always-approve`; confirm on enable |
 
 ### Timeout
 
@@ -35,11 +35,13 @@ If user ignores a permission dialog for `T` seconds (default 300):
 - Respond **deny**.
 - Toast: “Grok tool request timed out and was denied.”
 
-### YOLO confirmation
+### Always Approve confirmation
 
-Enabling `grok.alwaysApprove` requires a modal:
+Enabling Always Approve (`/always-approve` or mode cycle) requires a modal:
 
 > This allows Grok to run tools and edit files without asking. Continue?
+
+The choice is written to `~/.grok/config.toml` `[ui].permission_mode` (same as CLI).
 
 ## Path safety
 
@@ -58,11 +60,11 @@ Enabling `grok.alwaysApprove` requires a modal:
 
 ## Secrets
 
-| Do | Don't |
-|----|-------|
-| Store API keys in SecretStorage | Commit keys; put in plain settings without warning |
-| Redact `xai-` / bearer tokens in logs | Log full RPC bodies by default |
-| Pass key via env to child only | Echo key into chat history |
+| Do                                    | Don't                                              |
+| ------------------------------------- | -------------------------------------------------- |
+| Store API keys in SecretStorage       | Commit keys; put in plain settings without warning |
+| Redact `xai-` / bearer tokens in logs | Log full RPC bodies by default                     |
+| Pass key via env to child only        | Echo key into chat history                         |
 
 ## Child process
 
@@ -87,7 +89,7 @@ Enabling `grok.alwaysApprove` requires a modal:
 ## Security checklist before release
 
 - [x] Workspace Trust honored (agent start refused when untrusted)
-- [x] alwaysApprove defaults false + confirm (Settings UI + `/always-approve`)
+- [x] permission_mode defaults ask; confirm before Always Approve (mode UI + `/always-approve`)
 - [x] Permission timeout deny
 - [x] SecretStorage for keys
 - [x] CSP on webview (nonce script-src)

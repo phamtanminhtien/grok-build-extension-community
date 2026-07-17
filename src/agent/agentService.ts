@@ -25,11 +25,16 @@ import {
   type GrokSettings,
 } from "../config/settings";
 import {
+  loadPermissionMode,
+  permissionModeToCycleMode,
+  persistPermissionModeFromCycle,
+} from "../config/permissionMode";
+import {
   effortDisplayLabel,
   modelDisplayLabel,
   parseModelsFromSessionMeta,
   parseSessionModelState,
-  setModelSetting,
+  setModelAndEffortSetting,
   type GrokEffortOption,
   type GrokModelOption,
 } from "../config/modelService";
@@ -166,13 +171,15 @@ export class AgentService implements vscode.Disposable {
   private readonly _onTurnEnd = new vscode.EventEmitter<PromptResponse>();
   readonly onTurnEnd = this._onTurnEnd.event;
 
-  private readonly _onQueueChange = new vscode.EventEmitter<PromptQueueSnapshot>();
+  private readonly _onQueueChange =
+    new vscode.EventEmitter<PromptQueueSnapshot>();
   readonly onQueueChange = this._onQueueChange.event;
 
   /** ACP-advertised slash commands (skills + shell builtins). */
   private availableCommands: AvailableCommand[] = [];
-  private readonly _onAvailableCommands =
-    new vscode.EventEmitter<AvailableCommand[]>();
+  private readonly _onAvailableCommands = new vscode.EventEmitter<
+    AvailableCommand[]
+  >();
   readonly onAvailableCommands = this._onAvailableCommands.event;
 
   /**
@@ -202,8 +209,11 @@ export class AgentService implements vscode.Disposable {
   private acpModeId = "default";
   /** Session auto classifier (TUI `session.auto_mode`). */
   private autoMode = false;
-  private availableModes: Array<{ id: string; name: string; description?: string }> =
-    [];
+  private availableModes: Array<{
+    id: string;
+    name: string;
+    description?: string;
+  }> = [];
   private readonly _onModeChange = new vscode.EventEmitter<{
     mode: CycleModeId;
     label: string;
@@ -316,6 +326,8 @@ export class AgentService implements vscode.Disposable {
 
   /**
    * Apply a cycle mode arm (optimistic UI, then ACP + permission notify).
+   * Persists non-plan arms to `~/.grok/config.toml` like TUI
+   * `Effect::PersistPermissionMode`.
    */
   async applyCycleMode(mode: CycleModeId): Promise<void> {
     const prev = this.cycleModeId;
@@ -323,7 +335,11 @@ export class AgentService implements vscode.Disposable {
     this.autoMode = modeWantsAuto(mode);
     // Always-Approve → host auto-allow; Plan/Auto/Normal → no host yolo.
     this.permissions.setAlwaysApproveOverride(
-      modeWantsYolo(mode) ? true : mode === "plan" || mode === "auto" ? false : undefined,
+      modeWantsYolo(mode)
+        ? true
+        : mode === "plan" || mode === "auto"
+          ? false
+          : undefined,
     );
     this.fireModeChange();
 
@@ -335,6 +351,17 @@ export class AgentService implements vscode.Disposable {
       // Permission arms always notify (TUI PersistPermissionMode).
       if (mode !== "plan" || prev === "plan") {
         await this.notifyPermissionMode(mode);
+      }
+      // Shared with CLI — write disk after agent accepted the mode.
+      if (mode !== "plan") {
+        try {
+          const written = persistPermissionModeFromCycle(mode);
+          if (written) {
+            logInfo(`persisted [ui].permission_mode=${written}`);
+          }
+        } catch (err) {
+          logWarn(`Could not save permission_mode: ${formatUserError(err)}`);
+        }
       }
       // Re-assert cycle after wire (setSessionMode may not re-derive when preserve).
       this.cycleModeId = mode;
@@ -353,6 +380,27 @@ export class AgentService implements vscode.Disposable {
       );
       this.fireModeChange();
       throw err;
+    }
+  }
+
+  /**
+   * Seed cycle/permission UI from `~/.grok/config.toml` (same as TUI launch)
+   * and notify the agent so runtime matches disk.
+   */
+  private async applyPermissionModeFromDisk(): Promise<void> {
+    const resolved = loadPermissionMode();
+    const mode = permissionModeToCycleMode(resolved);
+    this.cycleModeId = mode;
+    this.autoMode = modeWantsAuto(mode);
+    this.permissions.setAlwaysApproveOverride(
+      modeWantsYolo(mode) ? true : mode === "auto" ? false : undefined,
+    );
+    this.fireModeChange();
+    try {
+      await this.notifyPermissionMode(mode);
+      logInfo(`permission mode from config.toml: ${resolved} → cycle=${mode}`);
+    } catch (err) {
+      logWarn(`notifyPermissionMode from disk failed: ${formatUserError(err)}`);
     }
   }
 
@@ -430,9 +478,7 @@ export class AgentService implements vscode.Disposable {
       try {
         await this.connection.agent.notify("x.ai/yolo_mode_changed", params);
       } catch (err) {
-        logWarn(
-          `yolo_mode_changed notify failed: ${formatUserError(err)}`,
-        );
+        logWarn(`yolo_mode_changed notify failed: ${formatUserError(err)}`);
       }
     }
   }
@@ -552,7 +598,10 @@ export class AgentService implements vscode.Disposable {
     const queueText =
       options?.queueText ??
       blocks
-        .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
+        .filter(
+          (b): b is Extract<ContentBlock, { type: "text" }> =>
+            b.type === "text",
+        )
         .map((b) => b.text)
         .join("\n\n");
     if (queueText) {
@@ -779,8 +828,8 @@ export class AgentService implements vscode.Disposable {
 
   /**
    * Switch model on the active session via ACP `session/set_model`
-   * (same path as TUI `/model`). Also persists `grok.model` for restarts.
-   * Optional effort is sent in `_meta.reasoningEffort` like the TUI.
+   * (same path as TUI `/model`). Persists to
+   * `~/.grok/config.toml` `[models].default` (+ optional effort).
    */
   async setSessionModel(
     modelId: string,
@@ -810,7 +859,15 @@ export class AgentService implements vscode.Disposable {
         : undefined;
     await this.requestSetSessionModel(sessionId, id, meta);
 
-    await setModelSetting(id);
+    try {
+      await setModelAndEffortSetting(id, effortId);
+      logInfo(
+        `persisted [models].default=${id}` +
+          (effortId ? ` default_reasoning_effort=${effortId}` : ""),
+      );
+    } catch (err) {
+      logWarn(`Could not save models config: ${formatUserError(err)}`);
+    }
     this.currentModelId = id;
     for (const m of this.models) {
       m.selected = m.id === id;
@@ -827,6 +884,7 @@ export class AgentService implements vscode.Disposable {
   /**
    * Set reasoning effort for the current model (TUI `/effort`).
    * Uses `session/set_model` with same model id + `_meta.reasoningEffort`.
+   * Persists `~/.grok/config.toml` `[models].default_reasoning_effort`.
    */
   async setReasoningEffort(effortId: string): Promise<void> {
     const id = effortId.trim();
@@ -837,6 +895,7 @@ export class AgentService implements vscode.Disposable {
     if (!modelId) {
       throw new Error("No current model to apply effort to");
     }
+    // setSessionModel persists both model + effort to config.toml.
     await this.setSessionModel(modelId, { effortId: id });
     this.currentEffortId = id;
     for (const e of this.efforts) {
@@ -925,9 +984,7 @@ export class AgentService implements vscode.Disposable {
       >("_x.ai/session_summaries/workspace_list_recent", {
         limit: Math.min(limit, 10_000),
       });
-      const arr = Array.isArray(res)
-        ? res
-        : (res.session_summaries ?? []);
+      const arr = Array.isArray(res) ? res : (res.session_summaries ?? []);
       return sortSessionsNewestFirst(
         arr
           .map(summaryWireToGrokSession)
@@ -1052,7 +1109,9 @@ export class AgentService implements vscode.Disposable {
 
     // SDK attachSession is internal; load response has no sessionId field.
     type Attachable = {
-      attachSession: (r: { sessionId: string } & typeof loadRes) => ActiveSession;
+      attachSession: (
+        r: { sessionId: string } & typeof loadRes,
+      ) => ActiveSession;
     };
     const agentCtx = this.connection.agent as unknown as Attachable;
     const session = agentCtx.attachSession({
@@ -1061,7 +1120,10 @@ export class AgentService implements vscode.Disposable {
     });
     this.session = session;
     // load response may carry config in result; merge meta when present.
-    this.ingestSessionModels(session, loadRes as { _meta?: unknown; models?: unknown });
+    this.ingestSessionModels(
+      session,
+      loadRes as { _meta?: unknown; models?: unknown },
+    );
     this.ingestSessionModes(session, loadRes as { modes?: unknown });
     void this.pumpSessionUpdates(session);
 
@@ -1194,16 +1256,13 @@ export class AgentService implements vscode.Disposable {
         });
 
         try {
-          await this.connection!.agent.request(
-            acp.methods.agent.authenticate,
-            {
-              methodId,
-              _meta: {
-                force_interactive: true,
-                use_oauth: true,
-              },
+          await this.connection!.agent.request(acp.methods.agent.authenticate, {
+            methodId,
+            _meta: {
+              force_interactive: true,
+              use_oauth: true,
             },
-          );
+          });
         } catch (err) {
           const msg = formatUserError(err);
           logError("interactive login failed", err);
@@ -1659,7 +1718,7 @@ export class AgentService implements vscode.Disposable {
     ) as ReadableStream<Uint8Array>;
     const stream = acp.ndJsonStream(input, output);
 
-    const identity = <T,>(p: T): T => p;
+    const identity = <T>(p: T): T => p;
     const connection = acp
       .client({ name: "grok-build-community-edition" })
       .onRequest(acp.methods.client.session.requestPermission, (ctx) =>
@@ -1682,15 +1741,11 @@ export class AgentService implements vscode.Disposable {
         }
       })
       // TUI question overlay — agent reverse-request (ExtMethod / custom method).
-      .onRequest(
-        "_x.ai/ask_user_question",
-        identity,
-        (ctx) => this.handleAskUserQuestion(ctx.params),
+      .onRequest("_x.ai/ask_user_question", identity, (ctx) =>
+        this.handleAskUserQuestion(ctx.params),
       )
-      .onRequest(
-        "x.ai/ask_user_question",
-        identity,
-        (ctx) => this.handleAskUserQuestion(ctx.params),
+      .onRequest("x.ai/ask_user_question", identity, (ctx) =>
+        this.handleAskUserQuestion(ctx.params),
       )
       .onNotification(acp.methods.client.session.update, (ctx) => {
         this.onSessionUpdateNotify(ctx.params);
@@ -1779,6 +1834,10 @@ export class AgentService implements vscode.Disposable {
       version: spawned.version,
     });
 
+    // Align host UI + agent runtime with CLI config (TUI load_permission_mode).
+    await this.applyPermissionModeFromDisk();
+    this.ingestSessionModes(session);
+
     void this.pumpSessionUpdates(session);
   }
 
@@ -1811,9 +1870,7 @@ export class AgentService implements vscode.Disposable {
           timeoutMs,
         });
       } catch (err) {
-        logWarn(
-          `ask_user_question webview failed: ${formatUserError(err)}`,
-        );
+        logWarn(`ask_user_question webview failed: ${formatUserError(err)}`);
       }
     } else {
       logWarn("ask_user_question: chat popover UI not registered");
@@ -1886,7 +1943,13 @@ export class AgentService implements vscode.Disposable {
         if (o.category === "model" && o.type === "select") {
           const select = o as {
             currentValue?: string;
-            options?: Array<{ value?: string; name?: string } | { group?: string; options?: Array<{ value?: string; name?: string }> }>;
+            options?: Array<
+              | { value?: string; name?: string }
+              | {
+                  group?: string;
+                  options?: Array<{ value?: string; name?: string }>;
+                }
+            >;
           };
           const rows: Array<{
             id: string;
@@ -1935,8 +1998,7 @@ export class AgentService implements vscode.Disposable {
       | { totalTokens?: number | string }
       | null
       | undefined;
-    const tok =
-      meta?.totalTokens != null ? ` tokens=${meta.totalTokens}` : "";
+    const tok = meta?.totalTokens != null ? ` tokens=${meta.totalTokens}` : "";
 
     switch (kind) {
       case "agent_message_chunk": {
@@ -2042,9 +2104,7 @@ export class AgentService implements vscode.Disposable {
   }
 }
 
-function summaryWireToGrokSession(
-  s: GrokSummaryWire,
-): GrokSession | undefined {
+function summaryWireToGrokSession(s: GrokSummaryWire): GrokSession | undefined {
   if (
     isHiddenSession({
       hidden: s.hidden,

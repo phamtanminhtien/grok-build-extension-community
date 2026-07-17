@@ -157,10 +157,16 @@ Type `/` in the chat (same names as Grok Build TUI):
 | Setting                    | Description                                            |
 | -------------------------- | ------------------------------------------------------ |
 | `grok.binaryPath`          | Absolute path to `grok` (empty = PATH / `~/.grok/bin`) |
-| `grok.model`               | Optional `--model`                                     |
-| `grok.alwaysApprove`       | Pass `--always-approve` (dangerous; confirm on enable) |
 | `grok.cwd`                 | Session cwd (empty = first workspace folder)           |
 | `grok.initializeTimeoutMs` | Spawn/init timeout (default 30s)                       |
+
+Shared with the CLI/TUI via `~/.grok/config.toml` (not VS Code settings):
+
+| Key              | Path                                                            |
+| ---------------- | --------------------------------------------------------------- |
+| Permission mode  | `[ui].permission_mode` — mode button / `/always-approve`        |
+| Default model    | `[models].default` — model picker / `/model`                    |
+| Reasoning effort | `[models].default_reasoning_effort` — effort picker / `/effort` |
 
 ---
 
@@ -173,7 +179,7 @@ src/
   ui/             # chat webview + status bar
   auth/           # SecretStorage API key
   context/        # active file / selection → ACP blocks
-  config/         # settings + alwaysApprove guard
+  config/         # settings + permissionMode (config.toml)
   log/output.ts
 media/demo.gif              # README product demo (GitHub raw; excluded from VSIX)
 media/grok.svg              # activity bar (monochrome Grok mark)
