@@ -80,7 +80,10 @@
         "command": "grok.openChat",
         "title": "Grok Build: Open Chat",
         "category": "Grok Build",
-        "icon": "$(comment-discussion)"
+        "icon": {
+          "light": "media/grok-light.svg",
+          "dark": "media/grok-dark.svg"
+        }
       },
       {
         "command": "grok.openChatActivityBar",
@@ -226,6 +229,13 @@
           "command": "grok.openExtensions",
           "when": "view == grok.chatView || view == grok.chatView.secondary",
           "group": "navigation@4"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "grok.openChat",
+          "group": "navigation",
+          "when": "resourceScheme != output && resourceScheme != log"
         }
       ],
       "editor/context": [

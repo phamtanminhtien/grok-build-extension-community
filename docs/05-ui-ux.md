@@ -47,67 +47,73 @@ While a turn is running, Enter **queues** a follow-up via `session/prompt`
 (server-authoritative). The panel above the composer lists held rows from
 `x.ai/queue/changed` and supports:
 
-| Action | Wire |
-|--------|------|
-| Remove | `x.ai/queue/remove` |
-| Reorder (↑/↓) | `x.ai/queue/reorder` |
-| Clear | `x.ai/queue/clear` |
-| Edit | `x.ai/queue/edit` |
+| Action             | Wire                   |
+| ------------------ | ---------------------- |
+| Remove             | `x.ai/queue/remove`    |
+| Reorder (↑/↓)      | `x.ai/queue/reorder`   |
+| Clear              | `x.ai/queue/clear`     |
+| Edit               | `x.ai/queue/edit`      |
 | Send now (per row) | `x.ai/queue/interject` |
 
 Primary composer button modes only:
 
-| State | Button |
-|-------|--------|
-| Idle + text | **Send** |
-| Busy + empty | **Stop** |
-| Busy + text | **Queue** |
+| State        | Button    |
+| ------------ | --------- |
+| Idle + text  | **Send**  |
+| Busy + empty | **Stop**  |
+| Busy + text  | **Queue** |
 
 Inject / send-now is **not** on that button — use the bolt control on a queue row.
 
-### 3. Status bar item
+### 3. Editor title (top-right)
+
+- Icon: Grok mark (`media/grok-light.svg` / `media/grok-dark.svg`).
+- Command: `grok.openChat` — opens the chat panel from any text editor.
+- Menu: `editor/title` group `navigation`.
+
+### 4. Status bar item
 
 - Idle: `Grok` / model short name.
 - Running: spinner + “Grok working…”.
 - Error: alert icon; click opens Output / panel.
 
-### 4. Commands (Command Palette)
+### 5. Commands (Command Palette)
 
-| Command id | Title | MVP |
-|------------|-------|-----|
-| `grok.openChat` | Grok: Open Chat | Yes |
-| `grok.newSession` | Grok: New Session | Yes |
-| `grok.cancel` | Grok: Cancel Turn | Yes |
-| `grok.restartAgent` | Grok: Restart Agent | Yes |
-| `grok.selectModel` | Grok: Select Model | Yes |
-| `grok.login` | Grok: Login | Yes |
-| `grok.addSelectionToChat` | Grok: Add Selection to Chat | Yes |
-| `grok.addFileToChat` | Grok: Add Active File to Chat | Yes |
-| `grok.showOutput` | Grok: Show Output Channel | Yes |
-| `grok.resumeSession` | Grok: Resume Session… | L2 |
+| Command id                | Title                         | MVP |
+| ------------------------- | ----------------------------- | --- |
+| `grok.openChat`           | Grok: Open Chat               | Yes |
+| `grok.newSession`         | Grok: New Session             | Yes |
+| `grok.cancel`             | Grok: Cancel Turn             | Yes |
+| `grok.restartAgent`       | Grok: Restart Agent           | Yes |
+| `grok.selectModel`        | Grok: Select Model            | Yes |
+| `grok.login`              | Grok: Login                   | Yes |
+| `grok.addSelectionToChat` | Grok: Add Selection to Chat   | Yes |
+| `grok.addFileToChat`      | Grok: Add Active File to Chat | Yes |
+| `grok.showOutput`         | Grok: Show Output Channel     | Yes |
+| `grok.resumeSession`      | Grok: Resume Session…         | L2  |
 
-### 5. Keybindings (proposed defaults)
+### 6. Keybindings (proposed defaults)
 
-| Key | Command | When |
-|-----|---------|------|
-| (none global mandatory) | — | Avoid fighting Copilot |
-| `Enter` in composer | Send | Webview only |
-| `Shift+Enter` | Newline | Webview only |
-| `Escape` | Cancel turn | When running (webview focus) |
+| Key                     | Command     | When                         |
+| ----------------------- | ----------- | ---------------------------- |
+| (none global mandatory) | —           | Avoid fighting Copilot       |
+| `Enter` in composer     | Send        | Webview only                 |
+| `Shift+Enter`           | Newline     | Webview only                 |
+| `Escape`                | Cancel turn | When running (webview focus) |
 
 Users may bind `grok.openChat` themselves.
 
 ## Message rendering
 
-| Stream event | Render |
-|--------------|--------|
-| User text | Right/secondary bubble |
-| `agent_message_chunk` | Streaming markdown (sanitize HTML) |
-| `agent_thought_chunk` | Collapsible “Thinking” |
-| `tool_call` | Card: icon by kind, title, status badge |
-| `tool_call_update` | Progress / completed / failed + truncated output |
-| Plan | Ordered checklist (L2) |
-| Permission pending | Inline banner + modal |
+| Stream event          | Render                                           |
+| --------------------- | ------------------------------------------------ |
+| User text             | Right/secondary bubble                           |
+| `agent_message_chunk` | Streaming markdown (sanitize HTML)               |
+| `agent_thought_chunk` | Collapsible “Thinking”                           |
+| `tool_call`           | Card: icon by kind, title, status badge          |
+| `tool_call_update`    | Progress / completed / failed + truncated output |
+| Plan                  | Ordered checklist (L2)                           |
+| Permission pending    | Inline banner + modal                            |
 
 ### Markdown rules
 
@@ -118,14 +124,14 @@ Users may bind `grok.openChat` themselves.
 
 ### Tool card kinds (heuristic)
 
-| Kind / title contains | Icon suggestion |
-|----------------------|-----------------|
-| read / grep / search | search |
-| edit / write / patch | edit |
-| terminal / bash / shell | terminal |
-| web | globe |
-| task / subagent | organization |
-| default | tools |
+| Kind / title contains   | Icon suggestion |
+| ----------------------- | --------------- |
+| read / grep / search    | search          |
+| edit / write / patch    | edit            |
+| terminal / bash / shell | terminal        |
+| web                     | globe           |
+| task / subagent         | organization    |
+| default                 | tools           |
 
 ## Permission UX
 
@@ -176,13 +182,13 @@ Removal: click ×. Adding: commands / drag file (L2) / `@` menu (L2).
 
 ## Empty states
 
-| State | Message | CTA |
-|-------|---------|-----|
-| No binary | “Grok CLI not found” | Install guide / set path |
-| Not logged in | “Not signed in — use Sign in…” | **Sign in** (browser OAuth / API key) |
+| State                 | Message                              | CTA                                                             |
+| --------------------- | ------------------------------------ | --------------------------------------------------------------- |
+| No binary             | “Grok CLI not found”                 | Install guide / set path                                        |
+| Not logged in         | “Not signed in — use Sign in…”       | **Sign in** (browser OAuth / API key)                           |
 | Signed in (CLI / API) | “Signed in via CLI session (email)…” | **Log out** (clears `~/.grok/auth.json`, same as `grok logout`) |
-| No workspace folder | “Open a folder to start” | Open folder |
-| Ready | Short tips / example prompts | — |
+| No workspace folder   | “Open a folder to start”             | Open folder                                                     |
+| Ready                 | Short tips / example prompts         | —                                                               |
 
 Auth CTAs must stay in sync with the CLI session: login/logout write the same
 `~/.grok/auth.json` the `grok` CLI uses, and the empty-state button flips
@@ -204,11 +210,11 @@ between Sign in and Log out from that shared status.
 
 ## Performance budgets (targets)
 
-| Metric | Target |
-|--------|--------|
-| Webview first paint | < 300 ms after open |
-| Stream chunk apply | No full re-render of entire history each chunk (L1 may simple; L2 virtualize) |
-| History length | Soft-trim UI at N messages; full history remains in agent session |
+| Metric              | Target                                                                        |
+| ------------------- | ----------------------------------------------------------------------------- |
+| Webview first paint | < 300 ms after open                                                           |
+| Stream chunk apply  | No full re-render of entire history each chunk (L1 may simple; L2 virtualize) |
+| History length      | Soft-trim UI at N messages; full history remains in agent session             |
 
 ## Next
 
