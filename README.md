@@ -125,20 +125,21 @@ Use commit prefixes: `feat:`, `fix:`, `feat!:` / `BREAKING CHANGE:`.
 
 ## Commands
 
-| Command                            | Action                                          |
-| ---------------------------------- | ----------------------------------------------- |
-| `Grok Build: Open Chat`            | Focus sidebar chat                              |
-| `Grok Build: Open Output`          | Show Output channel `Grok Build`                |
-| `Grok Build: Start Agent`          | Spawn → `initialize` → `session/new`            |
-| `Grok Build: New Session`          | New ACP session + clear UI                      |
-| `Grok Build: Cancel Turn`          | `session/cancel`                                |
-| `Grok Build: Add Context…`         | `@` sticky context picker                       |
-| `Grok Build: Select Model`         | QuickPick → `grok.model` + agent restart        |
-| `Grok Build: Resume Session…`      | Session history + `session/load` when available |
-| `Grok Build: Review Edits…`        | Multi-file diff review                          |
-| `Grok Build: Login / Set API Key`  | Browser login or SecretStorage API key          |
-| `Grok Build: Smoke Test (L0)`      | Headless-style prompt via agent                 |
-| `Grok Build: Restart / Stop Agent` | Process lifecycle                               |
+| Command                            | Action                                                               |
+| ---------------------------------- | -------------------------------------------------------------------- |
+| `Grok Build: Open Chat`            | Focus sidebar chat                                                   |
+| `Grok Build: Open Output`          | Show Output channel `Grok Build`                                     |
+| `Grok Build: Start Agent`          | Spawn → `initialize` → `session/new`                                 |
+| `Grok Build: New Session`          | New ACP session + clear UI                                           |
+| `Grok Build: Cancel Turn`          | `session/cancel`                                                     |
+| `Grok Build: Add Context…`         | `@` sticky context picker                                            |
+| `Grok Build: Fix with Grok`        | From hover / Quick Fix: fill composer with diagnostic + file snippet |
+| `Grok Build: Select Model`         | QuickPick → `grok.model` + agent restart                             |
+| `Grok Build: Resume Session…`      | Session history + `session/load` when available                      |
+| `Grok Build: Review Edits…`        | Multi-file diff review                                               |
+| `Grok Build: Login / Set API Key`  | Browser login or SecretStorage API key                               |
+| `Grok Build: Smoke Test (L0)`      | Headless-style prompt via agent                                      |
+| `Grok Build: Restart / Stop Agent` | Process lifecycle                                                    |
 
 ### Slash commands (chat composer)
 

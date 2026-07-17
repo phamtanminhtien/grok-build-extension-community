@@ -15,6 +15,12 @@ import { isExtensionsTab, type ExtensionsTab } from "./extensions/tabs";
 import { disposeOutput, logError, logInfo, openOutput } from "./log/output";
 import { resolveSessionCwd } from "./config/settings";
 import { pickGrokSessionToResume } from "./session/sessionPicker";
+import {
+  FIX_WITH_GROK_COMMAND,
+  registerFixWithGrokProviders,
+  resolveFixWithGrok,
+} from "./context/fixWithGrokProvider";
+import type { FixWithGrokPayload } from "./context/fixWithGrok";
 import { ChatViewProvider } from "./ui/chatViewProvider";
 import { GrokStatusBar } from "./ui/statusBar";
 
@@ -249,6 +255,29 @@ export function activate(context: vscode.ExtensionContext): void {
         `Look at the active file: ${editor.document.uri.fsPath}`,
       );
     }),
+
+    vscode.commands.registerCommand(
+      FIX_WITH_GROK_COMMAND,
+      async (payload?: FixWithGrokPayload) => {
+        if (!payload || typeof payload !== "object" || !payload.uri) {
+          void vscode.window.showWarningMessage(
+            "Grok Build: no diagnostic payload for Fix with Grok",
+          );
+          return;
+        }
+        try {
+          const { text, chips } = await resolveFixWithGrok(payload);
+          await chat.fillComposer(text, chips);
+        } catch (err) {
+          logError("Fix with Grok failed", err);
+          void vscode.window.showErrorMessage(
+            `Grok Build: Fix with Grok failed — ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      },
+    ),
+
+    ...registerFixWithGrokProviders(),
 
     vscode.commands.registerCommand("grok.addContext", async () => {
       await chat.addContextFromPicker();

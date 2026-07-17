@@ -410,6 +410,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     await this.handleSend(text);
   }
 
+  /**
+   * Open chat and fill the composer draft (does not send).
+   * Optionally attach sticky context chips (e.g. file for Fix with Grok).
+   */
+  async fillComposer(text: string, chips?: ContextChip[]): Promise<void> {
+    await this.openChat();
+    if (!(await this.waitForWebview(1500))) {
+      void vscode.window.showWarningMessage(
+        "Grok Build: open the chat panel to fill the composer",
+      );
+      return;
+    }
+    if (chips?.length) {
+      this.addStickyChips(chips);
+    }
+    this.post({ type: "setComposer", text });
+  }
+
   async addContextFromPicker(): Promise<void> {
     await this.openChat();
     if (!(await this.waitForWebview())) {
@@ -2287,6 +2305,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           type: m.type,
           id: m.id,
           text: m.text,
+          // Same sanitized GFM pipeline as assistant (code fences, lists, links).
+          html: this.cachedMarkdown(m.id, m.text || ""),
           chips: m.chips,
           images: (m.images ?? []).map((img) => ({
             ...img,
