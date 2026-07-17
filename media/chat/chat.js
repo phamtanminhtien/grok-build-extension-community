@@ -1308,11 +1308,19 @@ function attachCopyButtons(root) {
     const btn = document.createElement("button");
     btn.className = "copy-code";
     btn.type = "button";
-    btn.textContent = "Copy";
+    btn.title = "Copy";
+    btn.setAttribute("aria-label", "Copy code");
+    btn.innerHTML = icon("copy");
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const text = pre.innerText.replace(/^Copy\n?/, "");
+      const code = pre.querySelector("code");
+      const text = (
+        (code && (code.innerText || code.textContent)) ||
+        pre.innerText ||
+        ""
+      ).replace(/^\s+/, "");
       navigator.clipboard.writeText(text);
+      if (typeof flashCopyBtn === "function") flashCopyBtn(btn);
     });
     pre.style.position = "relative";
     pre.prepend(btn);
@@ -2098,9 +2106,10 @@ function messageCopyFromDom(wrap) {
   );
   const parts = [];
   bubbles.forEach((b) => {
-    let t = (b.innerText || b.textContent || "").trim();
-    // Drop code-block "Copy" button label if present at start of pre text.
-    t = t.replace(/^Copy\n?/gm, "").trim();
+    // Exclude code-block copy buttons so icon/label never pollutes plain text.
+    const clone = b.cloneNode(true);
+    clone.querySelectorAll(".copy-code").forEach((el) => el.remove());
+    let t = (clone.innerText || clone.textContent || "").trim();
     if (t) parts.push(t);
   });
   return parts.join("\n\n").trim();
@@ -2476,8 +2485,9 @@ function renderOneMessage(m, isNew) {
       wrap.classList.add("editing");
     }
     const b = document.createElement("div");
-    b.className = "bubble";
-    b.textContent = m.text || "";
+    // Prefer host-sanitized markdown HTML (same pipeline as assistant).
+    b.className = "bubble" + (m.html ? " md" : "");
+    fillTextBubble(b, m.text || "", m.html || "");
     wrap.appendChild(b);
     wrap.appendChild(renderMsgActions(m));
   } else if (m.type === "assistant") {
@@ -4087,6 +4097,20 @@ window.addEventListener("message", (event) => {
     setQueueEditMode(!!msg.active, msg.text || "");
   } else if (msg.type === "restoreEditComposer") {
     restoreEditComposer(msg.id, msg.text);
+  } else if (msg.type === "setComposer") {
+    const draft = msg.text != null ? String(msg.text) : "";
+    composer.value = draft;
+    if (typeof autosizeComposer === "function") autosizeComposer();
+    // Programmatic value changes do not fire "input" — refresh Send enablement.
+    updateSendStopButton();
+    composer.focus();
+    const len = composer.value.length;
+    try {
+      composer.setSelectionRange(len, len);
+    } catch {
+      /* ignore */
+    }
+    if (typeof syncComposerMenus === "function") syncComposerMenus();
   } else if (msg.type === "busy") {
     setBusy(!!msg.busy);
   } else if (msg.type === "blockingLoad") {
