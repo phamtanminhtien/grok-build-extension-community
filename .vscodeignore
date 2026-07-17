@@ -18,3 +18,17 @@ esbuild.mjs
 **/.git/**
 **/.github/**
 *.vsix
+
+# Dev / packaging junk (not needed at runtime)
+.yarn/**
+.yarnrc.yml
+yarn.lock
+release-please-config.json
+.release-please-manifest.json
+
+# README demo only — hosted on GitHub raw, not shipped in VSIX
+media/demo.gif
+
+# Webview only needs woff2 (copied by esbuild); drop fallback formats if present
+media/tabler/fonts/*.ttf
+media/tabler/fonts/*.woff

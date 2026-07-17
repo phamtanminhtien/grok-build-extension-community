@@ -3,7 +3,7 @@
 Community VS Code host for **Grok Build**: a thin TypeScript client
 that speaks **ACP** to `grok agent stdio`. The agent runtime stays in Rust.
 
-![Grok Build Community Edition demo](media/demo.gif)
+![Grok Build Community Edition demo](https://raw.githubusercontent.com/phamtanminhtien/grok-build-extension-community/main/media/demo.gif)
 
 | Phase                       | Status         |
 | --------------------------- | -------------- |
@@ -175,18 +175,18 @@ src/
   context/        # active file / selection → ACP blocks
   config/         # settings + alwaysApprove guard
   log/output.ts
-media/demo.gif              # README product demo
+media/demo.gif              # README product demo (GitHub raw; excluded from VSIX)
 media/grok.svg              # activity bar (monochrome Grok mark)
 media/grok-light.svg        # panel tab icon (light theme)
 media/grok-dark.svg         # panel tab icon (dark theme)
 media/icon.png              # marketplace icon (256×256 from media/icon.svg)
 media/icon.svg              # source for marketplace logo
-media/tabler/               # webfont copied on build
+media/tabler/               # webfont (woff2 only) copied on build
 scripts/smoke-cli.mjs
 docs/
 ```
 
-Chat UI uses **[@tabler/icons-webfont](https://tabler.io/icons)** (`yarn build` copies CSS/fonts into `media/tabler/`).
+Chat UI uses **[@tabler/icons-webfont](https://tabler.io/icons)** (`yarn build` copies CSS + woff2 into `media/tabler/`).
 
 ---
 
