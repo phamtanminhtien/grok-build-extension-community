@@ -3583,6 +3583,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             <i class="ti ti-route-alt-left" aria-hidden="true"></i>
             <span class="mode-btn-label" id="mode-btn-label">Normal</span>
           </button>
+          <div id="ctx-usage" class="ctx-usage" hidden title="Context window usage" aria-label="Context window usage">
+            <span class="ctx-sep" aria-hidden="true">|</span>
+            <svg class="ctx-ring" viewBox="0 0 36 36" width="14" height="14" aria-hidden="true">
+              <circle class="ctx-ring-track" cx="18" cy="18" r="14" fill="none" stroke-width="3.5" />
+              <circle class="ctx-ring-fill" cx="18" cy="18" r="14" fill="none" stroke-width="3.5" stroke-linecap="round" transform="rotate(-90 18 18)" stroke-dasharray="87.96" stroke-dashoffset="87.96" />
+            </svg>
+            <span class="ctx-usage-text" id="ctx-usage-text">—</span>
+          </div>
           <div class="actions-right">
             <button id="btn-model" class="secondary" type="button" title="Select model (same catalog as TUI)" aria-label="Select model" aria-haspopup="listbox">
               <i class="ti ti-cpu" aria-hidden="true"></i>

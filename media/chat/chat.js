@@ -68,6 +68,13 @@ const stickyEl = document.getElementById("sticky");
 const reviewBar = document.getElementById("review-bar");
 const reviewLabel = document.getElementById("review-label");
 const ctxBarEl = document.getElementById("ctx-bar");
+const ctxUsageEl = document.getElementById("ctx-usage");
+const ctxUsageTextEl = document.getElementById("ctx-usage-text");
+const ctxRingFillEl = ctxUsageEl
+  ? ctxUsageEl.querySelector(".ctx-ring-fill")
+  : null;
+/** Circumference for r=14 circle progress (2πr). */
+const CTX_RING_C = 2 * Math.PI * 14;
 const turnStatusEl = document.getElementById("turn-status");
 const tsProcess = turnStatusEl.querySelector(".ts-process");
 const tsTime = turnStatusEl.querySelector(".ts-time");
@@ -3418,19 +3425,53 @@ function setMeta(text, spinning) {
     "</span>";
 }
 
-// Top-right context bar — TUI style: 8.5K / 200K (used / context window).
+// Context usage: header chip + composer (mode | circle | used / window).
 function renderContextBar(c) {
-  if (!c || !c.visible || !c.text) {
-    ctxBarEl.hidden = true;
-    ctxBarEl.textContent = "";
-    ctxBarEl.className = "";
-    ctxBarEl.removeAttribute("title");
+  const hide = !c || !c.visible || !c.text;
+  if (hide) {
+    if (ctxBarEl) {
+      ctxBarEl.hidden = true;
+      ctxBarEl.textContent = "";
+      ctxBarEl.className = "";
+      ctxBarEl.removeAttribute("title");
+    }
+    if (ctxUsageEl) {
+      ctxUsageEl.hidden = true;
+      ctxUsageEl.className = "ctx-usage";
+      ctxUsageEl.removeAttribute("title");
+      if (ctxUsageTextEl) ctxUsageTextEl.textContent = "—";
+      if (ctxRingFillEl) {
+        ctxRingFillEl.style.strokeDasharray = String(CTX_RING_C);
+        ctxRingFillEl.style.strokeDashoffset = String(CTX_RING_C);
+      }
+    }
     return;
   }
-  ctxBarEl.hidden = false;
-  ctxBarEl.textContent = c.text;
-  ctxBarEl.className = "level-" + (c.level || "ok");
-  ctxBarEl.title = c.title || "Context " + c.text;
+
+  const level = c.level || "ok";
+  const title = c.title || "Context " + c.text;
+  const pct = Math.max(0, Math.min(100, Number(c.pct) || 0));
+
+  // Header top-right (text only).
+  if (ctxBarEl) {
+    ctxBarEl.hidden = false;
+    ctxBarEl.textContent = c.text;
+    ctxBarEl.className = "level-" + level;
+    ctxBarEl.title = title;
+  }
+
+  // Composer: mode | circle progress | tokens / context window.
+  if (ctxUsageEl) {
+    ctxUsageEl.hidden = false;
+    ctxUsageEl.className = "ctx-usage level-" + level;
+    ctxUsageEl.title = title;
+    if (ctxUsageTextEl) ctxUsageTextEl.textContent = c.text;
+    if (ctxRingFillEl) {
+      const offset = CTX_RING_C * (1 - pct / 100);
+      ctxRingFillEl.style.strokeDasharray = String(CTX_RING_C);
+      ctxRingFillEl.style.strokeDashoffset = String(offset);
+    }
+  }
 }
 
 function renderTurnStatus(s) {

@@ -2533,6 +2533,9 @@ footer {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  /* Responsive mode / ctx chips via container queries */
+  container-type: inline-size;
+  container-name: composer-actions;
 }
 /* mode | spacer | model · reasoning · send — stay inside shell, shrink if narrow */
 .actions-right {
@@ -2566,6 +2569,43 @@ footer {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Narrow sidebar / panel: icon-only mode (title + aria-label keep full name) */
+@container composer-actions (max-width: 380px) {
+  #btn-mode {
+    padding: 6px 8px;
+    gap: 0;
+    min-width: 30px;
+  }
+  #btn-mode .mode-btn-label {
+    display: none;
+  }
+  /* Keep ring + drop token text to free space */
+  .ctx-usage .ctx-usage-text {
+    display: none;
+  }
+  .ctx-usage {
+    max-width: none;
+    gap: 4px;
+  }
+}
+@container composer-actions (max-width: 300px) {
+  /* Very tight: hide separator + token chip text, keep ring only */
+  .ctx-usage .ctx-sep {
+    display: none;
+  }
+  #btn-model .model-btn-label,
+  #btn-effort .effort-btn-label,
+  #btn-model .ti-chevron-up,
+  #btn-effort .ti-chevron-up {
+    display: none;
+  }
+  #btn-model,
+  #btn-effort {
+    padding: 6px 8px;
+    min-width: 30px;
+    max-width: 36px;
+  }
+}
 #btn-mode.mode-plan {
   color: color-mix(in srgb, var(--focus) 85%, var(--fg));
   background: color-mix(in srgb, var(--focus) 14%, transparent);
@@ -2588,6 +2628,81 @@ footer {
 }
 #btn-mode.mode-always-approve:hover:not(:disabled) {
   background: color-mix(in srgb, #e05353 26%, transparent);
+}
+
+/* Mode | circle progress | used / context window (composer action row) */
+.ctx-usage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  min-width: 0;
+  max-width: 14em;
+  padding: 0 2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  user-select: none;
+  white-space: nowrap;
+}
+.ctx-usage[hidden] {
+  display: none !important;
+}
+.ctx-usage .ctx-sep {
+  color: color-mix(in srgb, var(--muted) 55%, transparent);
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 1;
+  margin: 0 1px 0 2px;
+  opacity: 0.9;
+}
+.ctx-usage .ctx-ring {
+  flex-shrink: 0;
+  display: block;
+  width: 14px;
+  height: 14px;
+  overflow: visible;
+}
+.ctx-usage .ctx-ring-track {
+  stroke: color-mix(in srgb, var(--muted) 28%, transparent);
+}
+.ctx-usage .ctx-ring-fill {
+  stroke: var(--fg);
+  transition:
+    stroke-dashoffset 200ms ease,
+    stroke 140ms ease;
+}
+.ctx-usage .ctx-usage-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  color: var(--fg);
+}
+.ctx-usage.level-ok .ctx-ring-fill {
+  stroke: var(--fg);
+}
+.ctx-usage.level-ok .ctx-usage-text {
+  color: var(--fg);
+}
+.ctx-usage.level-warn {
+  color: var(--vscode-editorWarning-foreground, #d29922);
+}
+.ctx-usage.level-warn .ctx-ring-fill {
+  stroke: var(--vscode-editorWarning-foreground, #d29922);
+}
+.ctx-usage.level-warn .ctx-usage-text {
+  color: var(--vscode-editorWarning-foreground, #d29922);
+}
+.ctx-usage.level-critical {
+  color: var(--vscode-errorForeground, #f85149);
+}
+.ctx-usage.level-critical .ctx-ring-fill {
+  stroke: var(--vscode-errorForeground, #f85149);
+}
+.ctx-usage.level-critical .ctx-usage-text {
+  color: var(--vscode-errorForeground, #f85149);
 }
 
 /* ── Buttons ── */
