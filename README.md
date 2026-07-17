@@ -3,6 +3,8 @@
 Community VS Code host for **Grok Build**: a thin TypeScript client
 that speaks **ACP** to `grok agent stdio`. The agent runtime stays in Rust.
 
+![Grok Build Community Edition demo](media/demo.gif)
+
 | Phase                       | Status         |
 | --------------------------- | -------------- |
 | Design docs                 | Done (`docs/`) |
@@ -173,6 +175,7 @@ src/
   context/        # active file / selection → ACP blocks
   config/         # settings + alwaysApprove guard
   log/output.ts
+media/demo.gif              # README product demo
 media/grok.svg              # activity bar (monochrome Grok mark)
 media/grok-light.svg        # panel tab icon (light theme)
 media/grok-dark.svg         # panel tab icon (dark theme)
