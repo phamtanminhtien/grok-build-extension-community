@@ -13,6 +13,7 @@ import {
   classifyToolVerb,
   emptyAssistant,
   extractToolContentText,
+  finalizeAssistantStream,
   finishAssistantThoughts,
   formatToolValue,
   formatToolVerbGroupLabel,
@@ -229,6 +230,28 @@ describe("timeline: thoughts stay split across tools", () => {
     }
     assert.equal(assistantPlainText(msg), "Final answer");
     assert.equal(assistantHasRunningThought(msg), false);
+  });
+
+  it("finalizeAssistantStream freezes thoughts and settles running tools", () => {
+    const msg = emptyAssistant("a-live");
+    appendAssistantThought(msg, "still thinking", {
+      running: true,
+      newId: () => "th-live",
+    });
+    upsertAssistantTool(msg, {
+      id: "tool-run",
+      title: "grep",
+      status: "in_progress",
+    });
+    finalizeAssistantStream(msg, 1500);
+    assert.equal(assistantHasRunningThought(msg), false);
+    if (msg.items[0]?.kind === "thought") {
+      assert.equal(msg.items[0].thought.running, false);
+      assert.equal(msg.items[0].thought.elapsedMs, 1500);
+    }
+    if (msg.items[1]?.kind === "tool") {
+      assert.equal(msg.items[1].tool.status, "completed");
+    }
   });
 
   it("applyAgentThoughtChunk + tool + thought preserve stream order", () => {

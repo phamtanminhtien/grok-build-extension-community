@@ -25,7 +25,7 @@ import {
   type GrokEffortOption,
   type GrokModelOption,
 } from "../config/modelService";
-import { logError } from "../log/output";
+import { logError, logInfo } from "../log/output";
 import { renderMarkdownToSafeHtml } from "./markdown";
 import {
   applyAgentMessageChunk,
@@ -37,6 +37,7 @@ import {
   assistantPlainText,
   emptyAssistant,
   extractToolContentText,
+  finalizeAssistantStream,
   finishAssistantThoughts,
   formatToolValue,
   nextPromptIndex,
@@ -62,6 +63,11 @@ import {
 } from "./sessionModeCycle";
 import type { DiffReviewService } from "../diff/diffReviewService";
 import { readTextFileHost } from "../agent/hostFs";
+import {
+  newPromptId,
+  queueEntryFirstLine,
+  type PromptQueueSnapshot,
+} from "../agent/promptQueue";
 import { dispatchSlash } from "../slash/dispatch";
 import { slashRegistry } from "../slash/registry";
 import {
@@ -160,6 +166,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     | undefined;
   /** Centered loading indicator (start / new session) — nest-safe. */
   private blockingLoadCount = 0;
+  /** Prompt ids already rendered as user bubbles (idle optimistic or queue adopt). */
+  private shownPromptIds = new Set<string>();
+  /** Last `runningPromptId` from the shared queue (detect drain → new turn). */
+  private lastRunningPromptId: string | undefined;
+  /** Local queue edit: composer targets this server row instead of a new send. */
+  private editingQueueId: string | undefined;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -172,6 +184,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.agent.setQuestionPromptUi((p) => this.showQuestionPrompt(p));
     this.disposables.push(
       this.agent.onSessionUpdate((n) => this.handleSessionUpdate(n)),
+      this.agent.onQueueChange((q) => this.handleQueueChange(q)),
       this.agent.onBusyChange((busy) => {
         this.post({ type: "busy", busy });
         if (busy) {
@@ -400,7 +413,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.currentUserId = undefined;
     this.thoughtStartedAt = undefined;
     this.mdCache.clear();
+    this.shownPromptIds.clear();
+    this.lastRunningPromptId = undefined;
+    this.editingQueueId = undefined;
     this.scheduleMessagesPost(true);
+    this.postQueue();
   }
 
   /**
@@ -413,6 +430,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.currentUserId = undefined;
     this.thoughtStartedAt = undefined;
     this.mdCache.clear();
+    this.shownPromptIds.clear();
+    this.lastRunningPromptId = undefined;
+    this.editingQueueId = undefined;
     this.sessionUsage = {};
     this.endTurnStatusClock();
     this.diffs?.clear();
@@ -607,6 +627,25 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.thoughtStartedAt = undefined;
   }
 
+  /**
+   * When a new turn is injected (queue adopt / next prompt), settle previous
+   * assistants so tool/thought loading animations stop on older bubbles.
+   */
+  private finalizeLiveAssistantForInject(): void {
+    const elapsed =
+      this.thoughtStartedAt != null
+        ? Math.max(0, Date.now() - this.thoughtStartedAt)
+        : undefined;
+    this.thoughtStartedAt = undefined;
+
+    for (const m of this.messages) {
+      if (m.type !== "assistant") continue;
+      // Wall-clock freeze only for the open live assistant.
+      const isLive = m.id === this.currentAssistantId;
+      finalizeAssistantStream(m, isLive ? elapsed : undefined);
+    }
+  }
+
   /** Current model context window from agent catalog (meta.totalContextTokens). */
   private agentContextWindow(): number | undefined {
     const catalog = this.agent.getModels();
@@ -617,10 +656,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const busy = this.agent.isBusy();
     const elapsedMs =
       busy && this.turnStartedAt ? Date.now() - this.turnStartedAt : 0;
+    const qn = this.agent.getQueue().entries.length;
+    const process =
+      busy && qn > 0
+        ? `${this.turnProcess || "Working…"} · ${qn} queued`
+        : this.turnProcess;
     const parts = buildTurnStatusParts(
       {
         busy,
-        process: this.turnProcess,
+        process,
         elapsedMs,
         usage: this.sessionUsage,
       },
@@ -629,6 +673,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.post({
       type: "turnStatus",
       ...parts,
+      queueCount: qn,
     });
     // Always push context bar (even when process row is hidden when idle).
     this.post({
@@ -656,6 +701,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     partial_answers?: Record<string, string>;
     promptIndex?: number;
     mode?: string;
+    expectedVersion?: number;
+    orderedIds?: string[];
+    newText?: string;
   }): Promise<void> {
     switch (msg.type) {
       case "ready":
@@ -668,6 +716,78 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       case "send":
         if (msg.text?.trim()) {
           await this.handleSend(msg.text.trim());
+        }
+        break;
+      case "queueRemove":
+        if (msg.id) {
+          try {
+            await this.agent.queueRemove(
+              msg.id,
+              typeof msg.expectedVersion === "number" ? msg.expectedVersion : 0,
+            );
+          } catch (err) {
+            this.pushSystem(errMessage(err));
+          }
+        }
+        break;
+      case "queueClear":
+        try {
+          await this.agent.queueClear();
+        } catch (err) {
+          this.pushSystem(errMessage(err));
+        }
+        break;
+      case "queueReorder":
+        if (Array.isArray(msg.orderedIds) && msg.orderedIds.length > 0) {
+          try {
+            await this.agent.queueReorder(msg.orderedIds);
+          } catch (err) {
+            this.pushSystem(errMessage(err));
+          }
+        }
+        break;
+      case "queueEditStart":
+        if (msg.id) {
+          const entry = this.agent.getQueue().entries.find((e) => e.id === msg.id);
+          if (!entry) {
+            this.pushSystem("That queue entry is gone.");
+            break;
+          }
+          this.editingQueueId = entry.id;
+          this.post({
+            type: "queueEditMode",
+            active: true,
+            id: entry.id,
+            text: entry.text,
+          });
+        }
+        break;
+      case "queueEditCancel":
+        this.editingQueueId = undefined;
+        this.post({ type: "queueEditMode", active: false });
+        break;
+      case "queueInterject":
+        if (msg.id) {
+          try {
+            await this.agent.queueInterject(
+              msg.id,
+              typeof msg.expectedVersion === "number" ? msg.expectedVersion : 0,
+              msg.newText,
+            );
+          } catch (err) {
+            this.pushSystem(errMessage(err));
+          }
+        }
+        break;
+      case "queueSendNowTop":
+        try {
+          const ok = await this.agent.queueSendNowTop();
+          if (!ok) {
+            // Fall back to cancel (empty Enter with empty queue).
+            await this.agent.cancelTurn();
+          }
+        } catch (err) {
+          this.pushSystem(errMessage(err));
         }
         break;
       case "editMessage":
@@ -992,16 +1112,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     text: string,
     options?: { literal?: boolean },
   ): Promise<void> {
-    if (this.agent.isBusy()) {
-      this.pushSystem("Wait for the current turn or press Stop.");
-      return;
-    }
-
     // Require CLI before any chat turn — force install if missing.
     const probe = await probeGrokBinary();
     if (!probe.found) {
       await promptMissingCli();
       await this.pushFullState();
+      return;
+    }
+
+    // Queue-row edit: save via x.ai/queue/edit.
+    if (this.editingQueueId) {
+      const id = this.editingQueueId;
+      this.editingQueueId = undefined;
+      this.post({ type: "queueEditMode", active: false });
+      try {
+        await this.agent.queueEdit(id, text);
+        this.pushSystem(
+          `Updated queued prompt: ${queueEntryFirstLine(text, 48)}`,
+        );
+      } catch (err) {
+        this.pushSystem(errMessage(err));
+      }
       return;
     }
 
@@ -1056,6 +1187,32 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const { blocks, chips } = buildPromptBlocks(text, {
       stickyChips: this.stickyChips,
     });
+    const promptId = newPromptId();
+    const queueWhileBusy = this.agent.isBusy();
+
+    // Mid-turn: enqueue server-side (TUI immediate send) — do not paint user
+    // bubble until the prompt starts running (queue/changed runningPromptId).
+    if (queueWhileBusy) {
+      this.agent.pushOptimisticQueueEntry(promptId, text, "prompt");
+      this.turnProcess = "Working…";
+      this.beginTurnStatus();
+      this.post({ type: "busy", busy: true });
+      try {
+        await this.agent.ensureStarted();
+        // Do not await end of turn — other in-flight prompts may still run.
+        void this.agent
+          .sendPrompt(blocks, { promptId, queueText: text })
+          .catch(async (err) => {
+            await this.showStartError(err);
+            this.pushSystem(errMessage(err));
+          });
+      } catch (err) {
+        await this.showStartError(err);
+        this.pushSystem(errMessage(err));
+      }
+      return;
+    }
+
     const userId = uid();
     this.messages.push({
       type: "user",
@@ -1064,6 +1221,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       chips: chips.map((c) => c.label),
       promptIndex: nextPromptIndex(this.messages),
     });
+    this.shownPromptIds.add(promptId);
 
     const asstId = uid();
     this.currentAssistantId = asstId;
@@ -1075,13 +1233,91 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     try {
       await this.agent.ensureStarted();
-      await this.agent.sendPrompt(blocks);
+      await this.agent.sendPrompt(blocks, { promptId, queueText: text });
     } catch (err) {
       this.currentAssistantId = undefined;
       this.post({ type: "busy", busy: false });
       await this.showStartError(err);
       this.pushSystem(errMessage(err));
     }
+  }
+
+  /**
+   * Reconcile shared queue UI + adopt a drained prompt into the message list
+   * when `runningPromptId` advances (TUI turn-start shim).
+   */
+  private handleQueueChange(q: PromptQueueSnapshot): void {
+    this.postQueue(q);
+    // Keep turn-status "N queued" suffix in sync with queue depth.
+    if (this.agent.isBusy()) {
+      this.postTurnStatus();
+    }
+
+    const running = q.runningPromptId;
+    if (!running || running === this.lastRunningPromptId) {
+      this.lastRunningPromptId = running;
+      return;
+    }
+    const prev = this.lastRunningPromptId;
+    this.lastRunningPromptId = running;
+
+    // First observation of this running id: if we never painted a user bubble
+    // for it (queued follow-up), adopt it into the transcript now.
+    if (this.shownPromptIds.has(running)) {
+      return;
+    }
+    const text = this.agent.getKnownPromptText(running);
+    if (!text?.trim()) {
+      // Unknown origin (other client) — still mark so we do not thrash.
+      this.shownPromptIds.add(running);
+      return;
+    }
+
+    // Close prior assistant stream focus; drop loading UI on old bubbles.
+    this.finalizeLiveAssistantForInject();
+    this.currentUserId = undefined;
+    this.currentAssistantId = undefined;
+
+    const userId = uid();
+    this.messages.push({
+      type: "user",
+      id: userId,
+      text,
+      chips: [],
+      promptIndex: nextPromptIndex(this.messages),
+    });
+    this.shownPromptIds.add(running);
+    const asstId = uid();
+    this.currentAssistantId = asstId;
+    this.messages.push(emptyAssistant(asstId));
+    // Force full re-render so older assistants lose streaming/shimmer.
+    this.scheduleMessagesPost(true);
+    this.turnProcess = "Working…";
+    this.beginTurnStatus();
+    this.post({ type: "busy", busy: true });
+    // Explicit settle signal for webview (even if message list patch is skipped).
+    this.post({ type: "streamTail", assistantId: asstId });
+    logInfo(
+      `queue adopt running=${running} prev=${prev ?? "-"} text=${text.slice(0, 48)}`,
+    );
+  }
+
+  private postQueue(q?: PromptQueueSnapshot): void {
+    const snap = q ?? this.agent.getQueue();
+    this.post({
+      type: "queue",
+      sessionId: snap.sessionId,
+      runningPromptId: snap.runningPromptId ?? null,
+      entries: snap.entries.map((e) => ({
+        id: e.id,
+        version: e.version,
+        kind: e.kind || "prompt",
+        text: e.text,
+        firstLine: queueEntryFirstLine(e.text),
+        position: e.position,
+        optimistic: !!e.optimistic,
+      })),
+    });
   }
 
   /**
@@ -1784,6 +2020,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       reviewCount: this.diffs?.getEntries().length ?? 0,
       turnStatus,
       context: turnStatus.context,
+      queue: (() => {
+        const snap = this.agent.getQueue();
+        return {
+          sessionId: snap.sessionId,
+          runningPromptId: snap.runningPromptId ?? null,
+          entries: snap.entries.map((e) => ({
+            id: e.id,
+            version: e.version,
+            kind: e.kind || "prompt",
+            text: e.text,
+            firstLine: queueEntryFirstLine(e.text),
+            position: e.position,
+            optimistic: !!e.optimistic,
+          })),
+        };
+      })(),
     });
   }
 
@@ -3027,6 +3279,106 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     background: #f48771;
     box-shadow: 0 2px 6px color-mix(in srgb, #f48771 45%, transparent);
   }
+  /* Prompt queue — same visual language as #review-bar / #edit-banner / chips */
+  #queue-pane {
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--btn-bg) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
+  }
+  #queue-pane.visible { display: flex; }
+  #queue-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; font-size: 12px; color: var(--muted); min-height: 22px;
+  }
+  #queue-head .qh-left {
+    display: inline-flex; align-items: center; gap: 6px; font-weight: 500;
+    color: var(--fg); min-width: 0;
+  }
+  #queue-head .qh-left .ti {
+    font-size: 14px; color: var(--link); flex-shrink: 0;
+  }
+  #queue-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #queue-clear {
+    margin-left: auto; padding: 2px 8px; font-size: 11px; min-height: 22px;
+  }
+  #queue-list {
+    display: flex; flex-direction: column; gap: 4px;
+    max-height: 132px; overflow: auto;
+  }
+  .queue-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 8px;
+    border-radius: var(--radius-xs);
+    background: color-mix(in srgb, var(--input-bg) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--fg) 6%, transparent);
+    min-width: 0;
+  }
+  .queue-row.optimistic {
+    opacity: 0.78;
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--muted) 45%, transparent);
+  }
+  .queue-row .q-pos {
+    font-size: 11px; font-weight: 600; color: var(--muted);
+    font-variant-numeric: tabular-nums; min-width: 1.5em;
+  }
+  .queue-row .q-body {
+    display: flex; flex-direction: column; gap: 1px; min-width: 0;
+  }
+  .queue-row .q-text {
+    font-size: 12px; color: var(--fg); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+    line-height: 1.35;
+  }
+  .queue-row .q-kind {
+    font-size: 10px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.03em;
+  }
+  .queue-row .q-actions {
+    display: inline-flex; gap: 2px; flex-shrink: 0;
+  }
+  .queue-row .q-actions button {
+    width: 24px; height: 24px; padding: 0;
+    border-radius: var(--radius-xs);
+    border: none; background: transparent; color: var(--muted);
+    cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+    min-height: 24px;
+  }
+  .queue-row .q-actions button .ti { font-size: 14px; margin: 0; }
+  .queue-row .q-actions button:hover:not(:disabled) {
+    color: var(--fg);
+    background: var(--list-hover, color-mix(in srgb, var(--fg) 10%, transparent));
+  }
+  .queue-row .q-actions button:disabled {
+    opacity: 0.35; cursor: default;
+  }
+  .queue-row .q-actions button[data-q-act="now"]:hover:not(:disabled) {
+    color: var(--link);
+  }
+  .queue-row .q-actions button[data-q-act="remove"]:hover:not(:disabled) {
+    color: #f48771;
+  }
+  /* Twin of #edit-banner — queue-row edit mode */
+  #queue-edit-banner {
+    display: none; align-items: center; gap: 8px;
+    padding: 6px 10px; margin: 0 0 6px;
+    font-size: 11px; color: var(--muted);
+    background: color-mix(in srgb, var(--vscode-charts-blue, #3794ff) 12%, transparent);
+    border-radius: var(--radius-sm);
+  }
+  #queue-edit-banner.visible { display: flex; }
+  #queue-edit-banner span { flex: 1; min-width: 0; }
+  #queue-edit-banner button {
+    min-height: 22px; padding: 2px 8px; font-size: 11px;
+  }
   .vspacer { flex-shrink: 0; width: 100%; pointer-events: none; }
 </style>
 </head>
@@ -3080,7 +3432,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   </div>
   <footer>
     <div id="sticky"></div>
+    <div id="queue-pane" aria-label="Queued prompts">
+      <div id="queue-head">
+        <span class="qh-left">
+          <i class="ti ti-stack-2" aria-hidden="true"></i>
+          <span id="queue-title">Queued</span>
+        </span>
+        <button type="button" class="secondary" id="queue-clear" title="Clear all queued prompts">Clear</button>
+      </div>
+      <div id="queue-list" role="list"></div>
+    </div>
     <div class="composer-wrap">
+      <div id="queue-edit-banner">
+        <i class="ti ti-pencil" aria-hidden="true"></i>
+        <span class="edit-banner-text">Editing queued prompt — send to save · Esc cancel</span>
+        <button type="button" class="secondary" id="queue-edit-cancel">Cancel</button>
+      </div>
       <div id="edit-banner" hidden>
         <i class="ti ti-pencil" aria-hidden="true"></i>
         <span class="edit-banner-text">Editing message — send to resubmit · Esc cancel</span>
@@ -3235,9 +3602,7 @@ function updateEmptyCliUi(cliFound, installCommand, typicalPath) {
   // Soft-lock composer when CLI is missing
   if (composer) {
     composer.disabled = cliMissing;
-    composer.placeholder = cliMissing
-      ? 'Install Grok Build CLI to chat…'
-      : 'Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)';
+    syncComposerPlaceholder();
   }
   updateSendStopButton();
 }
@@ -3296,6 +3661,9 @@ let allMessages = [];
 let stickyChips = [];
 let autoAttachEnabled = true;
 let autoChip = null; // { id, label, kind, fsPath } | null
+/** Shared prompt queue rows (TUI queue pane). */
+let queueEntries = [];
+let queueEditActive = false;
 /** Agent catalog — same source as TUI ModelsManager.available(). */
 let modelItems = [];
 let currentModelId = '';
@@ -4292,14 +4660,16 @@ function renderStreamShimmer() {
 }
 
 /**
- * Show/hide skeleton shimmer on a timeline based on busy + empty content.
+ * Show/hide skeleton shimmer on a timeline based on live stream + empty content.
+ * Only the live tail assistant should shimmer; older bubbles stay settled.
  * Keeps an existing shimmer node so the CSS animation does not restart.
  */
-function ensureStreamShimmer(timeline, m) {
+function ensureStreamShimmer(timeline, m, isLive) {
   if (!timeline) return;
+  const live = isLive === undefined ? isLiveStreamingAssistant(m) : !!isLive;
   const empty = visibleGroupedTimeline(m).length === 0;
   const existing = timeline.querySelector(':scope > .stream-shimmer');
-  if (busy && empty) {
+  if (live && busy && empty) {
     // Drop any leftover content nodes; keep shimmer if already mounted.
     Array.from(timeline.children).forEach((child) => {
       if (!child.classList.contains('stream-shimmer')) child.remove();
@@ -4775,16 +5145,17 @@ function patchTimelineInPlace(timeline, m, openToolIds, openThoughtIds, openGrou
 function renderAssistantTimeline(m, openToolIds, openThoughtIds, openGroupIds) {
   const timeline = document.createElement('div');
   timeline.className = 'assistant-timeline';
+  const live = isLiveStreamingAssistant(m);
   const nodes = visibleGroupedTimeline(m);
   for (let i = 0; i < nodes.length; i++) {
-    const streamText = busy && i === nodes.length - 1 && nodes[i].type === 'text';
+    const streamText = live && i === nodes.length - 1 && nodes[i].type === 'text';
     const el = renderTimelineNode(
       nodes[i], openToolIds, openThoughtIds, openGroupIds, streamText,
     );
     if (el) timeline.appendChild(el);
   }
-  // Waiting for first token / thought / tool — skeleton shimmer.
-  ensureStreamShimmer(timeline, m);
+  // Waiting for first token / thought / tool — skeleton only on live tail.
+  ensureStreamShimmer(timeline, m, live);
   markLatestRunningTool(timeline);
   // After first frame, only newly appended blocks (class tl-new) animate.
   requestAnimationFrame(() => timeline.classList.add('stream-settled'));
@@ -5030,7 +5401,7 @@ function updateEditBanner() {
   if (pendingEdit) {
     composer.placeholder = 'Edit message… (Enter resubmit · Esc cancel)';
   } else {
-    composer.placeholder = 'Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)';
+    syncComposerPlaceholder();
   }
   updateSendStopButton();
 }
@@ -5236,6 +5607,18 @@ if (rewindList) {
   });
 }
 
+/** True when this assistant is the live streaming tail (last assistant while busy). */
+function isLiveStreamingAssistant(m) {
+  if (!busy || !m || m.type !== 'assistant') return false;
+  for (let i = allMessages.length - 1; i >= 0; i--) {
+    const x = allMessages[i];
+    if (x && x.type === 'assistant') {
+      return x.id === m.id;
+    }
+  }
+  return false;
+}
+
 function renderOneMessage(m, isNew) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + m.type + (isNew ? ' msg-enter' : '');
@@ -5243,8 +5626,7 @@ function renderOneMessage(m, isNew) {
   if (m.type === 'user' && typeof m.promptIndex === 'number') {
     wrap.dataset.promptIndex = String(m.promptIndex);
   }
-  if (m.type === 'assistant' && busy) {
-    // Only the live tail should show stream caret — refined after append.
+  if (isLiveStreamingAssistant(m)) {
     wrap.classList.add('streaming');
   }
   if (m.type === 'user') {
@@ -5359,13 +5741,14 @@ function patchLastAssistant(m) {
   // Drop legacy top-level thought (pre-timeline); everything is in the timeline now.
   wrap.querySelectorAll(':scope > details.thought').forEach((el) => el.remove());
 
-  wrap.classList.toggle('streaming', !!busy);
+  const live = isLiveStreamingAssistant(m);
+  wrap.classList.toggle('streaming', live);
 
   const oldTimeline = wrap.querySelector(':scope > .assistant-timeline');
   if (oldTimeline) {
     // Empty live assistant → shimmer only (avoid thrashing rebuilds).
     if (visibleGroupedTimeline(m).length === 0) {
-      ensureStreamShimmer(oldTimeline, m);
+      ensureStreamShimmer(oldTimeline, m, live);
       markLatestRunningTool(oldTimeline);
       return true;
     }
@@ -5452,12 +5835,34 @@ function renderMessages(messages, opts) {
     if (!live.has(id)) seenMsgIds.delete(id);
   }
 
-  // Mark last assistant streaming state
-  const lastAsst = messagesEl.querySelector('.msg.assistant:last-of-type');
-  if (lastAsst) lastAsst.classList.toggle('streaming', !!busy);
+  // Only the live tail assistant streams; strip loading UI from older bubbles.
+  settleNonLiveAssistantStreams();
 
   if (stick || allMessages.length <= VIRT_THRESHOLD) {
     requestStickScroll({ force: true, smooth: true });
+  }
+}
+
+/** Drop streaming class + skeleton shimmer from every non-live assistant. */
+function settleNonLiveAssistantStreams() {
+  const nodes = messagesEl.querySelectorAll('.msg.assistant');
+  if (!nodes.length) return;
+  const last = nodes[nodes.length - 1];
+  nodes.forEach((el) => {
+    const live = busy && el === last;
+    el.classList.toggle('streaming', live);
+    if (!live) {
+      el.querySelectorAll('.stream-shimmer').forEach((s) => s.remove());
+      el.querySelectorAll('.tool-latest').forEach((t) => t.classList.remove('tool-latest'));
+    }
+  });
+  if (busy && last) {
+    const lastMsg =
+      allMessages.length > 0 ? allMessages[allMessages.length - 1] : null;
+    if (lastMsg && lastMsg.type === 'assistant') {
+      const tl = last.querySelector(':scope > .assistant-timeline');
+      if (tl) ensureStreamShimmer(tl, lastMsg, true);
+    }
   }
 }
 
@@ -5551,26 +5956,12 @@ function setBusy(b) {
   const wasBusy = busy;
   busy = b;
   composer.disabled = cliMissing;
+  syncComposerPlaceholder();
   if (b) setMeta('working…', true);
   else setMeta(meta.dataset.base || 'idle', false);
-  // Mark live assistant while turn is running (styling / stream path).
-  messagesEl.querySelectorAll('.msg.assistant.streaming').forEach((el) => {
-    el.classList.remove('streaming');
-  });
-  if (b) {
-    const nodes = messagesEl.querySelectorAll('.msg.assistant');
-    const last = nodes.length ? nodes[nodes.length - 1] : null;
-    if (last) {
-      last.classList.add('streaming');
-      // If the optimistic empty assistant is already mounted, show shimmer.
-      const lastMsg =
-        allMessages.length > 0 ? allMessages[allMessages.length - 1] : null;
-      if (lastMsg && lastMsg.type === 'assistant') {
-        const tl = last.querySelector(':scope > .assistant-timeline');
-        if (tl) ensureStreamShimmer(tl, lastMsg);
-      }
-    }
-  } else if (wasBusy) {
+  // Always re-scope stream UI to the live tail (or clear when idle).
+  settleNonLiveAssistantStreams();
+  if (!b && wasBusy) {
     // Turn ended: drop any leftover shimmer + re-render tail to full markdown.
     messagesEl.querySelectorAll('.stream-shimmer').forEach((el) => el.remove());
     const lastMsg =
@@ -5583,15 +5974,19 @@ function setBusy(b) {
 }
 
 /**
- * While a turn is running and the composer is empty, the primary action is Stop.
- * Typing into the composer switches back to Send (still blocked until idle).
+ * Primary action button modes (no inject/send-now here — that lives on queue rows):
+ * - idle + text → Send
+ * - busy + empty → Stop
+ * - busy + text → Queue
  */
 function updateSendStopButton() {
   const empty = !composer.value.trim();
-  const asStop = busy && empty && !cliMissing;
+  const asStop = busy && empty && !cliMissing && !queueEditActive;
+  const asQueue = busy && !empty && !cliMissing && !queueEditActive && !pendingEdit;
   sendBtn.classList.toggle('is-stop', asStop);
-  // Block send while CLI missing; otherwise only disable when busy with draft.
-  sendBtn.disabled = cliMissing || (busy && !empty);
+  // Allow send while busy (queues). Only block when CLI missing.
+  sendBtn.disabled =
+    cliMissing || (!busy && empty && !pendingEdit && !queueEditActive);
   if (cliMissing) {
     sendBtn.innerHTML = '<i class="ti ti-send" aria-hidden="true"></i>';
     sendBtn.title = 'Install Grok Build CLI first';
@@ -5600,15 +5995,99 @@ function updateSendStopButton() {
     sendBtn.innerHTML = '<i class="ti ti-player-stop" aria-hidden="true"></i>';
     sendBtn.title = 'Stop current turn (Esc)';
     sendBtn.setAttribute('aria-label', 'Stop');
+  } else if (queueEditActive) {
+    sendBtn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i>';
+    sendBtn.title = 'Save queued prompt edit';
+    sendBtn.setAttribute('aria-label', 'Save queue edit');
   } else if (pendingEdit) {
     sendBtn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i>';
     sendBtn.title = 'Resubmit edited message (choose rewind mode)';
     sendBtn.setAttribute('aria-label', 'Resubmit');
+  } else if (asQueue) {
+    sendBtn.innerHTML = '<i class="ti ti-stack-2" aria-hidden="true"></i>';
+    sendBtn.title = 'Queue follow-up (runs after current turn)';
+    sendBtn.setAttribute('aria-label', 'Queue');
   } else {
     sendBtn.innerHTML = '<i class="ti ti-send" aria-hidden="true"></i>';
     sendBtn.title = 'Send';
     sendBtn.setAttribute('aria-label', 'Send');
   }
+}
+
+function defaultComposerPlaceholder() {
+  if (cliMissing) return 'Install Grok Build CLI to chat…';
+  if (queueEditActive) return 'Edit queued prompt… (Enter save · Esc cancel)';
+  if (busy) {
+    return 'Queue a follow-up… (Enter queues · empty Enter stops)';
+  }
+  return 'Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)';
+}
+
+function syncComposerPlaceholder() {
+  if (!composer || pendingEdit) return;
+  composer.placeholder = defaultComposerPlaceholder();
+}
+
+function renderQueue(entries) {
+  queueEntries = Array.isArray(entries) ? entries.slice() : [];
+  const pane = document.getElementById('queue-pane');
+  const list = document.getElementById('queue-list');
+  const title = document.getElementById('queue-title');
+  if (!pane || !list || !title) return;
+  const n = queueEntries.length;
+  if (n === 0) {
+    pane.classList.remove('visible');
+    list.innerHTML = '';
+    title.textContent = 'Queued';
+    syncComposerPlaceholder();
+    updateSendStopButton();
+    return;
+  }
+  pane.classList.add('visible');
+  title.textContent = n === 1 ? '1 queued' : n + ' queued';
+  list.innerHTML = '';
+  queueEntries.forEach((e, i) => {
+    const row = document.createElement('div');
+    row.className = 'queue-row' + (e.optimistic ? ' optimistic' : '');
+    row.dataset.id = e.id;
+    row.setAttribute('role', 'listitem');
+    const kind = (e.kind && e.kind !== 'prompt') ? e.kind : '';
+    const line = e.firstLine || e.text || '';
+    row.innerHTML =
+      '<span class="q-pos">#' + (i + 1) + '</span>' +
+      '<span class="q-body" title="' + esc(e.text || '') + '">' +
+        (kind ? '<span class="q-kind">' + esc(kind) + '</span>' : '') +
+        '<span class="q-text">' + esc(line) + '</span>' +
+      '</span>' +
+      '<span class="q-actions">' +
+        '<button type="button" data-q-act="up" title="Move up" aria-label="Move up" ' +
+          (i === 0 ? 'disabled' : '') + '><i class="ti ti-arrow-up" aria-hidden="true"></i></button>' +
+        '<button type="button" data-q-act="down" title="Move down" aria-label="Move down" ' +
+          (i === n - 1 ? 'disabled' : '') + '><i class="ti ti-arrow-down" aria-hidden="true"></i></button>' +
+        '<button type="button" data-q-act="now" title="Send now" aria-label="Send now">' +
+          '<i class="ti ti-bolt" aria-hidden="true"></i></button>' +
+        '<button type="button" data-q-act="edit" title="Edit" aria-label="Edit">' +
+          '<i class="ti ti-pencil" aria-hidden="true"></i></button>' +
+        '<button type="button" data-q-act="remove" title="Remove" aria-label="Remove">' +
+          '<i class="ti ti-x" aria-hidden="true"></i></button>' +
+      '</span>';
+    list.appendChild(row);
+  });
+  syncComposerPlaceholder();
+  updateSendStopButton();
+}
+
+function setQueueEditMode(active, text) {
+  queueEditActive = !!active;
+  const ban = document.getElementById('queue-edit-banner');
+  if (ban) ban.classList.toggle('visible', queueEditActive);
+  if (queueEditActive) {
+    composer.value = text || '';
+    autosizeComposer();
+    composer.focus();
+  }
+  syncComposerPlaceholder();
+  updateSendStopButton();
 }
 
 function setReview(count) {
@@ -5665,14 +6144,15 @@ sendBtn.addEventListener('click', () => {
     acceptRewind(rewindIndex);
     return;
   }
-  // Busy + empty → Stop; otherwise Send
-  if (busy && !composer.value.trim()) {
+  // Busy + empty → Stop (inject/send-now is only on queue-row bolt buttons)
+  if (busy && !composer.value.trim() && !queueEditActive) {
     vscode.postMessage({ type: 'cancel' });
     return;
   }
   if (trySubmitPendingEdit()) return;
   const text = composer.value.trim();
-  if (!text || busy) return;
+  // Allow send while busy: host queues a follow-up (TUI mid-turn Enter).
+  if (!text) return;
   vscode.postMessage({ type: 'send', text });
   composer.value = '';
   autosizeComposer();
@@ -5977,15 +6457,70 @@ composer.addEventListener('keydown', (e) => {
     cancelPendingEdit();
     return;
   }
+  if (queueEditActive && e.key === 'Escape') {
+    e.preventDefault();
+    vscode.postMessage({ type: 'queueEditCancel' });
+    setQueueEditMode(false);
+    composer.value = '';
+    autosizeComposer();
+    return;
+  }
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
-    // Enter with empty input while busy → stop; else send
+    // Enter with empty input while busy → send-now / stop; else send/queue
     sendBtn.click();
   }
-  if (e.key === 'Escape' && busy) {
+  if (e.key === 'Escape' && busy && !queueEditActive) {
     vscode.postMessage({ type: 'cancel' });
   }
 });
+
+// Queue pane actions
+const queueListEl = document.getElementById('queue-list');
+const queueClearBtn = document.getElementById('queue-clear');
+const queueEditCancelBtn = document.getElementById('queue-edit-cancel');
+if (queueListEl) {
+  queueListEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-q-act]');
+    if (!btn) return;
+    const row = btn.closest('.queue-row');
+    if (!row) return;
+    const id = row.dataset.id;
+    const act = btn.getAttribute('data-q-act');
+    const entry = queueEntries.find((x) => x.id === id);
+    if (!entry) return;
+    if (act === 'remove') {
+      vscode.postMessage({ type: 'queueRemove', id, expectedVersion: entry.version || 0 });
+    } else if (act === 'now') {
+      vscode.postMessage({ type: 'queueInterject', id, expectedVersion: entry.version || 0 });
+    } else if (act === 'edit') {
+      vscode.postMessage({ type: 'queueEditStart', id });
+    } else if (act === 'up' || act === 'down') {
+      const ids = queueEntries.map((x) => x.id);
+      const idx = ids.indexOf(id);
+      if (idx < 0) return;
+      const j = act === 'up' ? idx - 1 : idx + 1;
+      if (j < 0 || j >= ids.length) return;
+      const tmp = ids[idx];
+      ids[idx] = ids[j];
+      ids[j] = tmp;
+      vscode.postMessage({ type: 'queueReorder', orderedIds: ids });
+    }
+  });
+}
+if (queueClearBtn) {
+  queueClearBtn.addEventListener('click', () => {
+    vscode.postMessage({ type: 'queueClear' });
+  });
+}
+if (queueEditCancelBtn) {
+  queueEditCancelBtn.addEventListener('click', () => {
+    vscode.postMessage({ type: 'queueEditCancel' });
+    setQueueEditMode(false);
+    composer.value = '';
+    autosizeComposer();
+  });
+}
 
 // Keep Send/Stop + composer height in sync on first paint
 autosizeComposer();
@@ -6011,6 +6546,7 @@ window.addEventListener('message', (event) => {
     setBusy(!!msg.busy);
     if (msg.turnStatus) renderTurnStatus(msg.turnStatus);
     if (msg.context) renderContextBar(msg.context);
+    if (msg.queue) renderQueue(msg.queue.entries || []);
     updateEmptyAuthUi(!!msg.hasAuth, msg.authSummary || '');
     updateEmptyCliUi(
       msg.cliFound !== false,
@@ -6021,6 +6557,13 @@ window.addEventListener('message', (event) => {
     emptyEl.hidden = msg.cliFound !== false && (msg.messages || []).length > 0;
   } else if (msg.type === 'messages') {
     renderMessages(msg.messages || []);
+  } else if (msg.type === 'queue') {
+    renderQueue(msg.entries || []);
+  } else if (msg.type === 'streamTail') {
+    // New turn injected — keep shimmer only on the live assistant tail.
+    settleNonLiveAssistantStreams();
+  } else if (msg.type === 'queueEditMode') {
+    setQueueEditMode(!!msg.active, msg.text || '');
   } else if (msg.type === 'restoreEditComposer') {
     restoreEditComposer(msg.id, msg.text);
   } else if (msg.type === 'busy') {

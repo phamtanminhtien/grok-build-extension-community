@@ -109,8 +109,10 @@ From upstream `xai-acp-lib` stdin reader notes:
 
 ### Concurrency
 
-- One outstanding `session/prompt` per session unless upstream supports queue
-  (Grok has prompt queue — UI may show queue later; MVP: disable send while
+- Concurrent `session/prompt` while a turn is running (Grok server-side prompt
+  queue). UI shows the shared queue from `x.ai/queue/changed` with remove /
+  reorder / clear / edit / send-now (`x.ai/queue/*`). Idle: one live turn at a
+  time; mid-turn Enter enqueues (MVP previously disabled send while
   turn in progress, or call cancel then send).
 - Host capability handlers must be re-entrant-safe (agent may call FS while
   a tool is running).

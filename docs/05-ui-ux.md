@@ -35,10 +35,35 @@ Layout (top → bottom):
 │                                     │
 ├─────────────────────────────────────┤
 │ [@ context chips]                   │
-│ [ textarea                      ⏎ ] │  composer
-│ [ Stop ] [ New session ]            │
+│ [ queue pane: #1 … #N  (when any) ] │  follow-ups (TUI-like)
+│ [ textarea                      ⏎ ] │  composer (Enter queues while busy)
+│ [ Send / Stop / Queue ]             │  primary button (no inject here)
 └─────────────────────────────────────┘
 ```
+
+### Prompt queue (TUI parity)
+
+While a turn is running, Enter **queues** a follow-up via `session/prompt`
+(server-authoritative). The panel above the composer lists held rows from
+`x.ai/queue/changed` and supports:
+
+| Action | Wire |
+|--------|------|
+| Remove | `x.ai/queue/remove` |
+| Reorder (↑/↓) | `x.ai/queue/reorder` |
+| Clear | `x.ai/queue/clear` |
+| Edit | `x.ai/queue/edit` |
+| Send now (per row) | `x.ai/queue/interject` |
+
+Primary composer button modes only:
+
+| State | Button |
+|-------|--------|
+| Idle + text | **Send** |
+| Busy + empty | **Stop** |
+| Busy + text | **Queue** |
+
+Inject / send-now is **not** on that button — use the bolt control on a queue row.
 
 ### 3. Status bar item
 

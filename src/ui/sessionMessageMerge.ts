@@ -300,6 +300,27 @@ export function finishAssistantThoughts(
   }
 }
 
+/**
+ * Settle a live assistant before a new turn is injected (queue adopt / next
+ * user message). Stops thought loading and tool "running" shimmer so only the
+ * new tail assistant shows stream UI.
+ */
+export function finalizeAssistantStream(
+  msg: Extract<MergeUiMessage, { type: "assistant" }>,
+  elapsedMs?: number,
+): void {
+  finishAssistantThoughts(msg, elapsedMs);
+  for (const item of msg.items) {
+    if (item.kind !== "tool") {
+      continue;
+    }
+    if (isToolStatusRunning(item.tool.status)) {
+      // Prefer a neutral terminal label; UI treats cancel/fail as settled.
+      item.tool.status = "completed";
+    }
+  }
+}
+
 function truncateDetail(s: string, max = DETAIL_MAX): string {
   if (s.length <= max) {
     return s;
@@ -619,6 +640,10 @@ export function classifyToolVerb(tool: {
 
 export function isToolStatusRunning(status?: string): boolean {
   const s = String(status || "").toLowerCase();
+  // "completed" must not match the "run" fragment inside "running" only.
+  if (!s || /complete|success|ok|done|fail|error|denied|cancel/.test(s)) {
+    return false;
+  }
   return /run|progress|pending|in_progress|start|stream/.test(s);
 }
 

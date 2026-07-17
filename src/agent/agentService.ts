@@ -67,6 +67,15 @@ import {
 } from "./permissionBroker";
 import { spawnAgentProcess, type SpawnedAgent } from "./processManager";
 import {
+  emptyQueueSnapshot,
+  makeOptimisticEntry,
+  newPromptId,
+  parseQueueChanged,
+  reconcileQueue,
+  type PromptQueueSnapshot,
+  type QueueEntryWire,
+} from "./promptQueue";
+import {
   parseAskUserQuestionRequest,
   type AskUserQuestionResponse,
   type QuestionPromptPayload,
@@ -120,7 +129,13 @@ export class AgentService implements vscode.Disposable {
   private session: ActiveSession | undefined;
   private startPromise: Promise<void> | undefined;
   private disposed = false;
+  /** Number of in-flight `session/prompt` RPCs (running + queued). */
+  private inFlightPrompts = 0;
   private busy = false;
+  /** Server-authoritative prompt queue (TUI `shared_prompt_queues`). */
+  private queue: PromptQueueSnapshot = emptyQueueSnapshot();
+  /** Client-minted promptId → plain text (for adoption into chat when drain starts). */
+  private readonly knownPromptTexts = new Map<string, string>();
   private readonly permissions = new PermissionBroker();
   /** In-webview ask_user_question popover (TUI question view). */
   private questionUi:
@@ -150,6 +165,9 @@ export class AgentService implements vscode.Disposable {
 
   private readonly _onTurnEnd = new vscode.EventEmitter<PromptResponse>();
   readonly onTurnEnd = this._onTurnEnd.event;
+
+  private readonly _onQueueChange = new vscode.EventEmitter<PromptQueueSnapshot>();
+  readonly onQueueChange = this._onQueueChange.event;
 
   /** ACP-advertised slash commands (skills + shell builtins). */
   private availableCommands: AvailableCommand[] = [];
@@ -247,6 +265,20 @@ export class AgentService implements vscode.Disposable {
 
   isBusy(): boolean {
     return this.busy;
+  }
+
+  /** Current shared prompt queue (queued follow-ups behind the running turn). */
+  getQueue(): PromptQueueSnapshot {
+    return {
+      sessionId: this.queue.sessionId,
+      runningPromptId: this.queue.runningPromptId,
+      entries: this.queue.entries.map((e) => ({ ...e })),
+    };
+  }
+
+  /** Plain text for a prompt id we submitted (or last known from queue wire). */
+  getKnownPromptText(promptId: string): string | undefined {
+    return this.knownPromptTexts.get(promptId);
   }
 
   getSessionId(): string | undefined {
@@ -500,27 +532,193 @@ export class AgentService implements vscode.Disposable {
 
   /**
    * Send a prompt turn. Streams via onSessionUpdate; resolves on stop.
+   *
+   * Concurrent calls are allowed while a turn is running: the agent queues the
+   * prompt server-side (same as Grok TUI) and each RPC completes when *that*
+   * prompt finishes. Pass `promptId` in options so optimistic queue rows match
+   * `x.ai/queue/changed` / `runningPromptId`.
    */
   async sendPrompt(
     content: string | ContentBlock[],
+    options?: { promptId?: string; queueText?: string },
   ): Promise<PromptResponse> {
     await this.ensureStarted();
-    if (!this.session) {
+    if (!this.session || !this.connection) {
       throw new Error("No active session");
     }
-    if (this.busy) {
-      throw new Error("A turn is already in progress — cancel or wait");
+
+    const promptId = options?.promptId?.trim() || newPromptId();
+    const blocks = normalizePromptBlocks(content);
+    const queueText =
+      options?.queueText ??
+      blocks
+        .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
+        .map((b) => b.text)
+        .join("\n\n");
+    if (queueText) {
+      this.knownPromptTexts.set(promptId, queueText);
     }
 
+    this.inFlightPrompts += 1;
     this.setBusy(true);
     try {
-      const response = await this.session.prompt(content);
+      // Use raw request so we can stamp `_meta.promptId` like the TUI.
+      const response = await this.connection.agent.request<
+        PromptResponse,
+        {
+          sessionId: string;
+          prompt: ContentBlock[];
+          _meta?: { promptId: string };
+        }
+      >(acp.methods.agent.session.prompt, {
+        sessionId: this.session.sessionId,
+        prompt: blocks,
+        _meta: { promptId },
+      });
       this._onTurnEnd.fire(response);
-      logInfo(`Prompt finished stopReason=${response.stopReason}`);
+      logInfo(
+        `Prompt finished stopReason=${response.stopReason} promptId=${promptId}`,
+      );
       return response;
     } finally {
-      this.setBusy(false);
+      this.inFlightPrompts = Math.max(0, this.inFlightPrompts - 1);
+      if (this.inFlightPrompts === 0) {
+        this.setBusy(false);
+      }
     }
+  }
+
+  /**
+   * Optimistically show a queue row before the confirming `x.ai/queue/changed`.
+   */
+  pushOptimisticQueueEntry(
+    promptId: string,
+    text: string,
+    kind = "prompt",
+  ): void {
+    const sid = this.getSessionId() ?? this.queue.sessionId;
+    const entry = makeOptimisticEntry(
+      promptId,
+      text,
+      kind,
+      this.queue.entries.length,
+    );
+    this.knownPromptTexts.set(promptId, text);
+    this.queue = {
+      sessionId: sid,
+      runningPromptId: this.queue.runningPromptId,
+      entries: [...this.queue.entries, entry],
+    };
+    this._onQueueChange.fire(this.getQueue());
+  }
+
+  /** Remove a queued prompt (`x.ai/queue/remove`). */
+  async queueRemove(id: string, expectedVersion = 0): Promise<void> {
+    const sessionId = this.requireSessionId();
+    // Optimistic local drop
+    this.queue = {
+      ...this.queue,
+      entries: this.queue.entries
+        .filter((e) => e.id !== id)
+        .map((e, i) => ({ ...e, position: i })),
+    };
+    this._onQueueChange.fire(this.getQueue());
+    await this.notifyQueue("x.ai/queue/remove", {
+      sessionId,
+      id,
+      expectedVersion,
+    });
+  }
+
+  /** Reorder the held queue (`x.ai/queue/reorder`). */
+  async queueReorder(orderedIds: string[]): Promise<void> {
+    const sessionId = this.requireSessionId();
+    const byId = new Map(this.queue.entries.map((e) => [e.id, e]));
+    const next: QueueEntryWire[] = [];
+    for (const id of orderedIds) {
+      const e = byId.get(id);
+      if (e) {
+        next.push({ ...e, position: next.length });
+        byId.delete(id);
+      }
+    }
+    for (const e of byId.values()) {
+      next.push({ ...e, position: next.length });
+    }
+    this.queue = { ...this.queue, entries: next };
+    this._onQueueChange.fire(this.getQueue());
+    await this.notifyQueue("x.ai/queue/reorder", {
+      sessionId,
+      orderedIds,
+    });
+  }
+
+  /** Clear all held queue entries (`x.ai/queue/clear`). */
+  async queueClear(): Promise<void> {
+    const sessionId = this.requireSessionId();
+    this.queue = {
+      sessionId,
+      entries: [],
+      runningPromptId: this.queue.runningPromptId,
+    };
+    this._onQueueChange.fire(this.getQueue());
+    await this.notifyQueue("x.ai/queue/clear", { sessionId });
+  }
+
+  /** Edit queued prompt text (`x.ai/queue/edit`). */
+  async queueEdit(id: string, newText: string): Promise<void> {
+    const sessionId = this.requireSessionId();
+    const text = newText.trim();
+    if (!text) {
+      throw new Error("Queue edit text is empty");
+    }
+    this.queue = {
+      ...this.queue,
+      entries: this.queue.entries.map((e) =>
+        e.id === id
+          ? { ...e, text, version: e.version + 1, lastEditor: "grok-vscode" }
+          : e,
+      ),
+    };
+    this.knownPromptTexts.set(id, text);
+    this._onQueueChange.fire(this.getQueue());
+    await this.notifyQueue("x.ai/queue/edit", {
+      sessionId,
+      id,
+      newText: text,
+    });
+  }
+
+  /**
+   * Force-send a queued prompt now (`x.ai/queue/interject`) — cancel-and-run
+   * next (TUI send-now), optionally with replacement text.
+   */
+  async queueInterject(
+    id: string,
+    expectedVersion = 0,
+    newText?: string,
+  ): Promise<void> {
+    const sessionId = this.requireSessionId();
+    const params: Record<string, unknown> = {
+      sessionId,
+      id,
+      expectedVersion,
+    };
+    if (newText != null && newText.trim()) {
+      params.newText = newText.trim();
+      this.knownPromptTexts.set(id, newText.trim());
+    }
+    await this.notifyQueue("x.ai/queue/interject", params);
+  }
+
+  /** Send-now the top held queue row (TUI empty-Enter force-send). */
+  async queueSendNowTop(): Promise<boolean> {
+    const top = this.queue.entries[0];
+    if (!top) {
+      return false;
+    }
+    await this.queueInterject(top.id, top.version);
+    return true;
   }
 
   async cancelTurn(): Promise<void> {
@@ -560,11 +758,14 @@ export class AgentService implements vscode.Disposable {
     this.permissions.resetSessionMemory();
     this.availableCommands = [];
     this._onAvailableCommands.fire([]);
+    this.inFlightPrompts = 0;
+    this.setBusy(false);
 
     const cwd = resolveSessionCwd();
     logInfo(`session/new cwd=${cwd}`);
     const session = await this.connection.agent.buildSession(cwd).start();
     this.session = session;
+    this.resetQueueState(session.sessionId);
     this.ingestSessionModels(session);
     this.ingestSessionModes(session);
     void this.pumpSessionUpdates(session);
@@ -1081,6 +1282,68 @@ export class AgentService implements vscode.Disposable {
     );
   }
 
+  private requireSessionId(): string {
+    const sid = this.getSessionId() ?? this.session?.sessionId;
+    if (!sid) {
+      throw new Error("No active session");
+    }
+    return sid;
+  }
+
+  /** Fire-and-forget queue mutation (TUI uses ExtNotification). */
+  private async notifyQueue(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.connection) {
+      throw new Error("No agent connection");
+    }
+    const wire = toAcpExtWireMethod(method);
+    logInfo(`queue notify ${wire}`);
+    try {
+      await this.connection.agent.notify(wire, params);
+    } catch (err) {
+      // Some agents register the bare method name.
+      if (wire !== method) {
+        logWarn(
+          `queue notify ${wire} failed, retry bare: ${formatUserError(err)}`,
+        );
+        await this.connection.agent.notify(method, params);
+        return;
+      }
+      throw err;
+    }
+  }
+
+  private handleQueueChangedNotification(raw: unknown): void {
+    const changed = parseQueueChanged(unwrapExtParams(raw));
+    if (!changed) {
+      logWarn("x.ai/queue/changed: invalid payload");
+      return;
+    }
+    // Ignore broadcasts for other sessions (multi-session future-proofing).
+    const active = this.getSessionId();
+    if (active && changed.sessionId && changed.sessionId !== active) {
+      return;
+    }
+    for (const e of changed.entries) {
+      if (e.text) {
+        this.knownPromptTexts.set(e.id, e.text);
+      }
+    }
+    this.queue = reconcileQueue(this.queue, changed);
+    logInfo(
+      `queue/changed session=${changed.sessionId} entries=${changed.entries.length} running=${changed.runningPromptId ?? "-"}`,
+    );
+    this._onQueueChange.fire(this.getQueue());
+  }
+
+  private resetQueueState(sessionId = ""): void {
+    this.queue = emptyQueueSnapshot(sessionId);
+    this.knownPromptTexts.clear();
+    this._onQueueChange.fire(this.getQueue());
+  }
+
   /**
    * L0 smoke: start, send a simple prompt, stream session/update to Output.
    */
@@ -1324,6 +1587,12 @@ export class AgentService implements vscode.Disposable {
   }
 
   private setBusy(busy: boolean): void {
+    if (!busy) {
+      // Never clear busy while any prompt RPC is still open.
+      if (this.inFlightPrompts > 0) {
+        busy = true;
+      }
+    }
     if (this.busy === busy) {
       return;
     }
@@ -1442,6 +1711,21 @@ export class AgentService implements vscode.Disposable {
           this.handleModelsUpdateNotification(ctx.params);
         },
       )
+      // Server-authoritative prompt queue (TUI shared queue).
+      .onNotification(
+        "_x.ai/queue/changed",
+        (p: unknown) => p,
+        (ctx) => {
+          this.handleQueueChangedNotification(ctx.params);
+        },
+      )
+      .onNotification(
+        "x.ai/queue/changed",
+        (p: unknown) => p,
+        (ctx) => {
+          this.handleQueueChangedNotification(ctx.params);
+        },
+      )
       .connect(stream);
 
     this.connection = connection;
@@ -1482,6 +1766,8 @@ export class AgentService implements vscode.Disposable {
     const session = await connection.agent.buildSession(cwd).start();
     this.session = session;
     this.permissions.resetSessionMemory();
+    this.resetQueueState(session.sessionId);
+    this.inFlightPrompts = 0;
     this.ingestSessionModels(session);
     logInfo(`session/new ok sessionId=${session.sessionId}`);
 
@@ -1821,6 +2107,15 @@ function unwrapExtParams(raw: unknown): unknown {
     return req;
   }
   return raw;
+}
+
+function normalizePromptBlocks(
+  content: string | ContentBlock[],
+): ContentBlock[] {
+  if (typeof content === "string") {
+    return [{ type: "text", text: content }];
+  }
+  return content;
 }
 
 function formatUserError(err: unknown): string {
