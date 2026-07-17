@@ -884,6 +884,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     query?: string;
     requestId?: number;
     chip?: ContextChip;
+    /** When set with pickMention, host skips sticky (inline insert already done). */
+    insertText?: string;
     enabled?: boolean;
     modelId?: string;
     effortId?: string;
@@ -1341,6 +1343,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
               description: s.description ?? "",
               icon: s.icon,
               chip: s.chip,
+              // Inline editor token — accept inserts this into #composer (not sticky).
+              insertText: s.insertText,
             })),
           });
         } catch (err) {
@@ -1369,7 +1373,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
       }
       case "pickMention":
-        if (msg.chip) {
+        // Legacy: older webviews added sticky chips. Mentions now insert
+        // `@path` into the composer; keep sticky only if insertText is absent.
+        if (msg.chip && !msg.insertText) {
           this.addStickyChips([msg.chip]);
         }
         break;
@@ -2919,14 +2925,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.scheduleMessagesPost(true);
   }
 
-  private cachedMarkdown(cacheId: string, source: string): string {
+  private cachedMarkdown(
+    cacheId: string,
+    source: string,
+    options?: { breaks?: boolean },
+  ): string {
     const key = source || "";
+    // Include breaks flag in cache identity so user vs assistant don't collide.
+    const cacheKey = options?.breaks ? `b1:${key}` : key;
     const hit = this.mdCache.get(cacheId);
-    if (hit && hit.key === key) {
+    if (hit && hit.key === cacheKey) {
       return hit.html;
     }
-    const html = renderMarkdownToSafeHtml(key);
-    this.mdCache.set(cacheId, { key, html });
+    const html = renderMarkdownToSafeHtml(key, {
+      breaks: options?.breaks === true,
+    });
+    this.mdCache.set(cacheId, { key: cacheKey, html });
     return html;
   }
 
@@ -2989,8 +3003,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           type: m.type,
           id: m.id,
           text: m.text,
-          // Same sanitized GFM pipeline as assistant (code fences, lists, links).
-          html: this.cachedMarkdown(m.id, m.text || ""),
+          // GFM like assistant, but soft-breaks so Shift+Enter line breaks show.
+          html: this.cachedMarkdown(m.id, m.text || "", { breaks: true }),
           chips: m.chips,
           images: (m.images ?? []).map((img) => ({
             ...img,
@@ -3579,7 +3593,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       </div>
       <div class="composer-shell">
         <div id="image-previews" class="image-previews" hidden aria-label="Attached images"></div>
-        <textarea id="composer" placeholder="Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)" rows="1"></textarea>
+        <div class="composer-input-wrap">
+          <div id="composer-highlight" class="composer-highlight" aria-hidden="true"></div>
+          <textarea id="composer" placeholder="Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)" rows="1" spellcheck="true"></textarea>
+        </div>
         <div class="actions">
           <button id="btn-mode" class="secondary mode-normal" type="button" title="Mode: Normal — Ask before running tools (Shift+Tab)" aria-label="Cycle session mode">
             <i class="ti ti-route-alt-left" aria-hidden="true"></i>

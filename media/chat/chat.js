@@ -63,6 +63,7 @@ function updateEmptyCliUi(cliFound, installCommand, typicalPath) {
 }
 const meta = document.getElementById("meta");
 const composer = document.getElementById("composer");
+const composerHighlight = document.getElementById("composer-highlight");
 const sendBtn = document.getElementById("send");
 const stickyEl = document.getElementById("sticky");
 const reviewBar = document.getElementById("review-bar");
@@ -1639,22 +1640,68 @@ function syncMentionFromComposer() {
   }
 }
 
+/**
+ * Accept @ mention → insert `@path` / `@path:N-M` into the composer (TUI-like).
+ * Does not add sticky chips; the agent prompt_parser resolves inline @ tokens.
+ */
 function acceptMention(idx) {
   const item = mentionItems[idx];
-  if (!item || !item.chip) return;
+  if (!item) return;
   const text = composer.value;
   const ctx =
     mentionAtCtx || detectAtContext(text, composer.selectionStart || 0);
-  if (ctx) {
-    const next = text.slice(0, ctx.start) + text.slice(ctx.end);
-    composer.value = next;
-    const pos = ctx.start;
-    composer.setSelectionRange(pos, pos);
-    autosizeComposer();
+  if (!ctx) {
+    closeMention();
+    composer.focus();
+    return;
   }
-  vscode.postMessage({ type: "pickMention", chip: item.chip });
+  let insert =
+    typeof item.insertText === "string" && item.insertText
+      ? item.insertText
+      : mentionInsertTextFallback(item);
+  if (!insert) {
+    closeMention();
+    return;
+  }
+  // Always leave a trailing space after a committed ref (TUI Tab).
+  if (!/\s$/.test(insert)) insert += " ";
+  const next = text.slice(0, ctx.start) + insert + text.slice(ctx.end);
+  composer.value = next;
+  const pos = ctx.start + insert.length;
+  composer.setSelectionRange(pos, pos);
+  autosizeComposer();
+  updateSendStopButton();
   closeMention();
   composer.focus();
+}
+
+/** Fallback when host omits insertText (older builds / partial items). */
+function mentionInsertTextFallback(item) {
+  const chip = item.chip || {};
+  let p = String(item.label || chip.label || "").trim();
+  p = p
+    .replace(/^file:/, "")
+    .replace(/^folder:/, "")
+    .replace(/^selection:/, "")
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "");
+  // selection:name#L1-L2 → keep basename only if no better path
+  const sel = p.match(/^(?:selection:)?([^#]+)#L(\d+)(?:-L(\d+))?$/);
+  if (chip.kind === "selection" || sel) {
+    const pathPart = sel ? sel[1] : p;
+    const start = chip.startLine || (sel ? Number(sel[2]) : null);
+    const end = chip.endLine || (sel && sel[3] ? Number(sel[3]) : start);
+    if (start != null) {
+      if (end != null && end !== start)
+        return "@" + pathPart + ":" + start + "-" + end + " ";
+      return "@" + pathPart + ":" + start + " ";
+    }
+  }
+  if (chip.kind === "folder" || /\/$/.test(p)) {
+    const body = p.replace(/\/+$/, "");
+    return body ? "@" + body + "/ " : "";
+  }
+  return p ? "@" + p + " " : "";
 }
 
 function moveMention(delta) {
@@ -1767,6 +1814,7 @@ function attachCopyButtons(root) {
 /**
  * Fill assistant text bubble. Prefers markdown HTML when present (including
  * while streaming). No stream text animation.
+ * Plain user text gets @mention coloring (same palette as composer).
  */
 function fillTextBubble(b, text, html, _opts) {
   const nextPlain = text || "";
@@ -1776,12 +1824,54 @@ function fillTextBubble(b, text, html, _opts) {
 
   if (html) {
     b.innerHTML = html;
+    // Color @path tokens inside host markdown HTML (text nodes only).
+    colorMentionsInElement(b);
     attachCopyButtons(b);
   } else if (nextPlain) {
-    b.textContent = nextPlain;
+    b.innerHTML = highlightMentionsHtml(nextPlain).replace(
+      /class="composer-mention"/g,
+      'class="msg-mention"',
+    );
   } else {
     // Empty text segment — timeline-level shimmer covers the wait state.
     b.textContent = "";
+  }
+}
+
+/**
+ * Walk element text nodes and wrap @mentions (skip CODE/PRE/A).
+ */
+function colorMentionsInElement(root) {
+  if (!root) return;
+  const skip = new Set(["CODE", "PRE", "A", "SCRIPT", "STYLE"]);
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      let p = node.parentElement;
+      while (p && p !== root) {
+        if (skip.has(p.tagName) || p.classList.contains("msg-mention")) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        p = p.parentElement;
+      }
+      return node.nodeValue && /@/.test(node.nodeValue)
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_REJECT;
+    },
+  });
+  const nodes = [];
+  let n;
+  while ((n = walker.nextNode())) nodes.push(n);
+  for (const textNode of nodes) {
+    const raw = textNode.nodeValue || "";
+    if (!/@/.test(raw)) continue;
+    const html = highlightMentionsHtml(raw).replace(
+      /class="composer-mention"/g,
+      'class="msg-mention"',
+    );
+    if (html === esc(raw)) continue;
+    const span = document.createElement("span");
+    span.innerHTML = html;
+    textNode.parentNode.replaceChild(span, textNode);
   }
 }
 
@@ -4220,16 +4310,100 @@ modelList.addEventListener("click", (e) => {
   acceptModel(Number(btn.getAttribute("data-model-idx")));
 });
 
-/** Grow #composer with content; cap at max-height and scroll when full. */
+/**
+ * Build HTML for inline @path / @path:N-M mentions (TUI path accent colors).
+ * Skips email-like tokens (word@domain).
+ */
+function highlightMentionsHtml(text) {
+  if (!text) return "";
+  // (^|non-word) @ body(no whitespace/,/;)
+  const re = /(^|[^A-Za-z0-9_])(@)([^\s,;]+)/g;
+  let out = "";
+  let last = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const prefix = m[1] || "";
+    const at = m[2];
+    const body = m[3];
+    const tokenStart = m.index + prefix.length;
+    out += esc(text.slice(last, tokenStart));
+    out += formatMentionHtml(at, body);
+    last = tokenStart + at.length + body.length;
+  }
+  out += esc(text.slice(last));
+  return out;
+}
+
+/** Split `@` + path + optional `:range` into styled spans. */
+function formatMentionHtml(at, body) {
+  // path:10 or path:10-20 at end of body
+  const rangeMatch = body.match(/^(.*?)(:\d+(?:-\d+)?)?$/);
+  const path = rangeMatch ? rangeMatch[1] : body;
+  const range = rangeMatch && rangeMatch[2] ? rangeMatch[2] : "";
+  return (
+    '<span class="composer-mention">' +
+    '<span class="cm-at">' +
+    esc(at) +
+    "</span>" +
+    '<span class="cm-path">' +
+    esc(path) +
+    "</span>" +
+    (range ? '<span class="cm-range">' + esc(range) + "</span>" : "") +
+    "</span>"
+  );
+}
+
+/** Paint colored mentions under the transparent textarea. */
+function renderComposerHighlight() {
+  if (!composerHighlight || !composer) return;
+  const text = composer.value;
+  // Empty: leave blank so native placeholder shows through.
+  if (!text) {
+    composerHighlight.innerHTML = "";
+    return;
+  }
+  // Trailing newline: browser collapses last empty line height unless padded.
+  const html = highlightMentionsHtml(text);
+  composerHighlight.innerHTML = text.endsWith("\n") ? html + "\n" : html;
+  composerHighlight.scrollTop = composer.scrollTop;
+  composerHighlight.scrollLeft = composer.scrollLeft;
+}
+
+function syncComposerHighlightScroll() {
+  if (!composerHighlight || !composer) return;
+  composerHighlight.scrollTop = composer.scrollTop;
+  composerHighlight.scrollLeft = composer.scrollLeft;
+}
+
+/**
+ * Grow/shrink #composer with content; cap at max-height and scroll when full.
+ * Must collapse both stacked layers before measuring — otherwise the highlight
+ * keeps the previous tall height and the grid cell never shrinks on delete.
+ */
 function autosizeComposer() {
   if (!composer) return;
   const minPx = 44; // match #composer min-height
   const maxPx = 180;
-  composer.style.height = "auto";
+
+  // 1) Collapse both layers so scrollHeight = content, not previous box.
+  composer.style.height = "0px";
+  if (composerHighlight) {
+    composerHighlight.style.height = "0px";
+  }
+
+  // 2) Measure content height (min-height still applies via CSS on layout,
+  //    but scrollHeight reports the full text height from 0).
   const sh = composer.scrollHeight;
   const next = Math.min(Math.max(sh, minPx), maxPx);
+
+  // 3) Apply the same height to both layers (keep caret/highlight aligned).
   composer.style.height = next + "px";
-  composer.style.overflowY = sh > maxPx ? "auto" : "hidden";
+  if (composerHighlight) {
+    composerHighlight.style.height = next + "px";
+  }
+
+  renderComposerHighlight();
+  syncComposerHighlightScroll();
 }
 
 composer.addEventListener("input", () => {
@@ -4237,6 +4411,7 @@ composer.addEventListener("input", () => {
   syncComposerMenus();
   updateSendStopButton();
 });
+composer.addEventListener("scroll", () => syncComposerHighlightScroll());
 composer.addEventListener("click", () => syncComposerMenus());
 composer.addEventListener("keyup", (e) => {
   if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {

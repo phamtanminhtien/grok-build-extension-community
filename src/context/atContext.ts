@@ -46,7 +46,10 @@ export function pathRange(ctx: AtContext): { start: number; end: number } {
  * Detect an @-completion context from prompt text and cursor position.
  * Returns `null` if the cursor is not inside an @-token.
  */
-export function detectAtContext(text: string, cursor: number): AtContext | null {
+export function detectAtContext(
+  text: string,
+  cursor: number,
+): AtContext | null {
   if (cursor < 0 || cursor > text.length) {
     return null;
   }
@@ -99,4 +102,42 @@ export function replaceAtToken(
     text.slice(0, ctx.range.start) + replacement + text.slice(ctx.range.end);
   const cursor = ctx.range.start + replacement.length;
   return { text: next, cursor };
+}
+
+/**
+ * Build the inline composer token for a context chip (mirrors TUI KIND_FILE_REF).
+ * Agent `prompt_parser` collects these `@path` tokens from the message text.
+ *
+ * @param kind file | selection | folder
+ * @param displayPath workspace-relative path when possible
+ * @param lines optional selection range (1-based, inclusive)
+ */
+export function formatMentionInsertText(
+  kind: "file" | "selection" | "folder",
+  displayPath: string,
+  lines?: { startLine?: number; endLine?: number },
+  basenameFallback = "file",
+): string {
+  let p = displayPath.replace(/\\/g, "/").replace(/^\.\//, "");
+  // Normalize accidental kind prefixes from legacy labels.
+  p = p
+    .replace(/^file:/, "")
+    .replace(/^folder:/, "")
+    .replace(/^selection:/, "");
+  p = p.replace(/\/+$/, "");
+  if (!p) {
+    p = basenameFallback;
+  }
+  if (kind === "selection" && lines?.startLine != null) {
+    const start = lines.startLine;
+    const end = lines.endLine ?? start;
+    if (end === start) {
+      return `@${p}:${start} `;
+    }
+    return `@${p}:${start}-${end} `;
+  }
+  if (kind === "folder") {
+    return `@${p}/ `;
+  }
+  return `@${p} `;
 }

@@ -36,17 +36,31 @@ const ALLOWED = new Set([
 
 marked.setOptions({
   gfm: true,
+  // Default off: assistant prose should not turn every newline into <br>.
   breaks: false,
 });
+
+export type RenderMarkdownOptions = {
+  /**
+   * When true, single newlines become `<br>` (chat-style / Shift+Enter).
+   * Used for user bubbles so composer line breaks survive markdown render.
+   */
+  breaks?: boolean;
+};
 
 /**
  * Render markdown to sanitized HTML safe for webview innerHTML.
  */
-export function renderMarkdownToSafeHtml(md: string): string {
+export function renderMarkdownToSafeHtml(
+  md: string,
+  options?: RenderMarkdownOptions,
+): string {
   if (!md) {
     return "";
   }
-  const raw = marked.parse(md, { async: false }) as string;
+  const breaks = options?.breaks === true;
+  // marked.parse options override setOptions for this call.
+  const raw = marked.parse(md, { async: false, breaks, gfm: true }) as string;
   return sanitizeHtml(raw);
 }
 

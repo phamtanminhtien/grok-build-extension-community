@@ -2,10 +2,15 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { getSettings } from "../config/settings";
 import { isExcluded, type ContextChip } from "./editorContext";
-import { matcherQuery, type AtContext } from "./atContext";
+import {
+  formatMentionInsertText,
+  matcherQuery,
+  type AtContext,
+} from "./atContext";
 import { fuzzyScore } from "./fuzzyScore";
 
 export { fuzzyScore } from "./fuzzyScore";
+export { formatMentionInsertText } from "./atContext";
 
 export type SuggestionIcon = "file" | "folder" | "selection" | "search";
 
@@ -16,8 +21,22 @@ export interface ContextSuggestion {
   description?: string;
   icon: SuggestionIcon;
   chip: ContextChip;
+  /**
+   * Text inserted into the composer when accepting (TUI `@path` / `@path:N-M`).
+   * Includes a trailing space so the user can keep typing.
+   */
+  insertText: string;
   /** Simple rank — lower is better. */
   score: number;
+}
+
+function chipInsertText(chip: ContextChip, displayPath: string): string {
+  return formatMentionInsertText(
+    chip.kind,
+    displayPath,
+    chip,
+    path.basename(chip.fsPath),
+  );
 }
 
 /**
@@ -50,23 +69,26 @@ export async function searchContextSuggestions(
     const end = ed.selection.end.line + 1;
     const fsPath = ed.document.uri.fsPath;
     const base = path.basename(fsPath);
+    const rel = vscode.workspace.asRelativePath(ed.document.uri);
     const label = `selection:${base}#L${start}-L${end}`;
     if (!q || fuzzyScore(label.toLowerCase(), q) < Infinity) {
-      push({
+      const chip: ContextChip = {
         id: `sel:${fsPath}:${start}-${end}`,
+        label,
+        kind: "selection",
+        fsPath,
+        startLine: start,
+        endLine: end,
+        selectedText: ed.document.getText(ed.selection).slice(0, 50_000),
+      };
+      push({
+        id: chip.id,
         label,
         description: "Current selection",
         icon: "selection",
         score: 0,
-        chip: {
-          id: `sel:${fsPath}:${start}-${end}`,
-          label,
-          kind: "selection",
-          fsPath,
-          startLine: start,
-          endLine: end,
-          selectedText: ed.document.getText(ed.selection).slice(0, 50_000),
-        },
+        chip,
+        insertText: chipInsertText(chip, rel),
       });
     }
   }
@@ -89,18 +111,20 @@ export async function searchContextSuggestions(
     if (dirOnly) {
       continue;
     }
-    push({
+    const chip: ContextChip = {
       id: `file:${d.uri.fsPath}`,
+      label: `file:${path.basename(d.uri.fsPath)}`,
+      kind: "file",
+      fsPath: d.uri.fsPath,
+    };
+    push({
+      id: chip.id,
       label: rel,
       description: "Open editor",
       icon: "file",
       score: score + 10,
-      chip: {
-        id: `file:${d.uri.fsPath}`,
-        label: `file:${path.basename(d.uri.fsPath)}`,
-        kind: "file",
-        fsPath: d.uri.fsPath,
-      },
+      chip,
+      insertText: chipInsertText(chip, rel),
     });
   }
 
@@ -132,18 +156,20 @@ export async function searchContextSuggestions(
             continue;
           }
         }
-        push({
+        const chip: ContextChip = {
           id: `file:${u.fsPath}`,
+          label: `file:${path.basename(u.fsPath)}`,
+          kind: "file",
+          fsPath: u.fsPath,
+        };
+        push({
+          id: chip.id,
           label: rel,
           description: "Workspace",
           icon: "file",
           score: score + 20,
-          chip: {
-            id: `file:${u.fsPath}`,
-            label: `file:${path.basename(u.fsPath)}`,
-            kind: "file",
-            fsPath: u.fsPath,
-          },
+          chip,
+          insertText: chipInsertText(chip, rel),
         });
       }
     } catch {
@@ -160,18 +186,20 @@ export async function searchContextSuggestions(
       if (score === Infinity) {
         continue;
       }
-      push({
+      const chip: ContextChip = {
         id: `folder:${u.fsPath}`,
+        label: `folder:${path.basename(u.fsPath)}`,
+        kind: "folder",
+        fsPath: u.fsPath,
+      };
+      push({
+        id: chip.id,
         label: rel + "/",
         description: "Folder",
         icon: "folder",
         score: score + 5,
-        chip: {
-          id: `folder:${u.fsPath}`,
-          label: `folder:${path.basename(u.fsPath)}`,
-          kind: "folder",
-          fsPath: u.fsPath,
-        },
+        chip,
+        insertText: chipInsertText(chip, rel),
       });
     }
   }

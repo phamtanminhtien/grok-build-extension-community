@@ -9,6 +9,16 @@ describe("renderMarkdownToSafeHtml", () => {
     assert.match(html, /const x = 1/);
   });
 
+  it("default does not soft-break single newlines", () => {
+    const html = renderMarkdownToSafeHtml("line1\nline2");
+    assert.equal(html.includes("<br>"), false);
+  });
+
+  it("breaks:true preserves Shift+Enter line breaks as <br>", () => {
+    const html = renderMarkdownToSafeHtml("line1\nline2", { breaks: true });
+    assert.match(html, /line1\s*<br\s*\/?>\s*line2/i);
+  });
+
   it("strips script tags", () => {
     const html = sanitizeHtml(`<p>ok</p><script>alert(1)</script>`);
     assert.equal(html.includes("script"), false);

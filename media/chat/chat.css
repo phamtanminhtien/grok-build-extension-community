@@ -16,11 +16,22 @@
     --vscode-button-secondaryHoverBackground,
     var(--btn-sec)
   );
-  --bubble-user: var(--vscode-button-background);
-  --bubble-user-fg: var(--vscode-button-foreground);
-  --bubble-asst: var(
-    --vscode-editor-inactiveSelectionBackground,
-    rgba(127, 127, 127, 0.15)
+  /* Soft chat chips — tint of button accent on input/surface, not solid primary */
+  --bubble-user: color-mix(
+    in srgb,
+    var(--vscode-button-background) 16%,
+    var(--input-bg)
+  );
+  --bubble-user-fg: var(--fg);
+  --bubble-user-edge: color-mix(
+    in srgb,
+    var(--vscode-button-background) 26%,
+    transparent
+  );
+  --bubble-asst: color-mix(
+    in srgb,
+    var(--fg) 5%,
+    var(--vscode-editor-inactiveSelectionBackground, transparent)
   );
   --link: var(--vscode-textLink-foreground);
   --error: var(--vscode-errorForeground);
@@ -471,7 +482,8 @@ header button.linkish:focus-visible {
   white-space: pre-wrap;
   border-radius: var(--radius-md) var(--radius-md) var(--radius-xs)
     var(--radius-md);
-  box-shadow: var(--shadow-soft);
+  border: 1px solid var(--bubble-user-edge);
+  box-shadow: none;
   /* Size to text only — never stretch to match wider chips/images */
   width: fit-content;
   max-width: 100%;
@@ -481,6 +493,7 @@ header button.linkish:focus-visible {
   background: var(--bubble-asst);
   border-radius: var(--radius-md) var(--radius-md) var(--radius-md)
     var(--radius-xs);
+  border: none;
 }
 /* MD assistant: no bubble fill. Fenced pre + inline code use --code-bg only. */
 .msg.assistant .bubble.md {
@@ -2770,31 +2783,175 @@ footer {
     0 0 0 2px color-mix(in srgb, var(--focus) 40%, transparent),
     var(--shadow-soft);
 }
-#composer {
+/* Transparent textarea over colored highlight layer (inline @mentions).
+   Grid-stack so both layers share the exact same box (avoids caret drift). */
+.composer-input-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  /* auto — not 1fr — so the wrap shrinks when lines are deleted */
+  grid-template-rows: auto;
   width: 100%;
-  /* ~2 lines at line-height 1.45; keep in sync with autosizeComposer minPx */
-  min-height: 44px;
-  max-height: 180px;
-  resize: none;
-  overflow-y: hidden;
-  background: transparent;
-  color: var(--input-fg);
-  border: none;
-  border-radius: 0;
-  outline: none;
-  /* shell owns outer inset; light y so first line isn’t flush */
-  padding: 2px 0;
+  min-width: 0;
+  align-items: stretch;
+  /* Shared type metrics — keep #composer and .composer-highlight in lockstep */
+  --composer-line-height: 1.45;
+  --composer-pad-y: 2px;
+  --composer-pad-x: 0px;
+  /* Same font metrics on both layers */
   font-family: inherit;
   font-size: inherit;
-  line-height: 1.45;
+  font-weight: inherit;
+  letter-spacing: normal;
+  line-height: var(--composer-line-height);
+}
+.composer-highlight,
+#composer {
+  grid-area: 1 / 1;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  padding: var(--composer-pad-y) var(--composer-pad-x);
+  /* ~2 lines; keep in sync with autosizeComposer minPx */
+  min-height: 44px;
+  max-height: 180px;
+  font: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  font-style: inherit;
+  letter-spacing: inherit;
+  line-height: var(--composer-line-height);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  tab-size: 4;
+  -webkit-font-smoothing: inherit;
+  overflow-x: hidden;
+  /* Always reserve the same vertical scrollbar lane on both layers */
+  overflow-y: scroll;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg) 28%, transparent) transparent;
+}
+.composer-highlight {
+  z-index: 0;
+  pointer-events: none;
+  color: var(--input-fg);
+  background: transparent;
+  /* Invisible but same-width scrollbar so content width matches #composer */
+  scrollbar-color: transparent transparent;
+}
+.composer-highlight::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.composer-highlight::-webkit-scrollbar-thumb,
+.composer-highlight::-webkit-scrollbar-track {
+  background: transparent;
+}
+#composer::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+#composer::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg) 28%, transparent);
+  border-radius: 8px;
+}
+#composer::-webkit-scrollbar-track {
+  background: transparent;
+}
+/* Nested spans MUST NOT change glyph metrics (weight/padding → caret drift) */
+.composer-highlight,
+.composer-highlight * {
+  font-weight: inherit !important;
+  font-style: inherit !important;
+  letter-spacing: inherit !important;
+  font-size: inherit !important;
+  font-family: inherit !important;
+  line-height: inherit !important;
+  font-variant-numeric: inherit !important;
+}
+.composer-highlight .composer-mention {
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+#composer {
+  z-index: 1;
+  position: relative;
+  resize: none;
+  background: transparent;
+  /* Text is painted by .composer-highlight; keep caret + selection visible */
+  color: transparent;
+  caret-color: var(--input-fg);
+  outline: none;
   field-sizing: content; /* Chromium: grow with content; JS fallback below */
 }
 #composer:focus {
   outline: none;
 }
+/* Placeholder must stay visible while value color is transparent */
 #composer::placeholder {
   color: var(--muted);
   opacity: 0.85;
+}
+/* Firefox */
+#composer::-moz-placeholder {
+  color: var(--muted);
+  opacity: 0.85;
+}
+/* Selection highlight still readable over the mention layer */
+#composer::selection {
+  background: color-mix(in srgb, var(--focus) 35%, transparent);
+  color: transparent;
+}
+#composer::-moz-selection {
+  background: color-mix(in srgb, var(--focus) 35%, transparent);
+  color: transparent;
+}
+/* ── Inline @path mentions (TUI: @ muted · path accent · :range dim) ──
+   Composer layer: color only (no weight/padding — see .composer-highlight rules).
+   Message bubbles may use richer chip styling. */
+.composer-mention,
+.msg-mention {
+  display: inline;
+  border-radius: 4px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.composer-mention .cm-at,
+.msg-mention .cm-at {
+  color: var(--muted);
+}
+.composer-mention .cm-path,
+.msg-mention .cm-path {
+  color: var(--vscode-charts-blue, var(--link));
+}
+.composer-mention .cm-range,
+.msg-mention .cm-range {
+  color: color-mix(in srgb, var(--fg) 72%, var(--muted));
+}
+/* Message bubbles: color only (no chip background / padding) */
+.msg-mention {
+  padding: 0;
+  background: none;
+  border-radius: 0;
+}
+/* User bubble uses soft surface + normal fg — same mention palette as composer */
+.msg.user .msg-mention .cm-at {
+  color: var(--muted);
+}
+.msg.user .msg-mention .cm-path {
+  color: var(--vscode-charts-blue, var(--link));
+}
+.msg.user .msg-mention .cm-range {
+  color: color-mix(in srgb, var(--fg) 72%, var(--muted));
 }
 .actions {
   display: flex;
