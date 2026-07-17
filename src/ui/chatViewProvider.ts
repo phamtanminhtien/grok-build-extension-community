@@ -4,10 +4,7 @@ import type { AgentService } from "../agent/agentService";
 import type { AuthService } from "../auth/authService";
 import { pickLoginMethod, promptAndStoreApiKey } from "../auth/authService";
 import { formatLogoutMessage } from "../auth/authFlow";
-import {
-  getCliInstallInfo,
-  probeGrokBinary,
-} from "../agent/binaryResolver";
+import { getCliInstallInfo, probeGrokBinary } from "../agent/binaryResolver";
 import {
   handleMissingCliError,
   promptMissingCli,
@@ -335,15 +332,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         /* fall through */
       }
     }
-    await vscode.commands.executeCommand(
-      `${ChatViewProvider.viewType}.focus`,
-    );
+    await vscode.commands.executeCommand(`${ChatViewProvider.viewType}.focus`);
   }
 
   async openActivityBarChat(): Promise<void> {
-    await vscode.commands.executeCommand(
-      `${ChatViewProvider.viewType}.focus`,
-    );
+    await vscode.commands.executeCommand(`${ChatViewProvider.viewType}.focus`);
   }
 
   async sendFromCommand(text: string): Promise<void> {
@@ -1026,8 +1019,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             .filter((m) => m.type === "user" || m.type === "assistant")
             .map((m) => ({
               role: m.type,
-              text:
-                m.type === "assistant" ? assistantPlainText(m) : m.text,
+              text: m.type === "assistant" ? assistantPlainText(m) : m.text,
             })),
         clearUi: () => {
           this.messages = [];
@@ -1275,6 +1267,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           await this.agent.cancelTurn();
         }
         await this.agent.newSession();
+        // Clear transcript so the webview empty-state (home) is shown —
+        // do not push a "New session" system line that would hide it.
         this.messages = [];
         this.currentAssistantId = undefined;
         this.thoughtStartedAt = undefined;
@@ -1282,7 +1276,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.sessionUsage = {};
         this.endTurnStatusClock();
         this.diffs?.clear();
-        this.pushSystem("New session");
         this.scheduleMessagesPost(true);
         this.postTurnStatus();
       } catch (err) {
@@ -1334,10 +1327,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         kind === "tool_call" || kind === "tool_call_update"
           ? (update.title ?? this.findToolCard(update.toolCallId)?.title)
           : undefined;
-      const label = processLabelForSessionUpdate(
-        kind,
-        toolTitle ?? undefined,
-      );
+      const label = processLabelForSessionUpdate(kind, toolTitle ?? undefined);
       if (label && label !== this.turnProcess) {
         this.turnProcess = label;
         statusDirty = true;
@@ -1353,8 +1343,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     // handleSend. Applying agent user_message_chunk again duplicates the
     // question and clears currentAssistantId, leaving a leftover empty assistant.
     if (kind === "user_message_chunk") {
-      const text =
-        update.content.type === "text" ? update.content.text : "";
+      const text = update.content.type === "text" ? update.content.text : "";
       const next = applyUserMessageChunk(
         {
           messages: this.messages,
@@ -1396,8 +1385,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (kind === "agent_message_chunk") {
       // Leaving thinking → responding: freeze "Thought for Xs" like TUI.
       this.finishThoughtPhase();
-      const text =
-        update.content.type === "text" ? update.content.text : "";
+      const text = update.content.type === "text" ? update.content.text : "";
       const next = applyAgentMessageChunk(
         {
           messages: this.messages,
@@ -1419,8 +1407,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (kind === "tool_call" || kind === "tool_call_update") {
       // Tool activity ends the thinking stream (TUI collapses thinking block).
       this.finishThoughtPhase();
-      const paths =
-        update.locations?.map((l) => l.path).filter(Boolean) ?? [];
+      const paths = update.locations?.map((l) => l.path).filter(Boolean) ?? [];
       // Capture input/output so expanding a tool row shows results (TUI fold).
       const input = formatToolValue(
         (update as { rawInput?: unknown }).rawInput,
@@ -1530,9 +1517,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const s = `${kind ?? ""} ${title}`.toLowerCase();
-    const isEdit = /edit|write|patch|replace|create.?file|search_replace|apply/.test(
-      s,
-    );
+    const isEdit =
+      /edit|write|patch|replace|create.?file|search_replace|apply/.test(s);
     if (!isEdit) {
       return;
     }
@@ -1694,10 +1680,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
    */
   private async ensureModelsLoaded(): Promise<void> {
     const catalog = this.agent.getModels();
-    if (
-      this.agent.getState().kind === "ready" &&
-      catalog.models.length > 0
-    ) {
+    if (this.agent.getState().kind === "ready" && catalog.models.length > 0) {
       await this.pushFullState();
       return;
     }

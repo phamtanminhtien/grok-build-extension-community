@@ -48,7 +48,10 @@ export async function dispatchSlash(
     return { kind: "not_slash" };
   }
   if (!inv.key) {
-    return { kind: "error", message: "Empty slash command. Type / for the list." };
+    return {
+      kind: "error",
+      message: "Empty slash command. Type / for the list.",
+    };
   }
 
   const cmd = deps.registry.resolve(inv.key);
@@ -84,7 +87,11 @@ export async function dispatchSlash(
   }
 
   // host
-  if (cmd.argsRequired && !inv.args.trim() && cmd.hostAction !== "selectModel") {
+  if (
+    cmd.argsRequired &&
+    !inv.args.trim() &&
+    cmd.hostAction !== "selectModel"
+  ) {
     // /model with no args → open model popover (args not required on host).
     return {
       kind: "error",
@@ -124,7 +131,7 @@ async function runHostAction(
   switch (action) {
     case "newSession":
       await deps.newSession();
-      // runNewSession already posts a system line
+      // runNewSession clears the UI to the home/empty state
       return undefined;
     case "resumeSession":
       await vscode.commands.executeCommand("grok.resumeSession");
@@ -177,9 +184,7 @@ async function runHostAction(
     case "docs": {
       const arg = inv.args.trim().toLowerCase();
       const url =
-        arg === "web" || arg === ""
-          ? "https://docs.x.ai"
-          : "https://docs.x.ai";
+        arg === "web" || arg === "" ? "https://docs.x.ai" : "https://docs.x.ai";
       await vscode.env.openExternal(vscode.Uri.parse(url));
       return `Opened docs: ${url}`;
     }
@@ -214,9 +219,7 @@ async function runHostAction(
     }
     case "export": {
       const lines = deps.getTranscript();
-      const body = lines
-        .map((l) => `## ${l.role}\n\n${l.text}\n`)
-        .join("\n");
+      const body = lines.map((l) => `## ${l.role}\n\n${l.text}\n`).join("\n");
       const filename = inv.args.trim();
       if (filename) {
         const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -236,13 +239,17 @@ async function runHostAction(
       if (!lines.length) {
         throw new Error("No assistant response to copy");
       }
-      const n = inv.args.trim() ? Math.max(1, parseInt(inv.args.trim(), 10) || 1) : 1;
+      const n = inv.args.trim()
+        ? Math.max(1, parseInt(inv.args.trim(), 10) || 1)
+        : 1;
       const idx = lines.length - n;
       if (idx < 0 || idx >= lines.length) {
         throw new Error(`No assistant response #${n}`);
       }
       await vscode.env.clipboard.writeText(lines[idx]!.text);
-      return n === 1 ? "Copied last response" : `Copied response #${n} from end`;
+      return n === 1
+        ? "Copied last response"
+        : `Copied response #${n} from end`;
     }
     case "context":
     case "sessionInfo": {
@@ -324,7 +331,9 @@ function buildHelpMessage(registry: SlashRegistry): string {
   };
   for (const cmd of registry.allCommands()) {
     const alias =
-      cmd.aliases.length > 0 ? ` (${cmd.aliases.map((a) => `/${a}`).join(", ")})` : "";
+      cmd.aliases.length > 0
+        ? ` (${cmd.aliases.map((a) => `/${a}`).join(", ")})`
+        : "";
     const row = `/${cmd.name}${alias} — ${cmd.description}`;
     byLayer[cmd.layer].push(row);
   }
@@ -332,7 +341,11 @@ function buildHelpMessage(registry: SlashRegistry): string {
     lines.push("Host:", ...byLayer.host.map((r) => `  ${r}`), "");
   }
   if (byLayer.passthrough.length) {
-    lines.push("Agent / pass-through:", ...byLayer.passthrough.map((r) => `  ${r}`), "");
+    lines.push(
+      "Agent / pass-through:",
+      ...byLayer.passthrough.map((r) => `  ${r}`),
+      "",
+    );
   }
   if (byLayer.unsupported.length) {
     lines.push(
