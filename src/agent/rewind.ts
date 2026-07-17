@@ -219,7 +219,7 @@ export function parseRewindResponse(raw: unknown): RewindResult {
   };
 }
 
-/** QuickPick label helpers. */
+/** QuickPick / panel label helpers. */
 export function formatRewindPointLabel(p: RewindPoint): string {
   const preview = (p.promptPreview ?? "").replace(/\s+/g, " ").trim();
   const short =
@@ -238,8 +238,209 @@ export function formatRewindPointDescription(p: RewindPoint): string {
   } else {
     parts.push("conversation only");
   }
-  if (p.createdAt) {
-    parts.push(p.createdAt);
+  const when = formatRewindTimestamp(p.createdAt);
+  if (when) {
+    parts.push(when);
   }
   return parts.join(" · ");
+}
+
+/** Parse optional `/rewind [index] [mode]` args. */
+export function parseRewindArgs(args: string): {
+  targetPromptIndex?: number;
+  mode?: RewindMode;
+} {
+  const tokens = args.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) {
+    return {};
+  }
+  let targetPromptIndex: number | undefined;
+  let mode: RewindMode | undefined;
+  for (const t of tokens) {
+    const asMode = normalizeRewindMode(t);
+    if (asMode) {
+      mode = asMode;
+      continue;
+    }
+    if (/^\d+$/.test(t)) {
+      targetPromptIndex = Number(t);
+      continue;
+    }
+  }
+  return { targetPromptIndex, mode };
+}
+
+export type PreviewDecision =
+  | { kind: "ready" }
+  | {
+      kind: "confirm_files";
+      cleanFiles: string[];
+      conflicts: RewindConflict[];
+    }
+  | {
+      kind: "confirm_force";
+      conflicts: RewindConflict[];
+      error?: string;
+    }
+  | { kind: "error"; error: string };
+
+/**
+ * Decide next step after a force=false preview (TUI confirm / force flow).
+ *
+ * Important: the shell dry-run **always** returns `success: false` even when
+ * the preview is valid (`acp_session_impl/rewind.rs` preview arm). TUI treats
+ * that as data for the confirm modal — only a hard failure is
+ * `error` with empty clean_files and empty conflicts
+ * (`handle_rewind_preview_complete`).
+ */
+export function decidePreviewAction(
+  preview: RewindResult,
+  mode: RewindMode,
+): PreviewDecision {
+  // Hard fail (invalid target, internal error, …) — not a dry-run payload.
+  if (
+    preview.error?.trim() &&
+    preview.cleanFiles.length === 0 &&
+    preview.conflicts.length === 0
+  ) {
+    return {
+      kind: "error",
+      error: preview.error.trim(),
+    };
+  }
+
+  if (preview.conflicts.length > 0) {
+    return {
+      kind: "confirm_force",
+      conflicts: preview.conflicts,
+      error: preview.error,
+    };
+  }
+
+  // conversation_only never needs file confirm (TUI skips preview entirely).
+  if (mode === "conversation_only") {
+    return { kind: "ready" };
+  }
+
+  if (preview.cleanFiles.length > 0) {
+    return {
+      kind: "confirm_files",
+      cleanFiles: preview.cleanFiles,
+      conflicts: preview.conflicts,
+    };
+  }
+
+  // File mode with no tracked file changes → execute immediately.
+  return { kind: "ready" };
+}
+
+export function conflictTypeLabel(conflictType: string): string {
+  switch (conflictType) {
+    case "deleted_externally":
+    case "missing_file":
+      return "deleted";
+    case "created_externally":
+    case "extra_file":
+      return "added";
+    case "modified_externally":
+    case "content_mismatch":
+      return "modified";
+    default:
+      return conflictType || "conflict";
+  }
+}
+
+export function basenamePath(p: string): string {
+  const n = p.replace(/\\/g, "/");
+  const i = n.lastIndexOf("/");
+  return i >= 0 ? n.slice(i + 1) : n;
+}
+
+/** Human success line for system banner / toast. */
+export function formatRewindSuccessMessage(result: RewindResult): string {
+  const parts = [`Rewound to before prompt #${result.targetPromptIndex}`];
+  if (modeTruncatesConversation(result.mode)) {
+    parts.push(
+      result.mode === "all" ? "(chat + files)" : "(conversation only)",
+    );
+  } else {
+    parts.push("(files only)");
+  }
+  if (result.revertedFiles.length > 0) {
+    const n = result.revertedFiles.length;
+    const sample = result.revertedFiles
+      .slice(0, 3)
+      .map(basenamePath)
+      .join(", ");
+    const more = n > 3 ? ` +${n - 3}` : "";
+    parts.push(`· ${n} file(s): ${sample}${more}`);
+  }
+  return parts.join(" ");
+}
+
+/** Format ISO / raw timestamps for point rows (best-effort relative). */
+export function formatRewindTimestamp(
+  raw: string,
+  nowMs: number = Date.now(),
+): string {
+  const s = raw.trim();
+  if (!s) {
+    return "";
+  }
+  const t = Date.parse(s);
+  if (!Number.isFinite(t)) {
+    // Already human or opaque — show as-is if short.
+    return s.length > 24 ? s.slice(0, 21) + "…" : s;
+  }
+  const delta = Math.max(0, nowMs - t);
+  const sec = Math.floor(delta / 1000);
+  if (sec < 45) {
+    return "just now";
+  }
+  const min = Math.floor(sec / 60);
+  if (min < 60) {
+    return `${min}m ago`;
+  }
+  const hr = Math.floor(min / 60);
+  if (hr < 36) {
+    return `${hr}h ago`;
+  }
+  const day = Math.floor(hr / 24);
+  if (day < 14) {
+    return `${day}d ago`;
+  }
+  try {
+    return new Date(t).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return s;
+  }
+}
+
+/** Serialize points for webview (stable JSON-friendly). */
+export function serializeRewindPointsForUi(points: RewindPoint[]): Array<{
+  promptIndex: number;
+  label: string;
+  description: string;
+  hasFileChanges: boolean;
+  promptPreview?: string;
+}> {
+  return points.map((p) => ({
+    promptIndex: p.promptIndex,
+    label: formatRewindPointLabel(p),
+    description: formatRewindPointDescription(p),
+    hasFileChanges: p.hasFileChanges,
+    promptPreview: p.promptPreview,
+  }));
+}
+
+/** Mode rows for webview / QuickPick. */
+export function serializeModesForUi(point: {
+  hasFileChanges: boolean;
+}): Array<{ mode: RewindMode; label: string; detail: string }> {
+  return modesForPoint(point);
 }

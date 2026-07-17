@@ -55,7 +55,19 @@ import {
   type ThoughtSegment,
   type ToolCard,
 } from "./sessionMessageMerge";
-import { modeTruncatesConversation, type RewindResult } from "../agent/rewind";
+import {
+  basenamePath,
+  conflictTypeLabel,
+  decidePreviewAction,
+  formatRewindSuccessMessage,
+  modeTruncatesConversation,
+  parseRewindArgs,
+  serializeModesForUi,
+  serializeRewindPointsForUi,
+  type RewindMode,
+  type RewindPoint,
+  type RewindResult,
+} from "../agent/rewind";
 import { parseSessionNotificationMeta } from "./sessionNotificationMeta";
 import {
   buildTurnStatusParts,
@@ -168,6 +180,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private messagesFlushTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly disposables: vscode.Disposable[] = [];
   private diffs: DiffReviewService | undefined;
+  /** In-chat multi-step rewind panel state. */
+  private sessionRewind:
+    | {
+        points: RewindPoint[];
+        selected?: RewindPoint;
+        mode?: RewindMode;
+        busy: boolean;
+      }
+    | undefined;
   /** True while ACP session/load is replaying history into the UI. */
   private loadingHistory = false;
   private currentUserId: string | undefined;
@@ -1091,6 +1112,36 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           );
         }
         break;
+      case "sessionRewindPick":
+        if (typeof msg.promptIndex === "number") {
+          await this.sessionRewindPickPoint(msg.promptIndex);
+        }
+        break;
+      case "sessionRewindMode":
+        if (
+          msg.mode === "all" ||
+          msg.mode === "conversation_only" ||
+          msg.mode === "files_only"
+        ) {
+          await this.sessionRewindPickMode(msg.mode);
+        }
+        break;
+      case "sessionRewindConfirm":
+        await this.sessionRewindConfirm();
+        break;
+      case "sessionRewindBack":
+        this.sessionRewindBack();
+        break;
+      case "sessionRewindCancel":
+        this.closeSessionRewind();
+        break;
+      case "sessionRewindFromMessage":
+        if (typeof msg.promptIndex === "number") {
+          await this.runRewind(String(msg.promptIndex));
+        } else {
+          await this.runRewind();
+        }
+        break;
       case "copyText":
         if (msg.text) {
           await vscode.env.clipboard.writeText(msg.text);
@@ -1559,6 +1610,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         },
         applyRewindResult: (result) => {
           this.applyRewindResult(result);
+        },
+        runRewind: async (args) => {
+          await this.runRewind(args ?? "");
         },
       });
 
@@ -2141,22 +2195,268 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** Command palette / `/rewind` — pick point, mode, preview, execute. */
-  async runRewind(): Promise<void> {
+  /**
+   * `/rewind` · command palette · message action.
+   * Opens in-chat panel (TUI picker parity); falls back to QuickPick if
+   * the webview is not ready.
+   */
+  async runRewind(args = ""): Promise<void> {
+    const parsed = parseRewindArgs(args);
     try {
-      const message = await runRewindPicker({
-        agent: this.agent,
-        applyRewindResult: (result) => {
-          this.applyRewindResult(result);
-        },
-      });
-      if (message) {
-        this.pushSystem(message);
+      if (!this.view) {
+        const message = await runRewindPicker(
+          {
+            agent: this.agent,
+            applyRewindResult: (result) => {
+              this.applyRewindResult(result);
+            },
+          },
+          args,
+        );
+        if (message) {
+          this.pushSystem(message);
+        }
+        return;
       }
+      await this.openSessionRewind(parsed);
     } catch (err) {
       this.pushSystem(errMessage(err));
+      this.post({
+        type: "sessionRewind",
+        phase: "error",
+        error: errMessage(err),
+      });
       throw err;
     }
+  }
+
+  private async openSessionRewind(opts: {
+    targetPromptIndex?: number;
+    mode?: RewindMode;
+  }): Promise<void> {
+    await this.agent.ensureStarted();
+    if (this.agent.isBusy()) {
+      await this.agent.cancelTurn();
+      this.pushSystem("Cancelled current turn for rewind…");
+    }
+    const points = await this.agent.rewindGetPoints();
+    if (points.length === 0) {
+      this.pushSystem("No rewind points yet — send a prompt first.");
+      return;
+    }
+
+    this.sessionRewind = { points, busy: false };
+    this.post({
+      type: "sessionRewind",
+      phase: "points",
+      points: serializeRewindPointsForUi(points),
+      selectPromptIndex: opts.targetPromptIndex,
+    });
+
+    // Optional shortcuts: /rewind 2  or  /rewind 2 conversation_only
+    if (opts.targetPromptIndex !== undefined) {
+      const hit = points.find((p) => p.promptIndex === opts.targetPromptIndex);
+      if (!hit) {
+        this.pushSystem(
+          `No rewind point for prompt #${opts.targetPromptIndex}`,
+        );
+        return;
+      }
+      this.sessionRewind.selected = hit;
+      if (opts.mode) {
+        if (
+          opts.mode === "files_only" &&
+          !hit.hasFileChanges &&
+          serializeModesForUi(hit).every((m) => m.mode !== "files_only")
+        ) {
+          this.post({
+            type: "sessionRewind",
+            phase: "error",
+            error:
+              "That turn has no file snapshots — pick conversation or both.",
+          });
+          return;
+        }
+        await this.sessionRewindPickMode(opts.mode);
+        return;
+      }
+      this.post({
+        type: "sessionRewind",
+        phase: "mode",
+        point: {
+          promptIndex: hit.promptIndex,
+          label: serializeRewindPointsForUi([hit])[0]!.label,
+          description: serializeRewindPointsForUi([hit])[0]!.description,
+          hasFileChanges: hit.hasFileChanges,
+        },
+        modes: serializeModesForUi(hit),
+      });
+    }
+  }
+
+  private async sessionRewindPickPoint(promptIndex: number): Promise<void> {
+    const st = this.sessionRewind;
+    if (!st || st.busy) {
+      return;
+    }
+    const hit = st.points.find((p) => p.promptIndex === promptIndex);
+    if (!hit) {
+      return;
+    }
+    st.selected = hit;
+    st.mode = undefined;
+    this.post({
+      type: "sessionRewind",
+      phase: "mode",
+      point: {
+        promptIndex: hit.promptIndex,
+        label: serializeRewindPointsForUi([hit])[0]!.label,
+        description: serializeRewindPointsForUi([hit])[0]!.description,
+        hasFileChanges: hit.hasFileChanges,
+      },
+      modes: serializeModesForUi(hit),
+    });
+  }
+
+  private async sessionRewindPickMode(mode: RewindMode): Promise<void> {
+    const st = this.sessionRewind;
+    if (!st?.selected || st.busy) {
+      return;
+    }
+    st.mode = mode;
+    st.busy = true;
+    this.post({
+      type: "sessionRewind",
+      phase: "busy",
+      message: "Checking rewind…",
+    });
+    try {
+      const preview = await this.agent.rewindExecute({
+        targetPromptIndex: st.selected.promptIndex,
+        mode,
+        force: false,
+      });
+      const decision = decidePreviewAction(preview, mode);
+      if (decision.kind === "error") {
+        st.busy = false;
+        this.post({
+          type: "sessionRewind",
+          phase: "error",
+          error: decision.error,
+        });
+        return;
+      }
+      if (decision.kind === "ready") {
+        await this.sessionRewindExecute(true);
+        return;
+      }
+      st.busy = false;
+      const files =
+        decision.kind === "confirm_files"
+          ? decision.cleanFiles
+          : decision.conflicts.map((c) => c.path);
+      const conflicts =
+        decision.kind === "confirm_force"
+          ? decision.conflicts
+          : decision.kind === "confirm_files"
+            ? decision.conflicts
+            : [];
+      this.post({
+        type: "sessionRewind",
+        phase: "confirm",
+        force: decision.kind === "confirm_force",
+        promptIndex: st.selected.promptIndex,
+        mode,
+        title:
+          decision.kind === "confirm_force"
+            ? `Force rewind past ${conflicts.length} conflict(s)?`
+            : `Revert ${files.length} file(s)?`,
+        files: files.slice(0, 12).map((p) => ({
+          path: p,
+          name: basenamePath(p),
+        })),
+        conflicts: conflicts.slice(0, 12).map((c) => ({
+          path: c.path,
+          name: basenamePath(c.path),
+          label: conflictTypeLabel(c.conflictType),
+        })),
+        moreFiles: Math.max(0, files.length - 12),
+      });
+    } catch (err) {
+      st.busy = false;
+      this.post({
+        type: "sessionRewind",
+        phase: "error",
+        error: errMessage(err),
+      });
+    }
+  }
+
+  private async sessionRewindConfirm(): Promise<void> {
+    await this.sessionRewindExecute(true);
+  }
+
+  private async sessionRewindExecute(force: boolean): Promise<void> {
+    const st = this.sessionRewind;
+    if (!st?.selected || !st.mode) {
+      return;
+    }
+    st.busy = true;
+    this.post({
+      type: "sessionRewind",
+      phase: "busy",
+      message: "Rewinding…",
+    });
+    try {
+      const result = await this.agent.rewindExecute({
+        targetPromptIndex: st.selected.promptIndex,
+        mode: st.mode,
+        force,
+      });
+      if (!result.success) {
+        st.busy = false;
+        this.post({
+          type: "sessionRewind",
+          phase: "error",
+          error: result.error?.trim() || "Rewind failed",
+        });
+        return;
+      }
+      this.applyRewindResult(result);
+      this.closeSessionRewind();
+      this.pushSystem(formatRewindSuccessMessage(result));
+    } catch (err) {
+      st.busy = false;
+      this.post({
+        type: "sessionRewind",
+        phase: "error",
+        error: errMessage(err),
+      });
+    }
+  }
+
+  private sessionRewindBack(): void {
+    const st = this.sessionRewind;
+    if (!st || st.busy) {
+      return;
+    }
+    if (st.mode || st.selected) {
+      // From mode/confirm → points
+      st.selected = undefined;
+      st.mode = undefined;
+      this.post({
+        type: "sessionRewind",
+        phase: "points",
+        points: serializeRewindPointsForUi(st.points),
+      });
+      return;
+    }
+    this.closeSessionRewind();
+  }
+
+  private closeSessionRewind(): void {
+    this.sessionRewind = undefined;
+    this.post({ type: "sessionRewind", phase: "close" });
   }
 
   /**
@@ -3049,6 +3349,32 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     </div>
   </div>
   <div id="messages"></div>
+  <section id="session-rewind-panel" hidden role="dialog" aria-label="Rewind conversation">
+    <div id="session-rewind-head">
+      <div class="session-rewind-head-left">
+        <i class="ti ti-arrow-back-up" aria-hidden="true"></i>
+        <span id="session-rewind-title">Rewind</span>
+        <span id="session-rewind-badge" class="session-rewind-badge" hidden></span>
+      </div>
+      <div class="session-rewind-head-right">
+        <button type="button" class="secondary session-rewind-icon" id="session-rewind-back" title="Back" aria-label="Back" hidden>
+          <i class="ti ti-arrow-left" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="secondary session-rewind-icon" id="session-rewind-close" title="Close (Esc)" aria-label="Close">
+          <i class="ti ti-x" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>
+    <div id="session-rewind-scroll">
+      <div id="session-rewind-body"></div>
+    </div>
+    <div id="session-rewind-foot" hidden>
+      <div id="session-rewind-actions" role="toolbar" aria-label="Rewind actions">
+        <button type="button" class="secondary" id="session-rewind-cancel-btn">Cancel</button>
+        <button type="button" id="session-rewind-confirm-btn">Rewind</button>
+      </div>
+    </div>
+  </section>
   <section id="plan-panel" hidden role="region" aria-label="Plan approval">
     <div id="plan-head">
       <div class="plan-head-left">

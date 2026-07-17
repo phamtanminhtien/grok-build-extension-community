@@ -13,10 +13,14 @@ import { getSettings, resolveSessionCwd } from "../config/settings";
 import { openOutput } from "../log/output";
 import { tabFromSlashName } from "../extensions/tabs";
 import {
+  basenamePath,
+  conflictTypeLabel,
+  decidePreviewAction,
   formatRewindPointDescription,
   formatRewindPointLabel,
-  modeTruncatesConversation,
+  formatRewindSuccessMessage,
   modesForPoint,
+  parseRewindArgs,
   type RewindMode,
   type RewindPoint,
   type RewindResult,
@@ -48,8 +52,13 @@ export interface DispatchDeps {
   beginHistoryLoad?: (sessionId?: string, title?: string) => void;
   endHistoryLoad?: () => void;
   /**
+   * Preferred in-chat rewind UI (`/rewind`, message action).
+   * When set, host slash uses this instead of QuickPick.
+   */
+  runRewind?: (args?: string) => Promise<void>;
+  /**
    * Apply successful rewind to chat UI (truncate turns / prefill composer).
-   * Required for `/rewind` host action.
+   * Used by QuickPick fallback when `runRewind` is absent.
    */
   applyRewindResult?: (result: RewindResult) => void;
 }
@@ -403,105 +412,135 @@ async function runHostAction(
       }
       return formatTasksReport(deps.agent.getTasks());
     }
-    case "rewind":
-      return runRewindPicker(deps);
+    case "rewind": {
+      if (deps.runRewind) {
+        await deps.runRewind(inv.args);
+        // Panel owns banners — no "cancelled" spam in chat.
+        return undefined;
+      }
+      return runRewindPicker(deps, inv.args);
+    }
     default:
       return `Unhandled host action for /${cmd.name}`;
   }
 }
 
 /**
- * TUI `/rewind` parity: list points → mode → preview → force execute.
- * UI truncation/prefill is delegated to `applyRewindResult`.
+ * QuickPick rewind (fallback when no in-chat panel).
+ * TUI parity: points → mode → preview → force execute.
+ * Cancel returns `undefined` (no noisy system line).
  */
 export async function runRewindPicker(
   deps: Pick<DispatchDeps, "agent" | "applyRewindResult">,
+  args = "",
 ): Promise<string | undefined> {
   await deps.agent.ensureStarted();
   if (deps.agent.isBusy()) {
     await deps.agent.cancelTurn();
   }
 
+  const parsed = parseRewindArgs(args);
   const points = await deps.agent.rewindGetPoints();
   if (points.length === 0) {
     return "No rewind points yet — send a prompt first.";
   }
 
-  type PointItem = vscode.QuickPickItem & { point: RewindPoint };
-  const pointPick = await vscode.window.showQuickPick<PointItem>(
-    points.map((p) => ({
-      label: formatRewindPointLabel(p),
-      description: formatRewindPointDescription(p),
-      point: p,
-    })),
-    {
-      title: "Rewind to turn",
-      placeHolder: "Restore state before this prompt ran",
-      matchOnDescription: true,
-    },
-  );
-  if (!pointPick) {
-    return "Rewind cancelled";
+  let point: RewindPoint | undefined =
+    parsed.targetPromptIndex !== undefined
+      ? points.find((p) => p.promptIndex === parsed.targetPromptIndex)
+      : undefined;
+
+  if (!point) {
+    type PointItem = vscode.QuickPickItem & { point: RewindPoint };
+    const pointPick = await vscode.window.showQuickPick<PointItem>(
+      points.map((p) => ({
+        label: formatRewindPointLabel(p),
+        description: formatRewindPointDescription(p),
+        point: p,
+      })),
+      {
+        title: "Rewind to turn",
+        placeHolder: "Restore state before this prompt ran",
+        matchOnDescription: true,
+      },
+    );
+    if (!pointPick) {
+      return undefined;
+    }
+    point = pointPick.point;
   }
 
-  const modeChoices = modesForPoint(pointPick.point);
-  type ModeItem = vscode.QuickPickItem & { mode: RewindMode };
-  const modePick = await vscode.window.showQuickPick<ModeItem>(
-    modeChoices.map((m) => ({
-      label: m.label,
-      description: m.detail,
-      mode: m.mode,
-    })),
-    {
-      title: `Rewind mode · #${pointPick.point.promptIndex}`,
-      placeHolder: "What should be rewound?",
-    },
-  );
-  if (!modePick) {
-    return "Rewind cancelled";
+  let mode: RewindMode | undefined = parsed.mode;
+  if (!mode) {
+    const modeChoices = modesForPoint(point);
+    type ModeItem = vscode.QuickPickItem & { mode: RewindMode };
+    const modePick = await vscode.window.showQuickPick<ModeItem>(
+      modeChoices.map((m) => ({
+        label: m.label,
+        description: m.detail,
+        mode: m.mode,
+      })),
+      {
+        title: `Rewind mode · #${point.promptIndex}`,
+        placeHolder: "What should be rewound?",
+      },
+    );
+    if (!modePick) {
+      return undefined;
+    }
+    mode = modePick.mode;
+  } else if (
+    mode === "files_only" &&
+    !point.hasFileChanges &&
+    modesForPoint(point).every((m) => m.mode !== "files_only")
+  ) {
+    return "That turn has no file snapshots — pick conversation or both.";
   }
 
-  const target = pointPick.point.promptIndex;
-  const mode = modePick.mode;
+  const target = point.promptIndex;
 
-  // Preview (force=false) — surfaces conflicts without applying.
   const preview = await deps.agent.rewindExecute({
     targetPromptIndex: target,
     mode,
     force: false,
   });
 
-  if (!preview.success && preview.conflicts.length > 0) {
-    const sample = preview.conflicts
+  const decision = decidePreviewAction(preview, mode);
+  if (decision.kind === "error") {
+    throw new Error(decision.error);
+  }
+  if (decision.kind === "confirm_force") {
+    const sample = decision.conflicts
       .slice(0, 5)
-      .map((c) => `${c.path} (${c.conflictType})`)
+      .map(
+        (c) => `${basenamePath(c.path)} (${conflictTypeLabel(c.conflictType)})`,
+      )
       .join("\n");
     const more =
-      preview.conflicts.length > 5
-        ? `\n…and ${preview.conflicts.length - 5} more`
+      decision.conflicts.length > 5
+        ? `\n…and ${decision.conflicts.length - 5} more`
         : "";
     const choice = await vscode.window.showWarningMessage(
-      `Rewind has ${preview.conflicts.length} file conflict(s). Force anyway?\n${sample}${more}`,
+      `Rewind has ${decision.conflicts.length} file conflict(s). Force anyway?\n${sample}${more}`,
       { modal: true },
       "Force rewind",
     );
     if (choice !== "Force rewind") {
-      return "Rewind cancelled (conflicts)";
+      return undefined;
     }
-  } else if (!preview.success) {
-    throw new Error(preview.error?.trim() || "Rewind preview failed");
-  } else if (
-    (mode === "all" || mode === "files_only") &&
-    preview.cleanFiles.length > 0
-  ) {
-    const n = preview.cleanFiles.length;
+  } else if (decision.kind === "confirm_files") {
+    const n = decision.cleanFiles.length;
+    const sample = decision.cleanFiles.slice(0, 5).map(basenamePath).join(", ");
+    const more = n > 5 ? ` +${n - 5}` : "";
     const choice = await vscode.window.showInformationMessage(
-      `Rewind will revert ${n} file(s). Continue?`,
+      n > 0
+        ? `Rewind will revert ${n} file(s): ${sample}${more}. Continue?`
+        : "Rewind will change workspace files. Continue?",
       { modal: true },
       "Rewind",
     );
     if (choice !== "Rewind") {
-      return "Rewind cancelled";
+      return undefined;
     }
   }
 
@@ -515,19 +554,7 @@ export async function runRewindPicker(
   }
 
   deps.applyRewindResult?.(result);
-
-  const parts = [`Rewound to before prompt #${result.targetPromptIndex}`];
-  if (modeTruncatesConversation(result.mode)) {
-    parts.push(
-      result.mode === "all" ? "(chat + files)" : "(conversation only)",
-    );
-  } else {
-    parts.push("(files only)");
-  }
-  if (result.revertedFiles.length > 0) {
-    parts.push(`· ${result.revertedFiles.length} file(s) reverted`);
-  }
-  return parts.join(" ");
+  return formatRewindSuccessMessage(result);
 }
 
 function buildHelpMessage(registry: SlashRegistry): string {

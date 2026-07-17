@@ -117,6 +117,19 @@ const planBody = document.getElementById("plan-body");
 const planAbandon = document.getElementById("plan-abandon");
 const planRequest = document.getElementById("plan-request");
 const planApprove = document.getElementById("plan-approve");
+const sessionRewindPanel = document.getElementById("session-rewind-panel");
+const sessionRewindTitle = document.getElementById("session-rewind-title");
+const sessionRewindBadge = document.getElementById("session-rewind-badge");
+const sessionRewindBody = document.getElementById("session-rewind-body");
+const sessionRewindFoot = document.getElementById("session-rewind-foot");
+const sessionRewindBack = document.getElementById("session-rewind-back");
+const sessionRewindClose = document.getElementById("session-rewind-close");
+const sessionRewindCancelBtn = document.getElementById(
+  "session-rewind-cancel-btn",
+);
+const sessionRewindConfirmBtn = document.getElementById(
+  "session-rewind-confirm-btn",
+);
 const subagentPanel = document.getElementById("subagent-panel");
 const subagentTypeEl = document.getElementById("subagent-type");
 const subagentStatusEl = document.getElementById("subagent-status");
@@ -131,6 +144,11 @@ const subagentRefresh = document.getElementById("subagent-refresh");
 const subagentKill = document.getElementById("subagent-kill");
 const appRoot = document.getElementById("app");
 let busy = false;
+/** In-chat multi-step session rewind (not the edit-mode popover). */
+let sessionRewindOpen = false;
+let sessionRewindPhase = "points"; // points | mode | confirm | busy | error
+let sessionRewindIndex = 0;
+let sessionRewindItems = []; // current list for keyboard nav
 /** In-chat subagent detail panel (plan-panel twin). */
 let subagentOpen = false;
 let subagentActiveId = "";
@@ -2451,8 +2469,326 @@ function renderMsgActions(m) {
       enterUserMessageEdit(live);
     });
     bar.appendChild(editBtn);
+
+    if (typeof m.promptIndex === "number") {
+      const rewindBtn = document.createElement("button");
+      rewindBtn.type = "button";
+      rewindBtn.className = "msg-act-rewind msg-act-icon";
+      rewindBtn.title = "Rewind to this turn";
+      rewindBtn.setAttribute("aria-label", "Rewind to this turn");
+      rewindBtn.innerHTML = icon("arrow-back-up");
+      rewindBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        vscode.postMessage({
+          type: "sessionRewindFromMessage",
+          promptIndex: m.promptIndex,
+        });
+      });
+      bar.appendChild(rewindBtn);
+    }
   }
   return bar;
+}
+
+// ── Session rewind panel (multi-step; distinct from edit-mode popover) ──
+function setSessionRewindOpen(open) {
+  sessionRewindOpen = !!open;
+  if (appRoot) {
+    appRoot.classList.toggle("session-rewind-open", sessionRewindOpen);
+  }
+  if (sessionRewindPanel) {
+    sessionRewindPanel.hidden = !sessionRewindOpen;
+  }
+}
+
+function closeSessionRewindPanel() {
+  setSessionRewindOpen(false);
+  sessionRewindPhase = "points";
+  sessionRewindIndex = 0;
+  sessionRewindItems = [];
+  if (sessionRewindBody) sessionRewindBody.innerHTML = "";
+  if (sessionRewindFoot) sessionRewindFoot.hidden = true;
+  if (sessionRewindBack) sessionRewindBack.hidden = true;
+  if (sessionRewindBadge) {
+    sessionRewindBadge.hidden = true;
+    sessionRewindBadge.textContent = "";
+  }
+  if (sessionRewindTitle) sessionRewindTitle.textContent = "Rewind";
+}
+
+function sessionRewindSetActive(idx) {
+  sessionRewindIndex = idx;
+  if (!sessionRewindBody) return;
+  const buttons = sessionRewindBody.querySelectorAll(".session-rewind-item");
+  buttons.forEach((btn, i) => {
+    btn.classList.toggle("active", i === idx);
+    btn.setAttribute("aria-selected", i === idx ? "true" : "false");
+  });
+  const active = sessionRewindBody.querySelector(".session-rewind-item.active");
+  if (active) active.scrollIntoView({ block: "nearest" });
+}
+
+function renderSessionRewindPoints(points, selectPromptIndex) {
+  sessionRewindPhase = "points";
+  sessionRewindItems = Array.isArray(points) ? points : [];
+  if (sessionRewindTitle) sessionRewindTitle.textContent = "Rewind to turn";
+  if (sessionRewindBadge) {
+    sessionRewindBadge.hidden = false;
+    sessionRewindBadge.textContent =
+      sessionRewindItems.length +
+      " point" +
+      (sessionRewindItems.length === 1 ? "" : "s");
+  }
+  if (sessionRewindBack) sessionRewindBack.hidden = true;
+  if (sessionRewindFoot) sessionRewindFoot.hidden = true;
+  if (!sessionRewindBody) return;
+  if (!sessionRewindItems.length) {
+    sessionRewindBody.innerHTML =
+      '<div class="session-rewind-status">No rewind points yet.</div>';
+    return;
+  }
+  let active = 0;
+  if (typeof selectPromptIndex === "number") {
+    const i = sessionRewindItems.findIndex(
+      (p) => p.promptIndex === selectPromptIndex,
+    );
+    if (i >= 0) active = i;
+  }
+  sessionRewindBody.innerHTML = sessionRewindItems
+    .map(
+      (p, i) =>
+        '<button type="button" class="session-rewind-item' +
+        (i === active ? " active" : "") +
+        '" data-sr-point="' +
+        p.promptIndex +
+        '" role="option" aria-selected="' +
+        (i === active ? "true" : "false") +
+        '">' +
+        '<span class="sr-label">' +
+        esc(p.label || "#" + p.promptIndex) +
+        "</span>" +
+        '<span class="sr-detail">' +
+        esc(p.description || "") +
+        "</span>" +
+        "</button>",
+    )
+    .join("");
+  sessionRewindSetActive(active);
+}
+
+function renderSessionRewindModes(point, modes) {
+  sessionRewindPhase = "mode";
+  sessionRewindItems = Array.isArray(modes) ? modes : [];
+  if (sessionRewindTitle) {
+    sessionRewindTitle.textContent =
+      "Rewind mode · #" +
+      (point && point.promptIndex != null ? point.promptIndex : "?");
+  }
+  if (sessionRewindBadge) {
+    sessionRewindBadge.hidden = false;
+    sessionRewindBadge.textContent =
+      point && point.hasFileChanges ? "files" : "chat";
+  }
+  if (sessionRewindBack) sessionRewindBack.hidden = false;
+  if (sessionRewindFoot) sessionRewindFoot.hidden = true;
+  if (!sessionRewindBody) return;
+  sessionRewindBody.innerHTML = sessionRewindItems
+    .map(
+      (m, i) =>
+        '<button type="button" class="session-rewind-item' +
+        (i === 0 ? " active" : "") +
+        '" data-sr-mode="' +
+        esc(m.mode) +
+        '" role="option" aria-selected="' +
+        (i === 0 ? "true" : "false") +
+        '">' +
+        '<span class="sr-label">' +
+        esc(m.label) +
+        "</span>" +
+        '<span class="sr-detail">' +
+        esc(m.detail || "") +
+        "</span>" +
+        "</button>",
+    )
+    .join("");
+  sessionRewindSetActive(0);
+}
+
+function renderSessionRewindConfirm(msg) {
+  sessionRewindPhase = "confirm";
+  sessionRewindItems = [];
+  if (sessionRewindTitle) sessionRewindTitle.textContent = "Confirm rewind";
+  if (sessionRewindBadge) {
+    sessionRewindBadge.hidden = false;
+    sessionRewindBadge.textContent = msg.force ? "force" : "preview";
+  }
+  if (sessionRewindBack) sessionRewindBack.hidden = false;
+  if (sessionRewindFoot) sessionRewindFoot.hidden = false;
+  if (sessionRewindConfirmBtn) {
+    sessionRewindConfirmBtn.textContent = msg.force ? "Force rewind" : "Rewind";
+  }
+  if (!sessionRewindBody) return;
+  let html =
+    '<div class="session-rewind-confirm-summary">' +
+    esc(msg.title || "Confirm rewind") +
+    "</div>";
+  const conflicts = Array.isArray(msg.conflicts) ? msg.conflicts : [];
+  const files = Array.isArray(msg.files) ? msg.files : [];
+  const rows = conflicts.length
+    ? conflicts.map(
+        (c) =>
+          '<li><span class="sr-file-name" title="' +
+          esc(c.path || "") +
+          '">' +
+          esc(c.name || c.path || "") +
+          '</span><span class="sr-file-tag">' +
+          esc(c.label || "conflict") +
+          "</span></li>",
+      )
+    : files.map(
+        (f) =>
+          '<li><span class="sr-file-name" title="' +
+          esc(f.path || "") +
+          '">' +
+          esc(f.name || f.path || "") +
+          "</span></li>",
+      );
+  if (rows.length) {
+    html += '<ul class="session-rewind-file-list">' + rows.join("") + "</ul>";
+  }
+  if (msg.moreFiles > 0) {
+    html +=
+      '<div class="session-rewind-status">…and ' +
+      msg.moreFiles +
+      " more</div>";
+  }
+  sessionRewindBody.innerHTML = html;
+}
+
+function renderSessionRewindBusy(message) {
+  sessionRewindPhase = "busy";
+  sessionRewindItems = [];
+  if (sessionRewindTitle) sessionRewindTitle.textContent = "Rewind";
+  if (sessionRewindBack) sessionRewindBack.hidden = true;
+  if (sessionRewindFoot) sessionRewindFoot.hidden = true;
+  if (sessionRewindBody) {
+    sessionRewindBody.innerHTML =
+      '<div class="session-rewind-status">' +
+      esc(message || "Working…") +
+      "</div>";
+  }
+}
+
+function renderSessionRewindError(error) {
+  sessionRewindPhase = "error";
+  sessionRewindItems = [];
+  if (sessionRewindTitle) sessionRewindTitle.textContent = "Rewind failed";
+  if (sessionRewindBack) sessionRewindBack.hidden = false;
+  if (sessionRewindFoot) sessionRewindFoot.hidden = true;
+  if (sessionRewindBody) {
+    sessionRewindBody.innerHTML =
+      '<div class="session-rewind-status error">' +
+      esc(error || "Unknown error") +
+      "</div>";
+  }
+}
+
+function handleSessionRewindMessage(msg) {
+  if (!msg || msg.type !== "sessionRewind") return;
+  const phase = msg.phase || "close";
+  if (phase === "close") {
+    closeSessionRewindPanel();
+    return;
+  }
+  setSessionRewindOpen(true);
+  if (phase === "points") {
+    renderSessionRewindPoints(msg.points, msg.selectPromptIndex);
+  } else if (phase === "mode") {
+    renderSessionRewindModes(msg.point, msg.modes);
+  } else if (phase === "confirm") {
+    renderSessionRewindConfirm(msg);
+  } else if (phase === "busy") {
+    renderSessionRewindBusy(msg.message);
+  } else if (phase === "error") {
+    renderSessionRewindError(msg.error);
+  }
+}
+
+function sessionRewindAcceptActive() {
+  if (sessionRewindPhase === "confirm") {
+    vscode.postMessage({ type: "sessionRewindConfirm" });
+    return;
+  }
+  if (sessionRewindPhase === "points") {
+    const item = sessionRewindItems[sessionRewindIndex];
+    if (item && typeof item.promptIndex === "number") {
+      vscode.postMessage({
+        type: "sessionRewindPick",
+        promptIndex: item.promptIndex,
+      });
+    }
+    return;
+  }
+  if (sessionRewindPhase === "mode") {
+    const item = sessionRewindItems[sessionRewindIndex];
+    if (item && item.mode) {
+      vscode.postMessage({ type: "sessionRewindMode", mode: item.mode });
+    }
+  }
+}
+
+function sessionRewindMove(delta) {
+  if (sessionRewindPhase !== "points" && sessionRewindPhase !== "mode") {
+    return;
+  }
+  if (!sessionRewindItems.length) return;
+  const next =
+    (sessionRewindIndex + delta + sessionRewindItems.length) %
+    sessionRewindItems.length;
+  sessionRewindSetActive(next);
+}
+
+if (sessionRewindBody) {
+  sessionRewindBody.addEventListener("click", (e) => {
+    const pointBtn = e.target.closest("[data-sr-point]");
+    if (pointBtn) {
+      e.preventDefault();
+      vscode.postMessage({
+        type: "sessionRewindPick",
+        promptIndex: Number(pointBtn.getAttribute("data-sr-point")),
+      });
+      return;
+    }
+    const modeBtn = e.target.closest("[data-sr-mode]");
+    if (modeBtn) {
+      e.preventDefault();
+      vscode.postMessage({
+        type: "sessionRewindMode",
+        mode: modeBtn.getAttribute("data-sr-mode"),
+      });
+    }
+  });
+}
+if (sessionRewindClose) {
+  sessionRewindClose.addEventListener("click", () =>
+    vscode.postMessage({ type: "sessionRewindCancel" }),
+  );
+}
+if (sessionRewindBack) {
+  sessionRewindBack.addEventListener("click", () =>
+    vscode.postMessage({ type: "sessionRewindBack" }),
+  );
+}
+if (sessionRewindCancelBtn) {
+  sessionRewindCancelBtn.addEventListener("click", () =>
+    vscode.postMessage({ type: "sessionRewindCancel" }),
+  );
+}
+if (sessionRewindConfirmBtn) {
+  sessionRewindConfirmBtn.addEventListener("click", () =>
+    vscode.postMessage({ type: "sessionRewindConfirm" }),
+  );
 }
 
 /**
@@ -3788,6 +4124,41 @@ window.addEventListener(
         return;
       }
     }
+    if (sessionRewindOpen) {
+      if (sessionRewindPhase === "busy") {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          // Allow cancel even while busy (host will ignore if mid-RPC).
+          vscode.postMessage({ type: "sessionRewindCancel" });
+        }
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        sessionRewindMove(1);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        sessionRewindMove(-1);
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        sessionRewindAcceptActive();
+        return;
+      }
+      if (e.key === "Backspace" && sessionRewindPhase !== "points") {
+        e.preventDefault();
+        vscode.postMessage({ type: "sessionRewindBack" });
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        vscode.postMessage({ type: "sessionRewindCancel" });
+        return;
+      }
+    }
     if (subagentOpen) {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -4578,6 +4949,8 @@ window.addEventListener("message", (event) => {
     openPlanPanel(msg);
   } else if (msg.type === "closePlanApproval") {
     closePlanPanel(null);
+  } else if (msg.type === "sessionRewind") {
+    handleSessionRewindMessage(msg);
   } else if (msg.type === "subagentPanel") {
     openSubagentPanel(msg);
   } else if (msg.type === "subagentPanelUpdate") {
