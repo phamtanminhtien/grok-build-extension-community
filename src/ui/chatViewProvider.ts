@@ -3514,21 +3514,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         <div id="mention-list"></div>
         <div id="mention-empty" hidden>No matches</div>
       </div>
-      <div id="model-popover" hidden role="listbox" aria-label="Select model">
+      <div id="model-popover" hidden role="dialog" aria-label="Select model and reasoning">
         <div id="model-head">
           <span id="model-title">Models</span>
           <span class="hint">↑↓ · Enter · Esc</span>
         </div>
-        <div id="model-list"></div>
+        <div id="model-list" role="listbox" aria-label="Models"></div>
         <div id="model-empty" hidden>No models from agent</div>
-      </div>
-      <div id="effort-popover" hidden role="listbox" aria-label="Reasoning effort">
-        <div id="effort-head">
-          <span id="effort-title">Reasoning</span>
-          <span class="hint">↑↓ · Enter · Esc</span>
+        <div id="model-effort-panel" class="model-effort-panel" hidden>
+          <div class="me-head">
+            <span class="me-title"><i class="ti ti-brain" aria-hidden="true"></i> Reasoning</span>
+            <span class="me-value" id="model-effort-value">—</span>
+          </div>
+          <div class="me-slider-wrap">
+            <input type="range" id="model-effort-slider" min="0" max="0" step="1" value="0" aria-label="Reasoning effort" />
+            <div class="me-ticks" id="model-effort-ticks" aria-hidden="true"></div>
+          </div>
+          <div class="me-desc" id="model-effort-desc"></div>
         </div>
-        <div id="effort-list"></div>
-        <div id="effort-empty" hidden>Not supported on this model</div>
       </div>
       <div id="rewind-popover" hidden role="listbox" aria-label="Rewind mode">
         <div id="rewind-head">
@@ -3592,14 +3595,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             <span class="ctx-usage-text" id="ctx-usage-text">—</span>
           </div>
           <div class="actions-right">
-            <button id="btn-model" class="secondary" type="button" title="Select model (same catalog as TUI)" aria-label="Select model" aria-haspopup="listbox">
+            <button id="btn-model" class="secondary" type="button" title="Select model (same catalog as TUI)" aria-label="Select model" aria-haspopup="dialog" aria-expanded="false">
               <i class="ti ti-cpu" aria-hidden="true"></i>
-              <span class="model-btn-label" id="model-btn-label">model</span>
-              <i class="ti ti-chevron-up" aria-hidden="true"></i>
-            </button>
-            <button id="btn-effort" class="secondary" type="button" hidden title="Reasoning effort" aria-label="Reasoning effort" aria-haspopup="listbox">
-              <i class="ti ti-brain" aria-hidden="true"></i>
-              <span class="effort-btn-label" id="effort-btn-label">effort</span>
+              <span class="model-btn-text">
+                <span class="model-btn-label" id="model-btn-label">model</span>
+                <span class="model-btn-effort" id="model-btn-effort" hidden></span>
+              </span>
               <i class="ti ti-chevron-up" aria-hidden="true"></i>
             </button>
             <button id="send" type="button" title="Send" aria-label="Send"><i class="ti ti-send" aria-hidden="true"></i></button>

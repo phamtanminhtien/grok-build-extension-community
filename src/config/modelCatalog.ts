@@ -38,7 +38,10 @@ const FALLBACK_MODELS: GrokModelOption[] = [
   { id: "grok-build", label: "Grok Build" },
 ];
 
-/** TUI legacy effort menu when server sends supportsReasoningEffort but empty list. */
+/**
+ * Built-in effort menu when the server only sets supportsReasoningEffort.
+ * Left→right / weak→strong for slider UX (TUI list is strongest-first).
+ */
 export const LEGACY_EFFORT_OPTIONS: GrokEffortOption[] = [
   { id: "minimal", label: "Minimal" },
   { id: "low", label: "Low" },
@@ -46,6 +49,67 @@ export const LEGACY_EFFORT_OPTIONS: GrokEffortOption[] = [
   { id: "high", label: "High" },
   { id: "xhigh", label: "X-High" },
 ];
+
+/**
+ * Rank for slider order (low → high). Agent/TUI menus often arrive strongest-first
+ * (`xhigh, high, medium, low`); the range slider needs weak→strong left→right.
+ * Unknown ids keep a high rank so they sort after known levels, stable by index.
+ */
+export function effortStrengthRank(id: string): number {
+  const key = String(id || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+  switch (key) {
+    case "none":
+    case "off":
+      return 0;
+    case "minimal":
+    case "min":
+      return 1;
+    case "low":
+      return 2;
+    case "medium":
+    case "med":
+      return 3;
+    case "high":
+      return 4;
+    case "xhigh":
+    case "max":
+    case "maximum":
+    case "deep":
+      return 5;
+    default:
+      return 50;
+  }
+}
+
+/** Sort efforts weak → strong for slider display. Stable for equal ranks. */
+export function sortEffortsLowToHigh(
+  efforts: readonly GrokEffortOption[],
+): GrokEffortOption[] {
+  return efforts
+    .map((e, i) => ({ e, i, r: effortStrengthRank(e.id) }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map(({ e }) => e);
+}
+
+/**
+ * Strip redundant "effort" suffix from labels ("High Effort" → "High").
+ * Agent/catalog menus often append the word; the UI only needs the level.
+ */
+export function normalizeEffortLabel(label: string, fallbackId = ""): string {
+  let s = String(label || "").trim();
+  if (!s) {
+    s = String(fallbackId || "").trim();
+  }
+  if (!s) {
+    return "";
+  }
+  // "High Effort", "high effort", "High-effort", trailing " effort"
+  s = s.replace(/[\s_-]*effort\s*$/i, "").trim();
+  return s || String(fallbackId || "").trim();
+}
 
 export function fallbackModels(): GrokModelOption[] {
   return FALLBACK_MODELS.map((m) => ({ ...m }));
@@ -86,7 +150,10 @@ function parseEffortOptions(
       if (!id) {
         continue;
       }
-      const label = String(r.label ?? id).trim() || id;
+      const label = normalizeEffortLabel(
+        String(r.label ?? id).trim() || id,
+        id,
+      );
       out.push({
         id,
         label,
@@ -105,7 +172,8 @@ function parseEffortOptions(
       e.selected = e.id === selectedId;
     }
   }
-  return out;
+  // Slider UX: always weak → strong (agent catalog is often strongest-first).
+  return sortEffortsLowToHigh(out);
 }
 
 /** Read context window from ACP model meta (shell `to_acp_model_info`). */
@@ -174,8 +242,7 @@ function parseModelInfo(raw: unknown): GrokModelOption | undefined {
   return {
     id,
     label: (typeof m.name === "string" && m.name.trim()) || id,
-    description:
-      typeof m.description === "string" ? m.description : undefined,
+    description: typeof m.description === "string" ? m.description : undefined,
     contextWindow: parseContextWindowTokens(meta),
     supportsReasoningEffort: supports,
     reasoningEffort: effortId,
@@ -187,9 +254,7 @@ function parseModelInfo(raw: unknown): GrokModelOption | undefined {
  * Parse ACP `SessionModelState` (wire of `x.ai/models/update` and
  * `session/new` `.models`).
  */
-export function parseSessionModelState(
-  state: unknown,
-): ModelCatalogSnapshot {
+export function parseSessionModelState(state: unknown): ModelCatalogSnapshot {
   const empty: ModelCatalogSnapshot = {
     models: [],
     currentModelId: "",
@@ -379,5 +444,5 @@ export function effortDisplayLabel(
     return "";
   }
   const hit = efforts.find((e) => e.id === id);
-  return hit?.label || id;
+  return normalizeEffortLabel(hit?.label || id, id);
 }

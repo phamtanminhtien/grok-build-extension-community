@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   contextWindowFromCatalog,
+  effortDisplayLabel,
   modelDisplayLabel,
   parseModelsFromSessionMeta,
   parseSessionModelState,
@@ -96,6 +97,56 @@ describe("parseSessionModelState (x.ai/models/update)", () => {
     assert.equal(snap.efforts.find((e) => e.id === "high")?.selected, true);
   });
 
+  it("strips trailing Effort from labels", () => {
+    const snap = parseSessionModelState({
+      currentModelId: "reason-model",
+      availableModels: [
+        {
+          modelId: "reason-model",
+          name: "Reasoner",
+          meta: {
+            supportsReasoningEffort: true,
+            reasoningEffort: "high",
+            reasoningEfforts: [
+              { id: "high", label: "High Effort" },
+              { id: "low", label: "Low Effort" },
+            ],
+          },
+        },
+      ],
+    });
+    assert.equal(snap.efforts.find((e) => e.id === "high")?.label, "High");
+    assert.equal(snap.efforts.find((e) => e.id === "low")?.label, "Low");
+    assert.equal(effortDisplayLabel(snap.efforts, "high"), "High");
+  });
+
+  it("sorts server efforts weak→strong (agent often sends strongest-first)", () => {
+    const snap = parseSessionModelState({
+      currentModelId: "reason-model",
+      availableModels: [
+        {
+          modelId: "reason-model",
+          name: "Reasoner",
+          meta: {
+            supportsReasoningEffort: true,
+            reasoningEffort: "high",
+            // TUI/agent order: xhigh → high → medium → low
+            reasoningEfforts: [
+              { id: "xhigh", label: "X-High" },
+              { id: "high", label: "High" },
+              { id: "medium", label: "Medium" },
+              { id: "low", label: "Low" },
+            ],
+          },
+        },
+      ],
+    });
+    assert.deepEqual(
+      snap.efforts.map((e) => e.id),
+      ["low", "medium", "high", "xhigh"],
+    );
+  });
+
   it("reads totalContextTokens from agent model meta (TUI source)", () => {
     const snap = parseSessionModelState({
       currentModelId: "grok-4.5",
@@ -113,10 +164,7 @@ describe("parseSessionModelState (x.ai/models/update)", () => {
       ],
     });
     assert.equal(snap.models[0]?.contextWindow, 500_000);
-    assert.equal(
-      contextWindowFromCatalog(snap.models, "grok-4.5"),
-      500_000,
-    );
+    assert.equal(contextWindowFromCatalog(snap.models, "grok-4.5"), 500_000);
   });
 
   it("uses legacy effort menu when supports but list empty", () => {

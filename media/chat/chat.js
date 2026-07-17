@@ -94,12 +94,12 @@ const modelEmpty = document.getElementById("model-empty");
 const modelTitle = document.getElementById("model-title");
 const btnModel = document.getElementById("btn-model");
 const modelBtnLabel = document.getElementById("model-btn-label");
-const effortPopover = document.getElementById("effort-popover");
-const effortList = document.getElementById("effort-list");
-const effortEmpty = document.getElementById("effort-empty");
-const effortTitle = document.getElementById("effort-title");
-const btnEffort = document.getElementById("btn-effort");
-const effortBtnLabel = document.getElementById("effort-btn-label");
+const modelBtnEffort = document.getElementById("model-btn-effort");
+const modelEffortPanel = document.getElementById("model-effort-panel");
+const modelEffortSlider = document.getElementById("model-effort-slider");
+const modelEffortValue = document.getElementById("model-effort-value");
+const modelEffortTicks = document.getElementById("model-effort-ticks");
+const modelEffortDesc = document.getElementById("model-effort-desc");
 const btnMode = document.getElementById("btn-mode");
 const modeBtnLabel = document.getElementById("mode-btn-label");
 const permissionPopover = document.getElementById("permission-popover");
@@ -177,32 +177,65 @@ let currentModelId = "";
 let currentModelLabel = "model";
 let modelOpen = false;
 let modelIndex = 0;
-/** Reasoning effort menu for current model (TUI sessionConfig category mode). */
+/** Reasoning efforts for the *current* model (empty when unsupported). */
 let effortItems = [];
 let currentEffortId = "";
 let currentEffortLabel = "";
-let effortOpen = false;
-let effortIndex = 0;
+/** Suppress setEffort spam while dragging / syncing the slider. */
+let effortSliderSyncing = false;
 const EST_ROW = 96;
 const VIRT_THRESHOLD = 40;
 
-/* ── model + effort popovers (TUI /model + /effort) ── */
-function setModelButtonLabel(label) {
-  currentModelLabel = label || currentModelId || "model";
-  modelBtnLabel.textContent = currentModelLabel;
-  btnModel.title = "Model: " + currentModelLabel + " (same catalog as TUI)";
+/* ── model popover (+ in-panel reasoning slider) ── */
+/** "High Effort" → "High" (agent labels often append "Effort"). */
+function cleanEffortLabel(label, fallbackId) {
+  let s = String(label || "").trim();
+  if (!s) s = String(fallbackId || "").trim();
+  if (!s) return "";
+  s = s.replace(/[\s_-]*effort\s*$/i, "").trim();
+  return s || String(fallbackId || "").trim();
 }
 
-function setEffortButtonLabel(label) {
-  currentEffortLabel = label || currentEffortId || "";
-  if (!effortItems.length) {
-    btnEffort.hidden = true;
-    return;
+function setModelButtonLabel(label) {
+  currentModelLabel = label || currentModelId || "model";
+  if (modelBtnLabel) modelBtnLabel.textContent = currentModelLabel;
+
+  const effortText =
+    effortItems.length && (currentEffortLabel || currentEffortId)
+      ? cleanEffortLabel(currentEffortLabel || currentEffortId, currentEffortId)
+      : "";
+  if (modelBtnEffort) {
+    if (effortText) {
+      modelBtnEffort.hidden = false;
+      // Plain text next to model name: " · High"
+      modelBtnEffort.textContent = " · " + effortText;
+    } else {
+      modelBtnEffort.hidden = true;
+      modelBtnEffort.textContent = "";
+    }
   }
-  btnEffort.hidden = false;
-  effortBtnLabel.textContent = currentEffortLabel || "effort";
-  btnEffort.title =
-    "Reasoning effort: " + (currentEffortLabel || currentEffortId || "—");
+
+  const effortBit = effortText ? " · " + effortText : "";
+  if (btnModel) {
+    btnModel.title =
+      "Model: " + currentModelLabel + effortBit + " (same catalog as TUI)";
+    btnModel.setAttribute(
+      "aria-label",
+      "Model " +
+        currentModelLabel +
+        (effortText ? ", reasoning " + effortText : ""),
+    );
+    btnModel.setAttribute("aria-expanded", modelOpen ? "true" : "false");
+  }
+}
+
+function syncEffortLabelFromItems() {
+  const hit = effortItems.find((e) => e.id === currentEffortId);
+  currentEffortLabel = cleanEffortLabel(
+    (hit && (hit.label || hit.id)) || currentEffortId,
+    currentEffortId,
+  );
+  setModelButtonLabel(currentModelLabel);
 }
 
 /** Map cycle mode id → button label (keep in sync with sessionModeCycle.ts). */
@@ -250,38 +283,42 @@ function applyModelsState(s) {
     modelItems = s.models.slice();
   }
   if (s.currentModelId != null) currentModelId = String(s.currentModelId || "");
+  if (Array.isArray(s.efforts)) {
+    effortItems = s.efforts.slice();
+  }
+  if (s.currentEffortId != null) {
+    currentEffortId = String(s.currentEffortId || "");
+  }
+  if (s.currentEffortLabel) {
+    currentEffortLabel = String(s.currentEffortLabel || "");
+  } else {
+    const hit = effortItems.find((e) => e.id === currentEffortId);
+    currentEffortLabel =
+      (hit && (hit.label || hit.id)) || currentEffortId || "";
+  }
   if (s.currentLabel) setModelButtonLabel(s.currentLabel);
   else if (currentModelId) {
     const hit = modelItems.find((m) => m.id === currentModelId);
     setModelButtonLabel(hit ? hit.label : currentModelId);
+  } else {
+    setModelButtonLabel(currentModelLabel);
   }
-  if (Array.isArray(s.efforts)) {
-    effortItems = s.efforts.slice();
+  if (modelOpen) {
+    // Keep highlight on current model after catalog refresh.
+    const idx = modelItems.findIndex((m) => m.id === currentModelId);
+    if (idx >= 0) modelIndex = idx;
+    renderModelList();
+    renderEffortPanel();
   }
-  if (s.currentEffortId != null)
-    currentEffortId = String(s.currentEffortId || "");
-  if (s.currentEffortLabel) setEffortButtonLabel(s.currentEffortLabel);
-  else
-    setEffortButtonLabel(
-      (effortItems.find((e) => e.id === currentEffortId) || {}).label ||
-        currentEffortId,
-    );
-  if (modelOpen) renderModelList();
-  if (effortOpen) renderEffortList();
 }
 
 function closeModelPopover() {
   modelOpen = false;
-  modelPopover.hidden = true;
-  modelList.innerHTML = "";
-  modelEmpty.hidden = true;
-}
-
-function closeEffortPopover() {
-  effortOpen = false;
-  effortPopover.hidden = true;
-  effortList.innerHTML = "";
-  effortEmpty.hidden = true;
+  if (modelPopover) modelPopover.hidden = true;
+  if (modelList) modelList.innerHTML = "";
+  if (modelEmpty) modelEmpty.hidden = true;
+  if (modelEffortPanel) modelEffortPanel.hidden = true;
+  if (btnModel) btnModel.setAttribute("aria-expanded", "false");
 }
 
 /* ── permission + question popovers (TUI overlays) ── */
@@ -303,7 +340,6 @@ let planPromptId = 0;
 
 function closeOtherDropdowns() {
   if (typeof closeModelPopover === "function") closeModelPopover();
-  if (typeof closeEffortPopover === "function") closeEffortPopover();
   if (typeof closeSlash === "function") closeSlash();
   if (typeof closeMention === "function") closeMention();
   if (typeof closeRewindPopover === "function") closeRewindPopover();
@@ -1004,92 +1040,157 @@ if (planApprove) {
   });
 }
 
-function renderModelList() {
-  if (!modelOpen) return;
-  modelPopover.hidden = false;
-  modelTitle.textContent =
-    "Models" + (modelItems.length ? " (" + modelItems.length + ")" : "");
-  if (!modelItems.length) {
-    modelList.innerHTML = "";
-    modelEmpty.hidden = false;
-    modelEmpty.textContent = "Waiting for agent catalog…";
-    return;
-  }
-  modelEmpty.hidden = true;
-  modelList.innerHTML = modelItems
-    .map((m, i) => {
-      const cur = m.id === currentModelId || m.selected;
-      return (
-        '<button type="button" class="model-item' +
-        (i === modelIndex ? " active" : "") +
-        (cur ? " current" : "") +
-        '" role="option" data-model-idx="' +
-        i +
-        '" aria-selected="' +
-        (i === modelIndex) +
-        '">' +
-        '<span class="mi-icon">' +
-        icon(cur ? "check" : "cpu") +
-        "</span>" +
-        '<span class="mi-body">' +
-        '<span class="mi-label">' +
-        esc(m.label || m.id) +
-        "</span>" +
-        (m.id && m.id !== m.label
-          ? '<span class="mi-desc">' + esc(m.id) + "</span>"
-          : m.description
-            ? '<span class="mi-desc">' + esc(m.description) + "</span>"
-            : "") +
-        "</span>" +
-        (cur ? '<span class="mi-badge">current</span>' : "") +
-        "</button>"
-      );
-    })
-    .join("");
-  const active = modelList.querySelector(".model-item.active");
-  if (active) active.scrollIntoView({ block: "nearest" });
+function modelSupportsEffort(m) {
+  if (!m) return false;
+  if (m.supportsReasoningEffort) return true;
+  return Array.isArray(m.reasoningEfforts) && m.reasoningEfforts.length > 0;
 }
 
-function renderEffortList() {
-  if (!effortOpen) return;
-  effortPopover.hidden = false;
-  effortTitle.textContent = "Reasoning";
-  if (!effortItems.length) {
-    effortList.innerHTML = "";
-    effortEmpty.hidden = false;
+function effortsForModel(m) {
+  if (!m) return [];
+  if (Array.isArray(m.reasoningEfforts) && m.reasoningEfforts.length) {
+    return m.reasoningEfforts.slice();
+  }
+  // Current model: host snapshot is authoritative after setModel.
+  if (m.id === currentModelId && effortItems.length) {
+    return effortItems.slice();
+  }
+  return [];
+}
+
+function shortEffortLabel(label) {
+  const s = String(label || "").trim();
+  if (!s) return "—";
+  // Compact tick labels for the slider row.
+  if (s.length <= 5) return s;
+  const map = {
+    minimal: "Min",
+    low: "Low",
+    medium: "Med",
+    high: "High",
+    xhigh: "XHi",
+    "x-high": "XHi",
+    max: "Max",
+  };
+  const key = s.toLowerCase().replace(/\s+/g, "");
+  if (map[key]) return map[key];
+  return s.slice(0, 4);
+}
+
+function renderModelList() {
+  if (!modelOpen || !modelPopover) return;
+  modelPopover.hidden = false;
+  if (modelTitle) {
+    modelTitle.textContent =
+      "Models" + (modelItems.length ? " (" + modelItems.length + ")" : "");
+  }
+  if (!modelItems.length) {
+    if (modelList) modelList.innerHTML = "";
+    if (modelEmpty) {
+      modelEmpty.hidden = false;
+      modelEmpty.textContent = "Waiting for agent catalog…";
+    }
+    renderEffortPanel();
     return;
   }
-  effortEmpty.hidden = true;
-  effortList.innerHTML = effortItems
-    .map((e, i) => {
-      const cur = e.id === currentEffortId || e.selected;
-      return (
-        '<button type="button" class="effort-item' +
-        (i === effortIndex ? " active" : "") +
-        (cur ? " current" : "") +
-        '" role="option" data-effort-idx="' +
-        i +
-        '" aria-selected="' +
-        (i === effortIndex) +
-        '">' +
-        '<span class="mi-icon">' +
-        icon(cur ? "check" : "brain") +
-        "</span>" +
-        '<span class="mi-body">' +
-        '<span class="mi-label">' +
-        esc(e.label || e.id) +
-        "</span>" +
-        (e.description
-          ? '<span class="mi-desc">' + esc(e.description) + "</span>"
-          : "") +
-        "</span>" +
-        (cur ? '<span class="mi-badge">current</span>' : "") +
-        "</button>"
-      );
-    })
-    .join("");
-  const active = effortList.querySelector(".effort-item.active");
-  if (active) active.scrollIntoView({ block: "nearest" });
+  if (modelEmpty) modelEmpty.hidden = true;
+  if (modelList) {
+    modelList.innerHTML = modelItems
+      .map((m, i) => {
+        const cur = m.id === currentModelId || m.selected;
+        const supports = modelSupportsEffort(m);
+        const descParts = [];
+        if (m.id && m.id !== m.label) descParts.push(m.id);
+        else if (m.description) descParts.push(m.description);
+        if (supports) descParts.push("reasoning");
+        return (
+          '<button type="button" class="model-item' +
+          (i === modelIndex ? " active" : "") +
+          (cur ? " current" : "") +
+          '" role="option" data-model-idx="' +
+          i +
+          '" aria-selected="' +
+          (cur ? "true" : "false") +
+          '">' +
+          '<span class="mi-icon">' +
+          icon(cur ? "check" : "cpu") +
+          "</span>" +
+          '<span class="mi-body">' +
+          '<span class="mi-label">' +
+          esc(m.label || m.id) +
+          "</span>" +
+          (descParts.length
+            ? '<span class="mi-desc">' + esc(descParts.join(" · ")) + "</span>"
+            : "") +
+          "</span>" +
+          (supports
+            ? '<span class="mi-badge" title="Supports reasoning effort">' +
+              icon("brain") +
+              "</span>"
+            : cur
+              ? '<span class="mi-badge">current</span>'
+              : "") +
+          "</button>"
+        );
+      })
+      .join("");
+    const active = modelList.querySelector(".model-item.active");
+    if (active) active.scrollIntoView({ block: "nearest" });
+  }
+  renderEffortPanel();
+}
+
+/**
+ * Show stepped reasoning slider when the current model supports efforts.
+ * Panel stays inside the model popover (no separate effort button).
+ */
+function renderEffortPanel() {
+  if (!modelEffortPanel) return;
+  if (!modelOpen || !effortItems.length) {
+    modelEffortPanel.hidden = true;
+    return;
+  }
+  modelEffortPanel.hidden = false;
+  const idx = Math.max(
+    0,
+    effortItems.findIndex((e) => e.id === currentEffortId),
+  );
+  const safeIdx = idx < 0 ? 0 : idx;
+  const cur = effortItems[safeIdx] || effortItems[0];
+  const curLabel = cleanEffortLabel(
+    (cur && (cur.label || cur.id)) || "",
+    (cur && cur.id) || "",
+  );
+  if (modelEffortValue) {
+    modelEffortValue.textContent = curLabel || "—";
+  }
+  if (modelEffortDesc) {
+    modelEffortDesc.textContent = (cur && cur.description) || "";
+  }
+  if (modelEffortSlider) {
+    effortSliderSyncing = true;
+    modelEffortSlider.min = "0";
+    modelEffortSlider.max = String(Math.max(0, effortItems.length - 1));
+    modelEffortSlider.step = "1";
+    modelEffortSlider.value = String(safeIdx);
+    modelEffortSlider.setAttribute("aria-valuetext", curLabel || "");
+    effortSliderSyncing = false;
+  }
+  if (modelEffortTicks) {
+    modelEffortTicks.innerHTML = effortItems
+      .map((e, i) => {
+        return (
+          '<span class="me-tick' +
+          (i === safeIdx ? " active" : "") +
+          '" data-effort-tick="' +
+          i +
+          '">' +
+          esc(shortEffortLabel(cleanEffortLabel(e.label || e.id, e.id))) +
+          "</span>"
+        );
+      })
+      .join("");
+  }
 }
 
 function focusPopoverActive(listEl, selector) {
@@ -1110,11 +1211,11 @@ function focusPopoverActive(listEl, selector) {
 function openModelPopover() {
   if (slashOpen) closeSlash();
   if (mentionOpen) closeMention();
-  if (effortOpen) closeEffortPopover();
   // Always re-fetch catalog from agent so we don't stick on bundled fallback
   // until some other server action happens to start the agent.
   vscode.postMessage({ type: "ensureModels" });
   modelOpen = true;
+  if (btnModel) btnModel.setAttribute("aria-expanded", "true");
   modelIndex = Math.max(
     0,
     modelItems.findIndex((m) => m.id === currentModelId),
@@ -1122,38 +1223,70 @@ function openModelPopover() {
   if (modelIndex < 0) modelIndex = 0;
   renderModelList();
   // Focus list so keyboard works even when opened from the model button.
-  // Empty catalog shows "Waiting for agent catalog…" until models post arrives.
   focusPopoverActive(modelList, ".model-item");
 }
 
-function openEffortPopover() {
-  if (slashOpen) closeSlash();
-  if (mentionOpen) closeMention();
-  if (modelOpen) closeModelPopover();
-  if (!effortItems.length) return;
-  effortOpen = true;
-  effortIndex = Math.max(
-    0,
-    effortItems.findIndex((e) => e.id === currentEffortId),
-  );
-  if (effortIndex < 0) effortIndex = 0;
-  renderEffortList();
-  focusPopoverActive(effortList, ".effort-item");
-}
-
+/**
+ * Select a model without closing the popover so the user can set reasoning
+ * effort on the slider when supported.
+ */
 function acceptModel(idx) {
   const m = modelItems[idx];
   if (!m || !m.id) return;
-  closeModelPopover();
-  if (m.id === currentModelId) return;
-  vscode.postMessage({ type: "setModel", modelId: m.id });
+  modelIndex = idx;
+  // Optimistic: switch current highlight immediately.
+  const prevId = currentModelId;
+  currentModelId = m.id;
+  setModelButtonLabel(m.label || m.id);
+  // Prefer per-model efforts if catalog includes them; else wait for host update.
+  const localEfforts = effortsForModel(m);
+  if (localEfforts.length) {
+    effortItems = localEfforts;
+    const preferred =
+      (m.reasoningEffort &&
+        localEfforts.find((e) => e.id === m.reasoningEffort)) ||
+      localEfforts.find((e) => e.selected) ||
+      localEfforts[0];
+    currentEffortId = preferred ? preferred.id : "";
+    syncEffortLabelFromItems();
+  } else if (m.id !== prevId) {
+    // Switching to a model without local efforts — hide until host responds.
+    effortItems = [];
+    currentEffortId = "";
+    currentEffortLabel = "";
+  }
+  renderModelList();
+  if (m.id !== prevId) {
+    vscode.postMessage({ type: "setModel", modelId: m.id });
+  }
 }
 
-function acceptEffort(idx) {
-  const e = effortItems[idx];
+function applyEffortIndex(idx, commit) {
+  if (!effortItems.length) return;
+  const i = Math.max(0, Math.min(effortItems.length - 1, Number(idx) || 0));
+  const e = effortItems[i];
   if (!e || !e.id) return;
-  closeEffortPopover();
-  if (e.id === currentEffortId) return;
+  const label = cleanEffortLabel(e.label || e.id, e.id);
+  // Live preview while dragging (do not mutate currentEffortId until commit).
+  if (modelEffortValue) modelEffortValue.textContent = label;
+  if (modelEffortDesc) modelEffortDesc.textContent = e.description || "";
+  if (modelEffortTicks) {
+    modelEffortTicks.querySelectorAll(".me-tick").forEach((el, ti) => {
+      el.classList.toggle("active", ti === i);
+    });
+  }
+  if (modelEffortSlider) {
+    modelEffortSlider.setAttribute("aria-valuetext", label);
+  }
+  if (!commit) return;
+  if (e.id === currentEffortId) {
+    currentEffortLabel = label;
+    setModelButtonLabel(currentModelLabel);
+    return;
+  }
+  currentEffortId = e.id;
+  currentEffortLabel = label;
+  setModelButtonLabel(currentModelLabel);
   vscode.postMessage({ type: "setEffort", effortId: e.id });
 }
 
@@ -1163,10 +1296,15 @@ function moveModel(delta) {
   renderModelList();
 }
 
-function moveEffort(delta) {
-  if (!effortItems.length) return;
-  effortIndex = (effortIndex + delta + effortItems.length) % effortItems.length;
-  renderEffortList();
+function moveEffortSlider(delta) {
+  if (!effortItems.length || !modelEffortSlider) return;
+  const cur = Number(modelEffortSlider.value) || 0;
+  const next = Math.max(0, Math.min(effortItems.length - 1, cur + delta));
+  if (next === cur) return;
+  effortSliderSyncing = true;
+  modelEffortSlider.value = String(next);
+  effortSliderSyncing = false;
+  applyEffortIndex(next, true);
 }
 
 /* ── / slash popover (synced with grok-build slash dropdown) ── */
@@ -1275,7 +1413,6 @@ function requestSlashSearch(query) {
 function openSlashFromContext(ctx) {
   if (mentionOpen) closeMention();
   if (modelOpen) closeModelPopover();
-  if (effortOpen) closeEffortPopover();
   slashOpen = true;
   slashCtx = ctx;
   slashIndex = 0;
@@ -1461,7 +1598,6 @@ function requestMentionSearch(query) {
 function openMentionFromContext(ctx) {
   if (slashOpen) closeSlash();
   if (modelOpen) closeModelPopover();
-  if (effortOpen) closeEffortPopover();
   mentionOpen = true;
   mentionAtCtx = ctx;
   mentionIndex = 0;
@@ -2860,7 +2996,6 @@ function enterUserMessageEdit(m) {
   if (mentionOpen) closeMention();
   if (slashOpen) closeSlash();
   if (modelOpen) closeModelPopover();
-  if (effortOpen) closeEffortPopover();
   closeRewindPopover();
   pendingEdit = {
     id: m.id,
@@ -2930,7 +3065,6 @@ function openRewindPopover() {
   if (mentionOpen) closeMention();
   if (slashOpen) closeSlash();
   if (modelOpen) closeModelPopover();
-  if (effortOpen) closeEffortPopover();
   rewindOpen = true;
   rewindIndex = 0;
   if (rewindPopover) rewindPopover.hidden = false;
@@ -2971,15 +3105,15 @@ function acceptRewind(idx) {
 
 /** True when a dismissible (non-modal) popover is open. */
 function anyDropdownOpen() {
-  return !!(modelOpen || effortOpen || slashOpen || mentionOpen || rewindOpen);
+  return !!(modelOpen || slashOpen || mentionOpen || rewindOpen);
 }
 
 /**
  * Close popovers when clicking outside them.
- * - Model / effort / slash / mention / rewind: dismiss
+ * - Model / slash / mention / rewind: dismiss (model stays open on *inner* clicks)
  * - Permission / question: modal — only cancel if click is fully outside
  *   those dialogs (not on their chrome)
- * - Toggle buttons (#btn-model / #btn-effort) are excluded so click can toggle
+ * - Toggle button (#btn-model) is excluded so click can toggle
  * - Composer keeps slash/mention open (filter still driven by typing)
  */
 document.addEventListener(
@@ -2989,31 +3123,29 @@ document.addEventListener(
     const t = e.target;
     if (!t || !t.closest) return;
 
-    // Inside any popover surface — leave open.
+    // Inside any popover surface — leave open (incl. model list + effort slider).
     if (
       t.closest(
-        "#model-popover, #effort-popover, #slash-popover, #mention-popover, " +
+        "#model-popover, #slash-popover, #mention-popover, " +
           "#rewind-popover, #permission-popover, #question-popover",
       )
     ) {
       return;
     }
 
-    // Model/effort toggle buttons: their click handlers own open/close.
-    if (t.closest("#btn-model, #btn-effort")) {
+    // Model toggle button: its click handler owns open/close.
+    if (t.closest("#btn-model")) {
       return;
     }
 
-    // Composer / shell: dismiss model/effort/rewind but keep slash/mention.
+    // Composer / shell: dismiss model/rewind but keep slash/mention.
     if (t.closest("#composer, .composer-shell, #edit-banner")) {
       if (modelOpen) closeModelPopover();
-      if (effortOpen) closeEffortPopover();
       if (rewindOpen) closeRewindPopover();
       return;
     }
 
     if (modelOpen) closeModelPopover();
-    if (effortOpen) closeEffortPopover();
     if (slashOpen) closeSlash();
     if (mentionOpen) closeMention();
     if (rewindOpen) closeRewindPopover();
@@ -3927,7 +4059,6 @@ sendBtn.addEventListener("click", () => {
   if (mentionOpen) closeMention();
   if (slashOpen) closeSlash();
   if (modelOpen) closeModelPopover();
-  if (effortOpen) closeEffortPopover();
   if (rewindOpen) {
     acceptRewind(rewindIndex);
     return;
@@ -3964,10 +4095,33 @@ btnModel.addEventListener("click", () => {
   if (modelOpen) closeModelPopover();
   else openModelPopover();
 });
-btnEffort.addEventListener("click", () => {
-  if (effortOpen) closeEffortPopover();
-  else openEffortPopover();
-});
+if (modelEffortSlider) {
+  modelEffortSlider.addEventListener("input", () => {
+    if (effortSliderSyncing) return;
+    applyEffortIndex(modelEffortSlider.value, false);
+  });
+  modelEffortSlider.addEventListener("change", () => {
+    if (effortSliderSyncing) return;
+    applyEffortIndex(modelEffortSlider.value, true);
+  });
+  modelEffortSlider.addEventListener("pointerdown", (e) => {
+    e.stopPropagation();
+  });
+}
+if (modelEffortTicks) {
+  modelEffortTicks.addEventListener("click", (e) => {
+    const tick = e.target.closest("[data-effort-tick]");
+    if (!tick) return;
+    const idx = Number(tick.getAttribute("data-effort-tick"));
+    if (!Number.isFinite(idx)) return;
+    if (modelEffortSlider) {
+      effortSliderSyncing = true;
+      modelEffortSlider.value = String(idx);
+      effortSliderSyncing = false;
+    }
+    applyEffortIndex(idx, true);
+  });
+}
 document
   .getElementById("empty-start")
   .addEventListener("click", () => vscode.postMessage({ type: "startAgent" }));
@@ -4053,14 +4207,6 @@ modelList.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-model-idx]");
   if (!btn) return;
   acceptModel(Number(btn.getAttribute("data-model-idx")));
-});
-effortList.addEventListener("mousedown", (e) => {
-  e.preventDefault();
-});
-effortList.addEventListener("click", (e) => {
-  const btn = e.target.closest("[data-effort-idx]");
-  if (!btn) return;
-  acceptEffort(Number(btn.getAttribute("data-effort-idx")));
 });
 
 /** Grow #composer with content; cap at max-height and scroll when full. */
@@ -4225,33 +4371,19 @@ window.addEventListener(
           return;
         }
       }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        moveEffortSlider(-1);
+        return;
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        moveEffortSlider(1);
+        return;
+      }
       if (e.key === "Escape") {
         e.preventDefault();
         closeModelPopover();
-        return;
-      }
-    }
-    if (effortOpen) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        moveEffort(1);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        moveEffort(-1);
-        return;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        if (effortItems.length) {
-          e.preventDefault();
-          acceptEffort(effortIndex);
-          return;
-        }
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        closeEffortPopover();
         return;
       }
     }
@@ -4341,7 +4473,6 @@ composer.addEventListener("keydown", (e) => {
     permissionOpen ||
     questionOpen ||
     modelOpen ||
-    effortOpen ||
     rewindOpen ||
     slashOpen ||
     mentionOpen
