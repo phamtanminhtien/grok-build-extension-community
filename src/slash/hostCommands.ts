@@ -10,7 +10,10 @@
 
 import type { HostAction, SlashCommandDef } from "./types";
 
-type Def = Omit<SlashCommandDef, "source" | "aliases" | "takesArgs" | "argsRequired"> & {
+type Def = Omit<
+  SlashCommandDef,
+  "source" | "aliases" | "takesArgs" | "argsRequired"
+> & {
   aliases?: string[];
   takesArgs?: boolean;
   argsRequired?: boolean;
@@ -70,14 +73,16 @@ export const HOST_COMMANDS: SlashCommandDef[] = [
     description: "Branch the current session into a peer agent",
     takesArgs: true,
     argHint: "[--worktree|--no-worktree] [directive]",
-    layer: "passthrough",
+    layer: "host",
+    hostAction: "fork",
   }),
   d({
     name: "compact",
     description: "Compact conversation history",
     takesArgs: true,
     argHint: "optional context to preserve",
-    layer: "passthrough",
+    layer: "host",
+    hostAction: "compact",
   }),
   d({
     name: "copy",
@@ -111,7 +116,8 @@ export const HOST_COMMANDS: SlashCommandDef[] = [
   }),
   d({
     name: "expand",
-    description: "Re-print the last collapsed block, fully expanded (minimal mode)",
+    description:
+      "Re-print the last collapsed block, fully expanded (minimal mode)",
     layer: "unsupported",
   }),
   d({
@@ -133,7 +139,8 @@ export const HOST_COMMANDS: SlashCommandDef[] = [
     takesArgs: true,
     argsRequired: true,
     argHint: "<title>",
-    layer: "passthrough",
+    layer: "host",
+    hostAction: "rename",
   }),
   d({
     name: "rewind",

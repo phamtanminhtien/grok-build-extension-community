@@ -1,27 +1,26 @@
 const vscode = acquireVsCodeApi();
-const messagesEl = document.getElementById('messages');
-const emptyEl = document.getElementById('empty');
-const emptyReady = document.getElementById('empty-ready');
-const emptyCliMissing = document.getElementById('empty-cli-missing');
-const emptyHint = document.getElementById('empty-hint');
-const emptyAuthBtn = document.getElementById('empty-auth');
-const emptyInstallCmd = document.getElementById('empty-install-cmd');
-const emptyInstallPath = document.getElementById('empty-install-path');
+const messagesEl = document.getElementById("messages");
+const emptyEl = document.getElementById("empty");
+const emptyReady = document.getElementById("empty-ready");
+const emptyCliMissing = document.getElementById("empty-cli-missing");
+const emptyHint = document.getElementById("empty-hint");
+const emptyAuthBtn = document.getElementById("empty-auth");
+const emptyInstallCmd = document.getElementById("empty-install-cmd");
+const emptyInstallPath = document.getElementById("empty-install-path");
 /** Toggle empty-state auth CTA: Sign in when logged out, Log out when signed in (CLI/API). */
 function updateEmptyAuthUi(hasAuth, authSummary) {
   emptyHint.textContent = hasAuth
-    ? (authSummary || 'Signed in. You can start chatting.')
-    : 'Not signed in — use Sign in (browser OAuth or API key), same as grok login.';
+    ? authSummary || "Signed in. You can start chatting."
+    : "Not signed in — use Sign in (browser OAuth or API key), same as grok login.";
   if (!emptyAuthBtn) return;
   if (hasAuth) {
-    emptyAuthBtn.setAttribute('data-action', 'logout');
+    emptyAuthBtn.setAttribute("data-action", "logout");
     emptyAuthBtn.title =
-      'Sign out of Grok — clears CLI session (~/.grok/auth.json), same as grok logout';
+      "Sign out of Grok — clears CLI session (~/.grok/auth.json), same as grok logout";
     emptyAuthBtn.innerHTML = '<i class="ti ti-logout"></i> Log out';
   } else {
-    emptyAuthBtn.setAttribute('data-action', 'login');
-    emptyAuthBtn.title =
-      'Sign in with browser or API key (same as grok login)';
+    emptyAuthBtn.setAttribute("data-action", "login");
+    emptyAuthBtn.title = "Sign in with browser or API key (same as grok login)";
     emptyAuthBtn.innerHTML = '<i class="ti ti-login-2"></i> Sign in';
   }
 }
@@ -30,7 +29,7 @@ let cliMissing = false;
 /** Show install-CLI panel when binary is missing (blocks agent use). */
 function updateEmptyCliUi(cliFound, installCommand, typicalPath) {
   cliMissing = !cliFound;
-  emptyEl.classList.toggle('cli-missing', cliMissing);
+  emptyEl.classList.toggle("cli-missing", cliMissing);
   if (emptyReady) emptyReady.hidden = cliMissing;
   if (emptyCliMissing) emptyCliMissing.hidden = !cliMissing;
   if (emptyInstallCmd && installCommand) {
@@ -38,8 +37,8 @@ function updateEmptyCliUi(cliFound, installCommand, typicalPath) {
   }
   if (emptyInstallPath) {
     emptyInstallPath.textContent = typicalPath
-      ? 'Typical path after install: ' + typicalPath
-      : '';
+      ? "Typical path after install: " + typicalPath
+      : "";
   }
   // Soft-lock composer when CLI is missing
   if (composer) {
@@ -48,57 +47,65 @@ function updateEmptyCliUi(cliFound, installCommand, typicalPath) {
   }
   updateSendStopButton();
 }
-const meta = document.getElementById('meta');
-const composer = document.getElementById('composer');
-const sendBtn = document.getElementById('send');
-const stickyEl = document.getElementById('sticky');
-const reviewBar = document.getElementById('review-bar');
-const reviewLabel = document.getElementById('review-label');
-const ctxBarEl = document.getElementById('ctx-bar');
-const turnStatusEl = document.getElementById('turn-status');
-const tsProcess = turnStatusEl.querySelector('.ts-process');
-const tsTime = turnStatusEl.querySelector('.ts-time');
-const tsTokens = turnStatusEl.querySelector('.ts-tokens');
-const tsCost = turnStatusEl.querySelector('.ts-cost');
-const mentionPopover = document.getElementById('mention-popover');
-const mentionList = document.getElementById('mention-list');
-const mentionEmpty = document.getElementById('mention-empty');
-const mentionTitle = document.getElementById('mention-title');
-const slashPopover = document.getElementById('slash-popover');
-const slashList = document.getElementById('slash-list');
-const slashEmpty = document.getElementById('slash-empty');
-const slashTitle = document.getElementById('slash-title');
-const modelPopover = document.getElementById('model-popover');
-const modelList = document.getElementById('model-list');
-const modelEmpty = document.getElementById('model-empty');
-const modelTitle = document.getElementById('model-title');
-const btnModel = document.getElementById('btn-model');
-const modelBtnLabel = document.getElementById('model-btn-label');
-const effortPopover = document.getElementById('effort-popover');
-const effortList = document.getElementById('effort-list');
-const effortEmpty = document.getElementById('effort-empty');
-const effortTitle = document.getElementById('effort-title');
-const btnEffort = document.getElementById('btn-effort');
-const effortBtnLabel = document.getElementById('effort-btn-label');
-const btnMode = document.getElementById('btn-mode');
-const modeBtnLabel = document.getElementById('mode-btn-label');
-const permissionPopover = document.getElementById('permission-popover');
-const permissionTitle = document.getElementById('permission-title');
-const permissionDetail = document.getElementById('permission-detail');
-const permissionList = document.getElementById('permission-list');
-const permissionCancel = document.getElementById('permission-cancel');
-const questionPopover = document.getElementById('question-popover');
-const questionTitle = document.getElementById('question-title');
-const questionTabs = document.getElementById('question-tabs');
-const questionBody = document.getElementById('question-body');
-const questionList = document.getElementById('question-list');
-const questionNotes = document.getElementById('question-notes');
-const questionCancel = document.getElementById('question-cancel');
-const questionChat = document.getElementById('question-chat');
-const questionSkip = document.getElementById('question-skip');
-const questionAccept = document.getElementById('question-accept');
+const meta = document.getElementById("meta");
+const composer = document.getElementById("composer");
+const sendBtn = document.getElementById("send");
+const stickyEl = document.getElementById("sticky");
+const reviewBar = document.getElementById("review-bar");
+const reviewLabel = document.getElementById("review-label");
+const ctxBarEl = document.getElementById("ctx-bar");
+const turnStatusEl = document.getElementById("turn-status");
+const tsProcess = turnStatusEl.querySelector(".ts-process");
+const tsTime = turnStatusEl.querySelector(".ts-time");
+const tsTokens = turnStatusEl.querySelector(".ts-tokens");
+const tsCost = turnStatusEl.querySelector(".ts-cost");
+const mentionPopover = document.getElementById("mention-popover");
+const mentionList = document.getElementById("mention-list");
+const mentionEmpty = document.getElementById("mention-empty");
+const mentionTitle = document.getElementById("mention-title");
+const slashPopover = document.getElementById("slash-popover");
+const slashList = document.getElementById("slash-list");
+const slashEmpty = document.getElementById("slash-empty");
+const slashTitle = document.getElementById("slash-title");
+const modelPopover = document.getElementById("model-popover");
+const modelList = document.getElementById("model-list");
+const modelEmpty = document.getElementById("model-empty");
+const modelTitle = document.getElementById("model-title");
+const btnModel = document.getElementById("btn-model");
+const modelBtnLabel = document.getElementById("model-btn-label");
+const effortPopover = document.getElementById("effort-popover");
+const effortList = document.getElementById("effort-list");
+const effortEmpty = document.getElementById("effort-empty");
+const effortTitle = document.getElementById("effort-title");
+const btnEffort = document.getElementById("btn-effort");
+const effortBtnLabel = document.getElementById("effort-btn-label");
+const btnMode = document.getElementById("btn-mode");
+const modeBtnLabel = document.getElementById("mode-btn-label");
+const permissionPopover = document.getElementById("permission-popover");
+const permissionTitle = document.getElementById("permission-title");
+const permissionDetail = document.getElementById("permission-detail");
+const permissionList = document.getElementById("permission-list");
+const permissionCancel = document.getElementById("permission-cancel");
+const questionPopover = document.getElementById("question-popover");
+const questionTitle = document.getElementById("question-title");
+const questionTabs = document.getElementById("question-tabs");
+const questionBody = document.getElementById("question-body");
+const questionList = document.getElementById("question-list");
+const questionNotes = document.getElementById("question-notes");
+const questionCancel = document.getElementById("question-cancel");
+const questionChat = document.getElementById("question-chat");
+const questionSkip = document.getElementById("question-skip");
+const questionAccept = document.getElementById("question-accept");
+const planPanel = document.getElementById("plan-panel");
+const planTitle = document.getElementById("plan-title");
+const planBadge = document.getElementById("plan-badge");
+const planBody = document.getElementById("plan-body");
+const planAbandon = document.getElementById("plan-abandon");
+const planRequest = document.getElementById("plan-request");
+const planApprove = document.getElementById("plan-approve");
+const appRoot = document.getElementById("app");
 let busy = false;
-let currentMode = 'normal';
+let currentMode = "normal";
 let allMessages = [];
 let stickyChips = [];
 let autoAttachEnabled = true;
@@ -108,14 +115,14 @@ let queueEntries = [];
 let queueEditActive = false;
 /** Agent catalog — same source as TUI ModelsManager.available(). */
 let modelItems = [];
-let currentModelId = '';
-let currentModelLabel = 'model';
+let currentModelId = "";
+let currentModelLabel = "model";
 let modelOpen = false;
 let modelIndex = 0;
 /** Reasoning effort menu for current model (TUI sessionConfig category mode). */
 let effortItems = [];
-let currentEffortId = '';
-let currentEffortLabel = '';
+let currentEffortId = "";
+let currentEffortLabel = "";
 let effortOpen = false;
 let effortIndex = 0;
 const EST_ROW = 96;
@@ -123,40 +130,49 @@ const VIRT_THRESHOLD = 40;
 
 /* ── model + effort popovers (TUI /model + /effort) ── */
 function setModelButtonLabel(label) {
-  currentModelLabel = label || currentModelId || 'model';
+  currentModelLabel = label || currentModelId || "model";
   modelBtnLabel.textContent = currentModelLabel;
-  btnModel.title = 'Model: ' + currentModelLabel + ' (same catalog as TUI)';
+  btnModel.title = "Model: " + currentModelLabel + " (same catalog as TUI)";
 }
 
 function setEffortButtonLabel(label) {
-  currentEffortLabel = label || currentEffortId || '';
+  currentEffortLabel = label || currentEffortId || "";
   if (!effortItems.length) {
     btnEffort.hidden = true;
     return;
   }
   btnEffort.hidden = false;
-  effortBtnLabel.textContent = currentEffortLabel || 'effort';
-  btnEffort.title = 'Reasoning effort: ' + (currentEffortLabel || currentEffortId || '—');
+  effortBtnLabel.textContent = currentEffortLabel || "effort";
+  btnEffort.title =
+    "Reasoning effort: " + (currentEffortLabel || currentEffortId || "—");
 }
 
 /** Map cycle mode id → button label (keep in sync with sessionModeCycle.ts). */
 function modeLabelForId(id) {
-  switch (String(id || '')) {
-    case 'plan': return 'Plan';
-    case 'auto': return 'Auto';
-    case 'always-approve': return 'Always Approve';
-    case 'normal':
-    default: return 'Normal';
+  switch (String(id || "")) {
+    case "plan":
+      return "Plan";
+    case "auto":
+      return "Auto";
+    case "always-approve":
+      return "Always Approve";
+    case "normal":
+    default:
+      return "Normal";
   }
 }
 
 function modeCssForId(id) {
-  switch (String(id || '')) {
-    case 'plan': return 'mode-plan';
-    case 'auto': return 'mode-auto';
-    case 'always-approve': return 'mode-always-approve';
-    case 'normal':
-    default: return 'mode-normal';
+  switch (String(id || "")) {
+    case "plan":
+      return "mode-plan";
+    case "auto":
+      return "mode-auto";
+    case "always-approve":
+      return "mode-always-approve";
+    case "normal":
+    default:
+      return "mode-normal";
   }
 }
 
@@ -166,8 +182,8 @@ function applyModeState(s) {
   const label = s.modeLabel || s.label || modeLabelForId(currentMode);
   modeBtnLabel.textContent = label;
   const css = s.modeCss || modeCssForId(currentMode);
-  btnMode.className = 'secondary ' + css;
-  btnMode.title = s.modeTitle || ('Mode: ' + label + ' (Shift+Tab)');
+  btnMode.className = "secondary " + css;
+  btnMode.title = s.modeTitle || "Mode: " + label + " (Shift+Tab)";
 }
 
 function applyModelsState(s) {
@@ -175,7 +191,7 @@ function applyModelsState(s) {
   if (Array.isArray(s.models)) {
     modelItems = s.models.slice();
   }
-  if (s.currentModelId != null) currentModelId = String(s.currentModelId || '');
+  if (s.currentModelId != null) currentModelId = String(s.currentModelId || "");
   if (s.currentLabel) setModelButtonLabel(s.currentLabel);
   else if (currentModelId) {
     const hit = modelItems.find((m) => m.id === currentModelId);
@@ -184,11 +200,14 @@ function applyModelsState(s) {
   if (Array.isArray(s.efforts)) {
     effortItems = s.efforts.slice();
   }
-  if (s.currentEffortId != null) currentEffortId = String(s.currentEffortId || '');
+  if (s.currentEffortId != null)
+    currentEffortId = String(s.currentEffortId || "");
   if (s.currentEffortLabel) setEffortButtonLabel(s.currentEffortLabel);
-  else setEffortButtonLabel(
-    (effortItems.find((e) => e.id === currentEffortId) || {}).label || currentEffortId
-  );
+  else
+    setEffortButtonLabel(
+      (effortItems.find((e) => e.id === currentEffortId) || {}).label ||
+        currentEffortId,
+    );
   if (modelOpen) renderModelList();
   if (effortOpen) renderEffortList();
 }
@@ -196,14 +215,14 @@ function applyModelsState(s) {
 function closeModelPopover() {
   modelOpen = false;
   modelPopover.hidden = true;
-  modelList.innerHTML = '';
+  modelList.innerHTML = "";
   modelEmpty.hidden = true;
 }
 
 function closeEffortPopover() {
   effortOpen = false;
   effortPopover.hidden = true;
-  effortList.innerHTML = '';
+  effortList.innerHTML = "";
   effortEmpty.hidden = true;
 }
 
@@ -214,19 +233,22 @@ let permissionItems = [];
 let permissionIndex = 0;
 let questionOpen = false;
 let questionPromptId = 0;
-let questionMode = 'default';
+let questionMode = "default";
 let questionItems = []; // full questions array
 let questionTab = 0;
 let questionSelections = []; // per-tab: number | Set
 let questionIndex = 0;
 let questionNotesByTab = [];
+/* Plan approval panel — full-width body UI (not a composer popover). */
+let planOpen = false;
+let planPromptId = 0;
 
 function closeOtherDropdowns() {
-  if (typeof closeModelPopover === 'function') closeModelPopover();
-  if (typeof closeEffortPopover === 'function') closeEffortPopover();
-  if (typeof closeSlash === 'function') closeSlash();
-  if (typeof closeMention === 'function') closeMention();
-  if (typeof closeRewindPopover === 'function') closeRewindPopover();
+  if (typeof closeModelPopover === "function") closeModelPopover();
+  if (typeof closeEffortPopover === "function") closeEffortPopover();
+  if (typeof closeSlash === "function") closeSlash();
+  if (typeof closeMention === "function") closeMention();
+  if (typeof closeRewindPopover === "function") closeRewindPopover();
 }
 
 function closePermissionPopover(send) {
@@ -234,11 +256,11 @@ function closePermissionPopover(send) {
   const id = permissionPromptId;
   permissionOpen = false;
   permissionPopover.hidden = true;
-  permissionList.innerHTML = '';
+  permissionList.innerHTML = "";
   permissionItems = [];
   if (send) {
     vscode.postMessage({
-      type: 'permissionResponse',
+      type: "permissionResponse",
       promptId: id,
       outcome: send.outcome,
       optionId: send.optionId,
@@ -249,75 +271,93 @@ function closePermissionPopover(send) {
 function openPermissionPrompt(msg) {
   closeOtherDropdowns();
   closeQuestionPopover(null);
+  // Plan panel stays open if present — permission is a separate modal.
   permissionOpen = true;
   permissionPromptId = msg.promptId || 0;
   permissionItems = msg.options || [];
   permissionIndex = 0;
-  permissionTitle.textContent = msg.title ? String(msg.title) : 'Permission';
-  permissionDetail.textContent = msg.detail ? String(msg.detail) : '';
+  permissionTitle.textContent = msg.title ? String(msg.title) : "Permission";
+  permissionDetail.textContent = msg.detail ? String(msg.detail) : "";
   permissionPopover.hidden = false;
   renderPermissionList();
   // Focus list so keyboard works even if composer isn't focused
-  const first = permissionList.querySelector('.permission-item');
+  const first = permissionList.querySelector(".permission-item");
   if (first) first.focus();
 }
 
 function renderPermissionList() {
   if (!permissionOpen) return;
-  permissionList.innerHTML = permissionItems.map((o, i) => {
-    const icon = o.icon || 'ti-circle-dot';
-    const kind = o.kind || '';
-    const label = o.label || o.name || o.optionId || '';
-    const desc = o.kind || '';
-    return '<button type="button" class="permission-item kind-' + esc(kind) +
-      (i === permissionIndex ? ' active' : '') +
-      '" data-i="' + i + '" role="option" tabindex="0" aria-selected="' +
-      (i === permissionIndex ? 'true' : 'false') + '">' +
-      '<span class="mi-icon"><i class="ti ' + esc(icon) + '"></i></span>' +
-      '<span class="mi-body"><span class="mi-label">' + esc(label) + '</span>' +
-      '<span class="mi-desc">' + esc(desc) + '</span></span>' +
-      '</button>';
-  }).join('');
+  permissionList.innerHTML = permissionItems
+    .map((o, i) => {
+      const icon = o.icon || "ti-circle-dot";
+      const kind = o.kind || "";
+      const label = o.label || o.name || o.optionId || "";
+      const desc = o.kind || "";
+      return (
+        '<button type="button" class="permission-item kind-' +
+        esc(kind) +
+        (i === permissionIndex ? " active" : "") +
+        '" data-i="' +
+        i +
+        '" role="option" tabindex="0" aria-selected="' +
+        (i === permissionIndex ? "true" : "false") +
+        '">' +
+        '<span class="mi-icon"><i class="ti ' +
+        esc(icon) +
+        '"></i></span>' +
+        '<span class="mi-body"><span class="mi-label">' +
+        esc(label) +
+        "</span>" +
+        '<span class="mi-desc">' +
+        esc(desc) +
+        "</span></span>" +
+        "</button>"
+      );
+    })
+    .join("");
   highlightPermissionIndex(false);
 }
 
 /** Update active row without rebuilding DOM (avoids killing click on mouseenter). */
 function highlightPermissionIndex(scroll) {
-  const buttons = permissionList.querySelectorAll('.permission-item');
+  const buttons = permissionList.querySelectorAll(".permission-item");
   buttons.forEach((btn, i) => {
     const on = i === permissionIndex;
-    btn.classList.toggle('active', on);
-    btn.setAttribute('aria-selected', on ? 'true' : 'false');
-    if (on && scroll) btn.scrollIntoView({ block: 'nearest' });
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-selected", on ? "true" : "false");
+    if (on && scroll) btn.scrollIntoView({ block: "nearest" });
   });
 }
 
 function movePermission(delta) {
   if (!permissionItems.length) return;
-  permissionIndex = (permissionIndex + delta + permissionItems.length) % permissionItems.length;
+  permissionIndex =
+    (permissionIndex + delta + permissionItems.length) % permissionItems.length;
   highlightPermissionIndex(true);
 }
 
 function acceptPermission(i) {
-  const idx = typeof i === 'number' ? i : permissionIndex;
+  const idx = typeof i === "number" ? i : permissionIndex;
   const o = permissionItems[idx];
   if (!o || !o.optionId) return;
-  closePermissionPopover({ outcome: 'selected', optionId: o.optionId });
+  closePermissionPopover({ outcome: "selected", optionId: o.optionId });
 }
 
 // Event delegation — stable handlers (re-render must not re-bind)
-permissionList.addEventListener('click', (e) => {
-  const btn = e.target && e.target.closest ? e.target.closest('.permission-item') : null;
+permissionList.addEventListener("click", (e) => {
+  const btn =
+    e.target && e.target.closest ? e.target.closest(".permission-item") : null;
   if (!btn || !permissionOpen) return;
   e.preventDefault();
   e.stopPropagation();
-  const i = Number(btn.getAttribute('data-i'));
+  const i = Number(btn.getAttribute("data-i"));
   if (Number.isFinite(i)) acceptPermission(i);
 });
-permissionList.addEventListener('mouseover', (e) => {
-  const btn = e.target && e.target.closest ? e.target.closest('.permission-item') : null;
+permissionList.addEventListener("mouseover", (e) => {
+  const btn =
+    e.target && e.target.closest ? e.target.closest(".permission-item") : null;
   if (!btn || !permissionOpen) return;
-  const i = Number(btn.getAttribute('data-i'));
+  const i = Number(btn.getAttribute("data-i"));
   if (!Number.isFinite(i) || i === permissionIndex) return;
   permissionIndex = i;
   highlightPermissionIndex(false);
@@ -328,16 +368,18 @@ function closeQuestionPopover(send) {
   const id = questionPromptId;
   questionOpen = false;
   questionPopover.hidden = true;
-  questionList.innerHTML = '';
-  questionTabs.innerHTML = '';
-  questionBody.textContent = '';
-  questionNotes.value = '';
+  questionList.innerHTML = "";
+  questionTabs.innerHTML = "";
+  questionBody.textContent = "";
+  questionNotes.value = "";
   questionNotes.hidden = true;
   questionItems = [];
   questionSelections = [];
   questionNotesByTab = [];
   if (send) {
-    vscode.postMessage(Object.assign({ type: 'questionResponse', promptId: id }, send));
+    vscode.postMessage(
+      Object.assign({ type: "questionResponse", promptId: id }, send),
+    );
   }
 }
 
@@ -346,28 +388,29 @@ function openQuestionPrompt(msg) {
   closePermissionPopover(null);
   questionOpen = true;
   questionPromptId = msg.promptId || 0;
-  questionMode = msg.mode === 'plan' ? 'plan' : 'default';
+  questionMode = msg.mode === "plan" ? "plan" : "default";
   questionItems = msg.questions || [];
   questionTab = 0;
   questionIndex = 0;
   questionSelections = questionItems.map((q) =>
-    q.multiSelect ? new Set() : null
+    q.multiSelect ? new Set() : null,
   );
-  questionNotesByTab = questionItems.map(() => '');
-  questionTitle.textContent = questionItems.length > 1
-    ? 'Questions (' + questionItems.length + ')'
-    : 'Question';
-  questionChat.hidden = questionMode !== 'plan';
-  questionSkip.hidden = questionMode !== 'plan';
+  questionNotesByTab = questionItems.map(() => "");
+  questionTitle.textContent =
+    questionItems.length > 1
+      ? "Questions (" + questionItems.length + ")"
+      : "Question";
+  questionChat.hidden = questionMode !== "plan";
+  questionSkip.hidden = questionMode !== "plan";
   questionPopover.hidden = false;
   renderQuestionView();
-  const first = questionList.querySelector('.question-item');
+  const first = questionList.querySelector(".question-item");
   if (first) first.focus();
 }
 
 function saveQuestionNotes() {
   if (questionTab >= 0 && questionTab < questionNotesByTab.length) {
-    questionNotesByTab[questionTab] = questionNotes.value || '';
+    questionNotesByTab[questionTab] = questionNotes.value || "";
   }
 }
 
@@ -377,46 +420,60 @@ function renderQuestionView() {
   if (!q) return;
   // tabs
   if (questionItems.length > 1) {
-    questionTabs.innerHTML = questionItems.map((qq, i) =>
-      '<button type="button" class="q-tab' + (i === questionTab ? ' active' : '') +
-      '" data-i="' + i + '">Q' + (i + 1) + '</button>'
-    ).join('');
+    questionTabs.innerHTML = questionItems
+      .map(
+        (qq, i) =>
+          '<button type="button" class="q-tab' +
+          (i === questionTab ? " active" : "") +
+          '" data-i="' +
+          i +
+          '">Q' +
+          (i + 1) +
+          "</button>",
+      )
+      .join("");
   } else {
-    questionTabs.innerHTML = '';
+    questionTabs.innerHTML = "";
   }
-  questionBody.textContent = q.question || '';
+  questionBody.textContent = q.question || "";
   questionNotes.hidden = false;
-  questionNotes.value = questionNotesByTab[questionTab] || '';
+  questionNotes.value = questionNotesByTab[questionTab] || "";
   const opts = q.options || [];
   const sel = questionSelections[questionTab];
-  questionList.innerHTML = opts.map((o, i) => {
-    const selected = q.multiSelect
-      ? !!(sel && sel.has(i))
-      : sel === i;
-    return '<button type="button" class="question-item' +
-      (i === questionIndex ? ' active' : '') +
-      (selected ? ' selected' : '') +
-      '" data-i="' + i + '" role="option" tabindex="0">' +
-      '<span class="mi-check"><i class="ti ti-check"></i></span>' +
-      '<span class="mi-body"><span class="mi-label">' + esc(o.label || '') + '</span>' +
-      '<span class="mi-desc">' + esc(o.description || '') + '</span></span>' +
-      '</button>';
-  }).join('');
+  questionList.innerHTML = opts
+    .map((o, i) => {
+      const selected = q.multiSelect ? !!(sel && sel.has(i)) : sel === i;
+      return (
+        '<button type="button" class="question-item' +
+        (i === questionIndex ? " active" : "") +
+        (selected ? " selected" : "") +
+        '" data-i="' +
+        i +
+        '" role="option" tabindex="0">' +
+        '<span class="mi-check"><i class="ti ti-check"></i></span>' +
+        '<span class="mi-body"><span class="mi-label">' +
+        esc(o.label || "") +
+        "</span>" +
+        '<span class="mi-desc">' +
+        esc(o.description || "") +
+        "</span></span>" +
+        "</button>"
+      );
+    })
+    .join("");
   highlightQuestionIndex(false);
 }
 
 function highlightQuestionIndex(scroll) {
   const q = questionItems[questionTab];
   const sel = questionSelections[questionTab];
-  const buttons = questionList.querySelectorAll('.question-item');
+  const buttons = questionList.querySelectorAll(".question-item");
   buttons.forEach((btn, i) => {
     const on = i === questionIndex;
-    btn.classList.toggle('active', on);
-    const selected = q && q.multiSelect
-      ? !!(sel && sel.has(i))
-      : sel === i;
-    btn.classList.toggle('selected', selected);
-    if (on && scroll) btn.scrollIntoView({ block: 'nearest' });
+    btn.classList.toggle("active", on);
+    const selected = q && q.multiSelect ? !!(sel && sel.has(i)) : sel === i;
+    btn.classList.toggle("selected", selected);
+    if (on && scroll) btn.scrollIntoView({ block: "nearest" });
   });
 }
 
@@ -443,27 +500,29 @@ function moveQuestion(delta) {
   highlightQuestionIndex(true);
 }
 
-questionTabs.addEventListener('click', (e) => {
-  const btn = e.target && e.target.closest ? e.target.closest('.q-tab') : null;
+questionTabs.addEventListener("click", (e) => {
+  const btn = e.target && e.target.closest ? e.target.closest(".q-tab") : null;
   if (!btn || !questionOpen) return;
   e.preventDefault();
   saveQuestionNotes();
-  questionTab = Number(btn.getAttribute('data-i')) || 0;
+  questionTab = Number(btn.getAttribute("data-i")) || 0;
   questionIndex = 0;
   renderQuestionView();
 });
-questionList.addEventListener('click', (e) => {
-  const btn = e.target && e.target.closest ? e.target.closest('.question-item') : null;
+questionList.addEventListener("click", (e) => {
+  const btn =
+    e.target && e.target.closest ? e.target.closest(".question-item") : null;
   if (!btn || !questionOpen) return;
   e.preventDefault();
   e.stopPropagation();
-  const i = Number(btn.getAttribute('data-i'));
+  const i = Number(btn.getAttribute("data-i"));
   if (Number.isFinite(i)) toggleQuestionOption(i);
 });
-questionList.addEventListener('mouseover', (e) => {
-  const btn = e.target && e.target.closest ? e.target.closest('.question-item') : null;
+questionList.addEventListener("mouseover", (e) => {
+  const btn =
+    e.target && e.target.closest ? e.target.closest(".question-item") : null;
   if (!btn || !questionOpen) return;
-  const i = Number(btn.getAttribute('data-i'));
+  const i = Number(btn.getAttribute("data-i"));
   if (!Number.isFinite(i) || i === questionIndex) return;
   questionIndex = i;
   highlightQuestionIndex(false);
@@ -479,18 +538,20 @@ function buildQuestionAnswers() {
     const labels = [];
     let preview;
     if (q.multiSelect && sel && sel.size) {
-      Array.from(sel).sort((a, b) => a - b).forEach((i) => {
-        const o = q.options[i];
-        if (o) labels.push(o.label);
-      });
-    } else if (typeof sel === 'number' && q.options[sel]) {
+      Array.from(sel)
+        .sort((a, b) => a - b)
+        .forEach((i) => {
+          const o = q.options[i];
+          if (o) labels.push(o.label);
+        });
+    } else if (typeof sel === "number" && q.options[sel]) {
       labels.push(q.options[sel].label);
       if (q.options[sel].preview) preview = q.options[sel].preview;
     }
-    const notes = (questionNotesByTab[ti] || '').trim();
+    const notes = (questionNotesByTab[ti] || "").trim();
     // Freeform-only (TUI): no option picked but notes → answer "Other"
     if (!labels.length && notes) {
-      labels.push('Other');
+      labels.push("Other");
     }
     if (labels.length) {
       answers[q.question] = labels;
@@ -508,7 +569,7 @@ function buildQuestionAnswers() {
 function acceptQuestion() {
   const { answers, annotations, any } = buildQuestionAnswers();
   if (!any) return;
-  const payload = { outcome: 'accepted', answers };
+  const payload = { outcome: "accepted", answers };
   if (Object.keys(annotations).length) payload.annotations = annotations;
   closeQuestionPopover(payload);
 }
@@ -517,97 +578,216 @@ function partialAnswersFromSelections() {
   const { answers } = buildQuestionAnswers();
   const partial = {};
   Object.keys(answers).forEach((k) => {
-    partial[k] = answers[k].join(', ');
+    partial[k] = answers[k].join(", ");
   });
   return partial;
 }
 
-permissionCancel.addEventListener('click', () => {
-  closePermissionPopover({ outcome: 'cancelled' });
+permissionCancel.addEventListener("click", () => {
+  closePermissionPopover({ outcome: "cancelled" });
 });
-questionCancel.addEventListener('click', () => {
-  closeQuestionPopover({ outcome: 'cancelled' });
+questionCancel.addEventListener("click", () => {
+  closeQuestionPopover({ outcome: "cancelled" });
 });
-questionAccept.addEventListener('click', () => acceptQuestion());
-questionChat.addEventListener('click', () => {
+questionAccept.addEventListener("click", () => acceptQuestion());
+questionChat.addEventListener("click", () => {
   closeQuestionPopover({
-    outcome: 'chat_about_this',
+    outcome: "chat_about_this",
     partial_answers: partialAnswersFromSelections(),
   });
 });
-questionSkip.addEventListener('click', () => {
+questionSkip.addEventListener("click", () => {
   closeQuestionPopover({
-    outcome: 'skip_interview',
+    outcome: "skip_interview",
     partial_answers: partialAnswersFromSelections(),
   });
 });
 
+function closePlanPanel(send) {
+  if (!planOpen && (!planPanel || planPanel.hidden)) return;
+  const id = planPromptId;
+  planOpen = false;
+  planPromptId = 0;
+  if (planPanel) planPanel.hidden = true;
+  if (appRoot) appRoot.classList.remove("plan-open");
+  if (planBody) planBody.innerHTML = "";
+  if (planBadge) planBadge.hidden = true;
+  syncComposerPlaceholder();
+  updateSendStopButton();
+  if (send) {
+    vscode.postMessage({
+      type: "planApprovalResponse",
+      promptId: id,
+      outcome: send.outcome,
+      feedback: send.feedback,
+    });
+  }
+}
+
+function openPlanPanel(msg) {
+  closeOtherDropdowns();
+  planOpen = true;
+  planPromptId = msg.promptId || 0;
+  if (appRoot) appRoot.classList.add("plan-open");
+  if (planTitle) {
+    planTitle.textContent =
+      msg.hasPlan === false ? "Exit plan mode" : "Plan approval";
+  }
+  if (planBadge) {
+    const empty = msg.hasPlan === false;
+    planBadge.hidden = !empty;
+    planBadge.textContent = empty ? "No plan written" : "";
+  }
+  if (planBody) {
+    // Same host pipeline as assistant messages: sanitized HTML + code Copy.
+    planBody.className = "bubble md";
+    if (msg.planHtml) {
+      planBody.innerHTML = msg.planHtml;
+      if (typeof attachCopyButtons === "function") {
+        attachCopyButtons(planBody);
+      }
+    } else {
+      planBody.textContent = msg.planContent ? String(msg.planContent) : "";
+    }
+  }
+  const planScroll = document.getElementById("plan-scroll");
+  if (planScroll) planScroll.scrollTop = 0;
+  if (planPanel) planPanel.hidden = false;
+  // Request changes uses the composer as feedback.
+  syncComposerPlaceholder();
+  updateSendStopButton();
+  if (composer) composer.focus();
+}
+
+/** Composer text becomes plan feedback; clear after send. */
+function submitPlanRequestChanges() {
+  if (!planOpen) return;
+  const feedback = composer ? composer.value : "";
+  if (composer) {
+    composer.value = "";
+    if (typeof autosizeComposer === "function") autosizeComposer();
+  }
+  closePlanPanel({
+    outcome: "cancelled",
+    feedback: feedback,
+  });
+}
+
+if (planAbandon) {
+  planAbandon.addEventListener("click", () => {
+    closePlanPanel({ outcome: "abandoned" });
+  });
+}
+if (planRequest) {
+  planRequest.addEventListener("click", () => {
+    submitPlanRequestChanges();
+  });
+}
+if (planApprove) {
+  planApprove.addEventListener("click", () => {
+    closePlanPanel({ outcome: "approved" });
+  });
+}
+
 function renderModelList() {
   if (!modelOpen) return;
   modelPopover.hidden = false;
-  modelTitle.textContent = 'Models' + (modelItems.length ? ' (' + modelItems.length + ')' : '');
+  modelTitle.textContent =
+    "Models" + (modelItems.length ? " (" + modelItems.length + ")" : "");
   if (!modelItems.length) {
-    modelList.innerHTML = '';
+    modelList.innerHTML = "";
     modelEmpty.hidden = false;
-    modelEmpty.textContent = 'Waiting for agent catalog…';
+    modelEmpty.textContent = "Waiting for agent catalog…";
     return;
   }
   modelEmpty.hidden = true;
-  modelList.innerHTML = modelItems.map((m, i) => {
-    const cur = m.id === currentModelId || m.selected;
-    return '<button type="button" class="model-item' +
-      (i === modelIndex ? ' active' : '') +
-      (cur ? ' current' : '') +
-      '" role="option" data-model-idx="' + i + '" aria-selected="' + (i === modelIndex) + '">' +
-      '<span class="mi-icon">' + icon(cur ? 'check' : 'cpu') + '</span>' +
-      '<span class="mi-body">' +
-        '<span class="mi-label">' + esc(m.label || m.id) + '</span>' +
+  modelList.innerHTML = modelItems
+    .map((m, i) => {
+      const cur = m.id === currentModelId || m.selected;
+      return (
+        '<button type="button" class="model-item' +
+        (i === modelIndex ? " active" : "") +
+        (cur ? " current" : "") +
+        '" role="option" data-model-idx="' +
+        i +
+        '" aria-selected="' +
+        (i === modelIndex) +
+        '">' +
+        '<span class="mi-icon">' +
+        icon(cur ? "check" : "cpu") +
+        "</span>" +
+        '<span class="mi-body">' +
+        '<span class="mi-label">' +
+        esc(m.label || m.id) +
+        "</span>" +
         (m.id && m.id !== m.label
-          ? '<span class="mi-desc">' + esc(m.id) + '</span>'
-          : (m.description ? '<span class="mi-desc">' + esc(m.description) + '</span>' : '')) +
-      '</span>' +
-      (cur ? '<span class="mi-badge">current</span>' : '') +
-    '</button>';
-  }).join('');
-  const active = modelList.querySelector('.model-item.active');
-  if (active) active.scrollIntoView({ block: 'nearest' });
+          ? '<span class="mi-desc">' + esc(m.id) + "</span>"
+          : m.description
+            ? '<span class="mi-desc">' + esc(m.description) + "</span>"
+            : "") +
+        "</span>" +
+        (cur ? '<span class="mi-badge">current</span>' : "") +
+        "</button>"
+      );
+    })
+    .join("");
+  const active = modelList.querySelector(".model-item.active");
+  if (active) active.scrollIntoView({ block: "nearest" });
 }
 
 function renderEffortList() {
   if (!effortOpen) return;
   effortPopover.hidden = false;
-  effortTitle.textContent = 'Reasoning';
+  effortTitle.textContent = "Reasoning";
   if (!effortItems.length) {
-    effortList.innerHTML = '';
+    effortList.innerHTML = "";
     effortEmpty.hidden = false;
     return;
   }
   effortEmpty.hidden = true;
-  effortList.innerHTML = effortItems.map((e, i) => {
-    const cur = e.id === currentEffortId || e.selected;
-    return '<button type="button" class="effort-item' +
-      (i === effortIndex ? ' active' : '') +
-      (cur ? ' current' : '') +
-      '" role="option" data-effort-idx="' + i + '" aria-selected="' + (i === effortIndex) + '">' +
-      '<span class="mi-icon">' + icon(cur ? 'check' : 'brain') + '</span>' +
-      '<span class="mi-body">' +
-        '<span class="mi-label">' + esc(e.label || e.id) + '</span>' +
-        (e.description ? '<span class="mi-desc">' + esc(e.description) + '</span>' : '') +
-      '</span>' +
-      (cur ? '<span class="mi-badge">current</span>' : '') +
-    '</button>';
-  }).join('');
-  const active = effortList.querySelector('.effort-item.active');
-  if (active) active.scrollIntoView({ block: 'nearest' });
+  effortList.innerHTML = effortItems
+    .map((e, i) => {
+      const cur = e.id === currentEffortId || e.selected;
+      return (
+        '<button type="button" class="effort-item' +
+        (i === effortIndex ? " active" : "") +
+        (cur ? " current" : "") +
+        '" role="option" data-effort-idx="' +
+        i +
+        '" aria-selected="' +
+        (i === effortIndex) +
+        '">' +
+        '<span class="mi-icon">' +
+        icon(cur ? "check" : "brain") +
+        "</span>" +
+        '<span class="mi-body">' +
+        '<span class="mi-label">' +
+        esc(e.label || e.id) +
+        "</span>" +
+        (e.description
+          ? '<span class="mi-desc">' + esc(e.description) + "</span>"
+          : "") +
+        "</span>" +
+        (cur ? '<span class="mi-badge">current</span>' : "") +
+        "</button>"
+      );
+    })
+    .join("");
+  const active = effortList.querySelector(".effort-item.active");
+  if (active) active.scrollIntoView({ block: "nearest" });
 }
 
 function focusPopoverActive(listEl, selector) {
   requestAnimationFrame(() => {
     const el =
-      (listEl && listEl.querySelector(selector + '.active')) ||
+      (listEl && listEl.querySelector(selector + ".active")) ||
       (listEl && listEl.querySelector(selector));
-    if (el && typeof el.focus === 'function') {
-      try { el.focus(); } catch (_) { /* ignore */ }
+    if (el && typeof el.focus === "function") {
+      try {
+        el.focus();
+      } catch (_) {
+        /* ignore */
+      }
     }
   });
 }
@@ -618,14 +798,17 @@ function openModelPopover() {
   if (effortOpen) closeEffortPopover();
   // Always re-fetch catalog from agent so we don't stick on bundled fallback
   // until some other server action happens to start the agent.
-  vscode.postMessage({ type: 'ensureModels' });
+  vscode.postMessage({ type: "ensureModels" });
   modelOpen = true;
-  modelIndex = Math.max(0, modelItems.findIndex((m) => m.id === currentModelId));
+  modelIndex = Math.max(
+    0,
+    modelItems.findIndex((m) => m.id === currentModelId),
+  );
   if (modelIndex < 0) modelIndex = 0;
   renderModelList();
   // Focus list so keyboard works even when opened from the model button.
   // Empty catalog shows "Waiting for agent catalog…" until models post arrives.
-  focusPopoverActive(modelList, '.model-item');
+  focusPopoverActive(modelList, ".model-item");
 }
 
 function openEffortPopover() {
@@ -634,10 +817,13 @@ function openEffortPopover() {
   if (modelOpen) closeModelPopover();
   if (!effortItems.length) return;
   effortOpen = true;
-  effortIndex = Math.max(0, effortItems.findIndex((e) => e.id === currentEffortId));
+  effortIndex = Math.max(
+    0,
+    effortItems.findIndex((e) => e.id === currentEffortId),
+  );
   if (effortIndex < 0) effortIndex = 0;
   renderEffortList();
-  focusPopoverActive(effortList, '.effort-item');
+  focusPopoverActive(effortList, ".effort-item");
 }
 
 function acceptModel(idx) {
@@ -645,7 +831,7 @@ function acceptModel(idx) {
   if (!m || !m.id) return;
   closeModelPopover();
   if (m.id === currentModelId) return;
-  vscode.postMessage({ type: 'setModel', modelId: m.id });
+  vscode.postMessage({ type: "setModel", modelId: m.id });
 }
 
 function acceptEffort(idx) {
@@ -653,7 +839,7 @@ function acceptEffort(idx) {
   if (!e || !e.id) return;
   closeEffortPopover();
   if (e.id === currentEffortId) return;
-  vscode.postMessage({ type: 'setEffort', effortId: e.id });
+  vscode.postMessage({ type: "setEffort", effortId: e.id });
 }
 
 function moveModel(delta) {
@@ -680,11 +866,11 @@ function detectSlashContext(text, cursor) {
   if (cursor < 0 || cursor > text.length) return null;
   let i = 0;
   while (i < text.length && /\s/.test(text[i])) i++;
-  if (i >= text.length || text[i] !== '/') return null;
+  if (i >= text.length || text[i] !== "/") return null;
   const slashStart = i;
   let nameEnd = slashStart + 1;
   while (nameEnd < text.length && !/\s/.test(text[nameEnd])) {
-    if (nameEnd > slashStart + 1 && text[nameEnd] === '/') return null;
+    if (nameEnd > slashStart + 1 && text[nameEnd] === "/") return null;
     nameEnd++;
   }
   const inCommand = cursor >= slashStart && cursor <= nameEnd;
@@ -694,7 +880,9 @@ function detectSlashContext(text, cursor) {
   return {
     start: slashStart,
     end: nameEnd,
-    query: inCommand ? text.slice(slashStart + 1, cursor) : text.slice(slashStart + 1, nameEnd),
+    query: inCommand
+      ? text.slice(slashStart + 1, cursor)
+      : text.slice(slashStart + 1, nameEnd),
     inCommand,
     args: text.slice(argsStart),
   };
@@ -706,7 +894,7 @@ function closeSlash() {
   slashIndex = 0;
   slashCtx = null;
   slashPopover.hidden = true;
-  slashList.innerHTML = '';
+  slashList.innerHTML = "";
   slashEmpty.hidden = true;
   if (slashSearchTimer) {
     clearTimeout(slashSearchTimer);
@@ -715,44 +903,58 @@ function closeSlash() {
 }
 
 function slashIconName(layer) {
-  if (layer === 'host') return 'device-desktop';
-  if (layer === 'unsupported') return 'device-desktop-off';
-  return 'robot';
+  if (layer === "host") return "device-desktop";
+  if (layer === "unsupported") return "device-desktop-off";
+  return "robot";
 }
 
 function renderSlashList() {
   if (!slashOpen) return;
   slashPopover.hidden = false;
   slashTitle.textContent = slashCtx
-    ? ('/' + (slashCtx.query || '…'))
-    : '/ commands';
+    ? "/" + (slashCtx.query || "…")
+    : "/ commands";
   if (!slashItems.length) {
-    slashList.innerHTML = '';
+    slashList.innerHTML = "";
     slashEmpty.hidden = false;
-    slashEmpty.textContent = 'No matches';
+    slashEmpty.textContent = "No matches";
     return;
   }
   slashEmpty.hidden = true;
-  slashList.innerHTML = slashItems.map((it, i) =>
-    '<button type="button" class="slash-item' + (i === slashIndex ? ' active' : '') +
-    '" role="option" data-slash-idx="' + i + '" aria-selected="' + (i === slashIndex) + '">' +
-      '<span class="mi-icon">' + icon(slashIconName(it.layer)) + '</span>' +
-      '<span class="mi-body">' +
-        '<span class="mi-label">' + esc(it.display) + '</span>' +
+  slashList.innerHTML = slashItems
+    .map(
+      (it, i) =>
+        '<button type="button" class="slash-item' +
+        (i === slashIndex ? " active" : "") +
+        '" role="option" data-slash-idx="' +
+        i +
+        '" aria-selected="' +
+        (i === slashIndex) +
+        '">' +
+        '<span class="mi-icon">' +
+        icon(slashIconName(it.layer)) +
+        "</span>" +
+        '<span class="mi-body">' +
+        '<span class="mi-label">' +
+        esc(it.display) +
+        "</span>" +
         (it.description
-          ? '<span class="mi-desc">' + esc(it.description) + '</span>'
-          : '') +
-      '</span>' +
-      '<span class="mi-badge">' + esc(it.layer === 'passthrough' ? 'agent' : it.layer) + '</span>' +
-    '</button>'
-  ).join('');
-  const active = slashList.querySelector('.slash-item.active');
-  if (active) active.scrollIntoView({ block: 'nearest' });
+          ? '<span class="mi-desc">' + esc(it.description) + "</span>"
+          : "") +
+        "</span>" +
+        '<span class="mi-badge">' +
+        esc(it.layer === "passthrough" ? "agent" : it.layer) +
+        "</span>" +
+        "</button>",
+    )
+    .join("");
+  const active = slashList.querySelector(".slash-item.active");
+  if (active) active.scrollIntoView({ block: "nearest" });
 }
 
 function requestSlashSearch(query) {
   const requestId = ++slashRequestId;
-  vscode.postMessage({ type: 'searchSlash', query: query || '', requestId });
+  vscode.postMessage({ type: "searchSlash", query: query || "", requestId });
 }
 
 function openSlashFromContext(ctx) {
@@ -764,12 +966,12 @@ function openSlashFromContext(ctx) {
   slashIndex = 0;
   slashPopover.hidden = false;
   slashEmpty.hidden = false;
-  slashEmpty.textContent = 'Loading…';
-  slashList.innerHTML = '';
-  slashTitle.textContent = '/' + (ctx.query || '…');
+  slashEmpty.textContent = "Loading…";
+  slashList.innerHTML = "";
+  slashTitle.textContent = "/" + (ctx.query || "…");
   if (slashSearchTimer) clearTimeout(slashSearchTimer);
   slashSearchTimer = setTimeout(() => {
-    requestSlashSearch(ctx.query || '');
+    requestSlashSearch(ctx.query || "");
   }, 20);
 }
 
@@ -783,9 +985,7 @@ function syncSlashFromComposer() {
     return;
   }
   const same =
-    slashCtx &&
-    slashCtx.start === ctx.start &&
-    slashCtx.query === ctx.query;
+    slashCtx && slashCtx.start === ctx.start && slashCtx.query === ctx.query;
   slashCtx = ctx;
   if (!slashOpen) {
     openSlashFromContext(ctx);
@@ -795,9 +995,9 @@ function syncSlashFromComposer() {
     slashIndex = 0;
     if (slashSearchTimer) clearTimeout(slashSearchTimer);
     slashSearchTimer = setTimeout(() => {
-      requestSlashSearch(ctx.query || '');
+      requestSlashSearch(ctx.query || "");
     }, 40);
-    slashTitle.textContent = '/' + (ctx.query || '…');
+    slashTitle.textContent = "/" + (ctx.query || "…");
   }
 }
 
@@ -805,7 +1005,8 @@ function acceptSlash(idx) {
   const item = slashItems[idx];
   if (!item) return;
   const text = composer.value;
-  const ctx = slashCtx || detectSlashContext(text, composer.selectionStart || 0);
+  const ctx =
+    slashCtx || detectSlashContext(text, composer.selectionStart || 0);
   if (ctx) {
     const after = text.slice(ctx.end);
     const next = text.slice(0, ctx.start) + item.insertText + after;
@@ -839,7 +1040,7 @@ let mentionSearchTimer = null;
 function detectAtContext(text, cursor) {
   if (cursor < 0 || cursor > text.length) return null;
   const before = text.slice(0, cursor);
-  const atIdx = before.lastIndexOf('@');
+  const atIdx = before.lastIndexOf("@");
   if (atIdx < 0) return null;
   if (atIdx > 0) {
     const prev = text[atIdx - 1];
@@ -848,7 +1049,7 @@ function detectAtContext(text, cursor) {
   let tokenEnd = text.length;
   for (let i = atIdx + 1; i < text.length; i++) {
     const ch = text[i];
-    if (/\s/.test(ch) || ch === ',' || ch === ';') {
+    if (/\s/.test(ch) || ch === "," || ch === ";") {
       tokenEnd = i;
       break;
     }
@@ -867,7 +1068,7 @@ function closeMention() {
   mentionIndex = 0;
   mentionAtCtx = null;
   mentionPopover.hidden = true;
-  mentionList.innerHTML = '';
+  mentionList.innerHTML = "";
   mentionEmpty.hidden = true;
   if (mentionSearchTimer) {
     clearTimeout(mentionSearchTimer);
@@ -889,45 +1090,57 @@ function syncComposerMenus() {
 }
 
 function mentionIconName(icon) {
-  if (icon === 'folder') return 'folder';
-  if (icon === 'selection') return 'highlight';
-  if (icon === 'search') return 'search';
-  return 'file';
+  if (icon === "folder") return "folder";
+  if (icon === "selection") return "highlight";
+  if (icon === "search") return "search";
+  return "file";
 }
 
 function renderMentionList() {
   if (!mentionOpen) return;
   mentionPopover.hidden = false;
   mentionTitle.textContent = mentionAtCtx
-    ? ('@' + (mentionAtCtx.query || '…'))
-    : '@ context';
+    ? "@" + (mentionAtCtx.query || "…")
+    : "@ context";
   if (!mentionItems.length) {
-    mentionList.innerHTML = '';
+    mentionList.innerHTML = "";
     mentionEmpty.hidden = false;
-    mentionEmpty.textContent = 'No matches';
+    mentionEmpty.textContent = "No matches";
     return;
   }
   mentionEmpty.hidden = true;
-  mentionEmpty.textContent = 'No matches';
-  mentionList.innerHTML = mentionItems.map((it, i) =>
-    '<button type="button" class="mention-item' + (i === mentionIndex ? ' active' : '') +
-    '" role="option" data-idx="' + i + '" aria-selected="' + (i === mentionIndex) + '">' +
-      '<span class="mi-icon">' + icon(mentionIconName(it.icon)) + '</span>' +
-      '<span class="mi-body">' +
-        '<span class="mi-label">' + esc(it.label) + '</span>' +
+  mentionEmpty.textContent = "No matches";
+  mentionList.innerHTML = mentionItems
+    .map(
+      (it, i) =>
+        '<button type="button" class="mention-item' +
+        (i === mentionIndex ? " active" : "") +
+        '" role="option" data-idx="' +
+        i +
+        '" aria-selected="' +
+        (i === mentionIndex) +
+        '">' +
+        '<span class="mi-icon">' +
+        icon(mentionIconName(it.icon)) +
+        "</span>" +
+        '<span class="mi-body">' +
+        '<span class="mi-label">' +
+        esc(it.label) +
+        "</span>" +
         (it.description
-          ? '<span class="mi-desc">' + esc(it.description) + '</span>'
-          : '') +
-      '</span>' +
-    '</button>'
-  ).join('');
-  const active = mentionList.querySelector('.mention-item.active');
-  if (active) active.scrollIntoView({ block: 'nearest' });
+          ? '<span class="mi-desc">' + esc(it.description) + "</span>"
+          : "") +
+        "</span>" +
+        "</button>",
+    )
+    .join("");
+  const active = mentionList.querySelector(".mention-item.active");
+  if (active) active.scrollIntoView({ block: "nearest" });
 }
 
 function requestMentionSearch(query) {
   const requestId = ++mentionRequestId;
-  vscode.postMessage({ type: 'searchMention', query: query || '', requestId });
+  vscode.postMessage({ type: "searchMention", query: query || "", requestId });
 }
 
 function openMentionFromContext(ctx) {
@@ -939,12 +1152,12 @@ function openMentionFromContext(ctx) {
   mentionIndex = 0;
   mentionPopover.hidden = false;
   mentionEmpty.hidden = false;
-  mentionEmpty.textContent = 'Searching…';
-  mentionList.innerHTML = '';
-  mentionTitle.textContent = '@' + (ctx.query || '…');
+  mentionEmpty.textContent = "Searching…";
+  mentionList.innerHTML = "";
+  mentionTitle.textContent = "@" + (ctx.query || "…");
   if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
   mentionSearchTimer = setTimeout(() => {
-    requestMentionSearch(ctx.query || '');
+    requestMentionSearch(ctx.query || "");
   }, 40);
 }
 
@@ -969,9 +1182,9 @@ function syncMentionFromComposer() {
     mentionIndex = 0;
     if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
     mentionSearchTimer = setTimeout(() => {
-      requestMentionSearch(ctx.query || '');
+      requestMentionSearch(ctx.query || "");
     }, 60);
-    mentionTitle.textContent = '@' + (ctx.query || '…');
+    mentionTitle.textContent = "@" + (ctx.query || "…");
   }
 }
 
@@ -979,7 +1192,8 @@ function acceptMention(idx) {
   const item = mentionItems[idx];
   if (!item || !item.chip) return;
   const text = composer.value;
-  const ctx = mentionAtCtx || detectAtContext(text, composer.selectionStart || 0);
+  const ctx =
+    mentionAtCtx || detectAtContext(text, composer.selectionStart || 0);
   if (ctx) {
     const next = text.slice(0, ctx.start) + text.slice(ctx.end);
     composer.value = next;
@@ -987,56 +1201,74 @@ function acceptMention(idx) {
     composer.setSelectionRange(pos, pos);
     autosizeComposer();
   }
-  vscode.postMessage({ type: 'pickMention', chip: item.chip });
+  vscode.postMessage({ type: "pickMention", chip: item.chip });
   closeMention();
   composer.focus();
 }
 
 function moveMention(delta) {
   if (!mentionItems.length) return;
-  mentionIndex = (mentionIndex + delta + mentionItems.length) % mentionItems.length;
+  mentionIndex =
+    (mentionIndex + delta + mentionItems.length) % mentionItems.length;
   renderMentionList();
 }
 
 function esc(s) {
-  return String(s).replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  })[c]);
+  return String(s).replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[c],
+  );
 }
 
 function icon(name, extraClass) {
-  return '<i class="ti ti-' + name + (extraClass ? ' ' + extraClass : '') + '" aria-hidden="true"></i>';
+  return (
+    '<i class="ti ti-' +
+    name +
+    (extraClass ? " " + extraClass : "") +
+    '" aria-hidden="true"></i>'
+  );
 }
 
 function toolIconName(t) {
-  const s = ((t.kind || '') + ' ' + (t.title || '')).toLowerCase();
-  if (/read|grep|search|glob|find|list/.test(s)) return 'search';
-  if (/edit|write|patch|replace|create.?file/.test(s)) return 'pencil';
-  if (/terminal|bash|shell|command|run/.test(s)) return 'terminal-2';
-  if (/web|fetch|http|browser/.test(s)) return 'world';
-  if (/task|subagent|agent/.test(s)) return 'robot';
-  if (/git/.test(s)) return 'brand-git';
-  return 'tool';
+  const s = ((t.kind || "") + " " + (t.title || "")).toLowerCase();
+  if (/read|grep|search|glob|find|list/.test(s)) return "search";
+  if (/edit|write|patch|replace|create.?file/.test(s)) return "pencil";
+  if (/terminal|bash|shell|command|run/.test(s)) return "terminal-2";
+  if (/web|fetch|http|browser/.test(s)) return "world";
+  if (/task|subagent|agent/.test(s)) return "robot";
+  if (/git/.test(s)) return "brand-git";
+  return "tool";
 }
 
 function statusIcon(status) {
-  const s = String(status || '').toLowerCase();
-  if (/complet|success|done|ok/.test(s)) return icon('check');
-  if (/fail|error/.test(s)) return icon('x');
-  if (/run|progress|pending|in_progress/.test(s)) return icon('loader', 'ti-spin');
-  return icon('circle-dashed');
+  const s = String(status || "").toLowerCase();
+  if (/complet|success|done|ok/.test(s)) return icon("check");
+  if (/fail|error/.test(s)) return icon("x");
+  if (/run|progress|pending|in_progress/.test(s))
+    return icon("loader", "ti-spin");
+  return icon("circle-dashed");
 }
 
 function chipIcon(label) {
-  if (String(label).startsWith('selection:')) return 'highlight';
-  if (String(label).startsWith('folder:')) return 'folder';
-  if (String(label).startsWith('file:')) return 'file';
-  return 'paperclip';
+  if (String(label).startsWith("selection:")) return "highlight";
+  if (String(label).startsWith("folder:")) return "folder";
+  if (String(label).startsWith("file:")) return "file";
+  return "paperclip";
 }
 
 function computeVirtualWindow(args) {
-  const total = args.total, scrollTop = args.scrollTop, viewportHeight = args.viewportHeight;
-  const estimatedRowHeight = args.estimatedRowHeight, overscan = args.overscan ?? 5;
+  const total = args.total,
+    scrollTop = args.scrollTop,
+    viewportHeight = args.viewportHeight;
+  const estimatedRowHeight = args.estimatedRowHeight,
+    overscan = args.overscan ?? 5;
   if (total <= 0 || estimatedRowHeight <= 0) return { start: 0, end: 0 };
   const first = Math.floor(scrollTop / estimatedRowHeight);
   const visible = Math.ceil(viewportHeight / estimatedRowHeight);
@@ -1046,24 +1278,29 @@ function computeVirtualWindow(args) {
   };
 }
 
-function shouldStickToBottom(scrollTop, scrollHeight, viewportHeight, thresholdPx) {
+function shouldStickToBottom(
+  scrollTop,
+  scrollHeight,
+  viewportHeight,
+  thresholdPx,
+) {
   thresholdPx = thresholdPx == null ? 48 : thresholdPx;
   return scrollTop + viewportHeight >= scrollHeight - thresholdPx;
 }
 
 function attachCopyButtons(root) {
-  root.querySelectorAll('pre').forEach((pre) => {
-    if (pre.querySelector('.copy-code')) return;
-    const btn = document.createElement('button');
-    btn.className = 'copy-code';
-    btn.type = 'button';
-    btn.textContent = 'Copy';
-    btn.addEventListener('click', (e) => {
+  root.querySelectorAll("pre").forEach((pre) => {
+    if (pre.querySelector(".copy-code")) return;
+    const btn = document.createElement("button");
+    btn.className = "copy-code";
+    btn.type = "button";
+    btn.textContent = "Copy";
+    btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const text = pre.innerText.replace(/^Copy\n?/, '');
+      const text = pre.innerText.replace(/^Copy\n?/, "");
       navigator.clipboard.writeText(text);
     });
-    pre.style.position = 'relative';
+    pre.style.position = "relative";
     pre.prepend(btn);
   });
 }
@@ -1073,8 +1310,8 @@ function attachCopyButtons(root) {
  * while streaming). No stream text animation.
  */
 function fillTextBubble(b, text, html, _opts) {
-  const nextPlain = text || '';
-  const key = html ? 'h:' + html : 't:' + nextPlain;
+  const nextPlain = text || "";
+  const key = html ? "h:" + html : "t:" + nextPlain;
   if (b.dataset.streamKey === key) return;
   b.dataset.streamKey = key;
 
@@ -1085,15 +1322,15 @@ function fillTextBubble(b, text, html, _opts) {
     b.textContent = nextPlain;
   } else {
     // Empty text segment — timeline-level shimmer covers the wait state.
-    b.textContent = '';
+    b.textContent = "";
   }
 }
 
 /** Skeleton shimmer while a live assistant has no timeline content yet. */
 function renderStreamShimmer() {
-  const el = document.createElement('div');
-  el.className = 'stream-shimmer';
-  el.setAttribute('aria-hidden', 'true');
+  const el = document.createElement("div");
+  el.className = "stream-shimmer";
+  el.setAttribute("aria-hidden", "true");
   el.innerHTML =
     '<div class="shimmer-line"></div>' +
     '<div class="shimmer-line"></div>' +
@@ -1110,11 +1347,11 @@ function ensureStreamShimmer(timeline, m, isLive) {
   if (!timeline) return;
   const live = isLive === undefined ? isLiveStreamingAssistant(m) : !!isLive;
   const empty = visibleGroupedTimeline(m).length === 0;
-  const existing = timeline.querySelector(':scope > .stream-shimmer');
+  const existing = timeline.querySelector(":scope > .stream-shimmer");
   if (live && busy && empty) {
     // Drop any leftover content nodes; keep shimmer if already mounted.
     Array.from(timeline.children).forEach((child) => {
-      if (!child.classList.contains('stream-shimmer')) child.remove();
+      if (!child.classList.contains("stream-shimmer")) child.remove();
     });
     if (!existing) timeline.appendChild(renderStreamShimmer());
     return;
@@ -1122,67 +1359,68 @@ function ensureStreamShimmer(timeline, m, isLive) {
   if (existing) existing.remove();
 }
 
-
 /**
  * Only the latest running tool/group line gets shimmer (one live line, like Thinking…).
  * Scans top-level timeline children first, then nested tool-rows inside groups.
  */
 function markLatestRunningTool(timeline) {
   if (!timeline) return;
-  timeline.querySelectorAll('.tool-latest').forEach((el) => {
-    el.classList.remove('tool-latest');
+  timeline.querySelectorAll(".tool-latest").forEach((el) => {
+    el.classList.remove("tool-latest");
   });
   // Prefer the last top-level running tool or verb-group in stream order.
   const top = Array.from(timeline.children).filter(
     (el) =>
-      (el.classList.contains('tool-row') && el.classList.contains('tool-running')) ||
-      (el.classList.contains('tool-group') && el.classList.contains('running')),
+      (el.classList.contains("tool-row") &&
+        el.classList.contains("tool-running")) ||
+      (el.classList.contains("tool-group") && el.classList.contains("running")),
   );
   if (top.length) {
-    top[top.length - 1].classList.add('tool-latest');
+    top[top.length - 1].classList.add("tool-latest");
     return;
   }
   // Fallback: last nested running tool-row (e.g. only members updated).
-  const nested = timeline.querySelectorAll('.tool-row.tool-running');
-  if (nested.length) nested[nested.length - 1].classList.add('tool-latest');
+  const nested = timeline.querySelectorAll(".tool-row.tool-running");
+  if (nested.length) nested[nested.length - 1].classList.add("tool-latest");
 }
-
 
 /** TUI ThinkingBlock header: Thinking… / Thought for Xs / Thought */
 function thoughtHeaderLabel(t) {
   if (t && t.label) return t.label;
-  if (t && t.running) return 'Thinking…';
-  return 'Thought';
+  if (t && t.running) return "Thinking…";
+  return "Thought";
 }
 
 /** Fill a thought <details> from a timeline thought segment. */
 function fillThoughtBlock(d, t) {
   const running = !!(t && t.running);
-  d.className = 'thought' + (running ? ' thought-running' : '');
+  d.className = "thought" + (running ? " thought-running" : "");
   if (t && t.id) d.dataset.thoughtId = t.id;
-  let summary = d.querySelector('summary');
+  let summary = d.querySelector("summary");
   if (!summary) {
-    summary = document.createElement('summary');
+    summary = document.createElement("summary");
     d.appendChild(summary);
   }
   summary.innerHTML =
-    icon('brain') +
-    ' <span class="thought-label">' + esc(thoughtHeaderLabel(t)) + '</span>';
-  let body = d.querySelector('.thought-body');
+    icon("brain") +
+    ' <span class="thought-label">' +
+    esc(thoughtHeaderLabel(t)) +
+    "</span>";
+  let body = d.querySelector(".thought-body");
   if (!body) {
-    body = document.createElement('div');
-    body.className = 'thought-body md';
+    body = document.createElement("div");
+    body.className = "thought-body md";
     d.appendChild(body);
   } else {
-    body.className = 'thought-body md';
+    body.className = "thought-body md";
   }
-  const bodyKey = t && t.html ? 'h:' + t.html : 't:' + ((t && t.text) || '');
+  const bodyKey = t && t.html ? "h:" + t.html : "t:" + ((t && t.text) || "");
   if (body.dataset.streamKey !== bodyKey) {
     body.dataset.streamKey = bodyKey;
     if (t && t.html) {
       body.innerHTML = t.html;
     } else {
-      body.textContent = (t && t.text) || '';
+      body.textContent = (t && t.text) || "";
     }
   }
   if (running && body.scrollHeight > body.clientHeight) {
@@ -1191,7 +1429,7 @@ function fillThoughtBlock(d, t) {
 }
 
 function renderThoughtRow(t, forceOpen) {
-  const d = document.createElement('details');
+  const d = document.createElement("details");
   fillThoughtBlock(d, t);
   // Running → open; finished → collapsed unless user had it expanded (forceOpen).
   d.open = !!(t && t.running) || !!forceOpen;
@@ -1199,78 +1437,104 @@ function renderThoughtRow(t, forceOpen) {
 }
 
 function renderToolRow(t, open) {
-  const d = document.createElement('details');
+  const d = document.createElement("details");
   const running = isToolStatusRunning(t && t.status);
-  d.className = 'tool-row' + (running ? ' tool-running' : '');
-  d.dataset.toolId = t.id || '';
+  d.className = "tool-row" + (running ? " tool-running" : "");
+  d.dataset.toolId = t.id || "";
   d.dataset.streamKey =
-    (t.status || '') +
-    '|' +
-    (t.title || '') +
-    '|' +
-    (t.input || '') +
-    '|' +
-    (t.output || '') +
-    '|' +
-    ((t.paths && t.paths.join(',')) || '');
+    (t.status || "") +
+    "|" +
+    (t.title || "") +
+    "|" +
+    (t.input || "") +
+    "|" +
+    (t.output || "") +
+    "|" +
+    ((t.paths && t.paths.join(",")) || "");
   if (open) d.open = true;
-  const summary = document.createElement('summary');
+  const summary = document.createElement("summary");
   // No disclosure arrow — click the row to expand detail (TUI-style fold).
   summary.innerHTML =
-    '<span class="tool-ico">' + icon(toolIconName(t)) + '</span>' +
-    '<span class="tool-title">' + esc(t.title || t.id || 'tool') + '</span>' +
-    '<span class="tool-status">' + statusIcon(t.status) + esc(t.status || '') + '</span>';
+    '<span class="tool-ico">' +
+    icon(toolIconName(t)) +
+    "</span>" +
+    '<span class="tool-title">' +
+    esc(t.title || t.id || "tool") +
+    "</span>" +
+    '<span class="tool-status">' +
+    statusIcon(t.status) +
+    esc(t.status || "") +
+    "</span>";
   d.appendChild(summary);
 
-  const detail = document.createElement('div');
-  detail.className = 'tool-detail';
+  const detail = document.createElement("div");
+  detail.className = "tool-detail";
   const metaBits = [];
   if (t.kind) metaBits.push(esc(t.kind));
   if (t.status) metaBits.push(esc(t.status));
   if (metaBits.length) {
-    const meta = document.createElement('div');
-    meta.innerHTML = metaBits.join(' · ');
+    const meta = document.createElement("div");
+    meta.innerHTML = metaBits.join(" · ");
     detail.appendChild(meta);
   }
   if (t.paths && t.paths.length) {
-    const paths = document.createElement('div');
-    paths.className = 'paths';
-    paths.innerHTML = t.paths.map(p => {
-      const isEdit = /edit|write|patch|replace|create.?file|search_replace|apply/i.test(
-        (t.kind || '') + ' ' + (t.title || '')
-      );
-      return '<a data-path="' + esc(p) + '" href="#">' + icon('file') + esc(p) + '</a>' +
-        (isEdit
-          ? '<button type="button" class="link" data-diff="' + esc(p) + '">' + icon('file-diff') + ' Diff</button>'
-          : '');
-    }).join('');
+    const paths = document.createElement("div");
+    paths.className = "paths";
+    paths.innerHTML = t.paths
+      .map((p) => {
+        const isEdit =
+          /edit|write|patch|replace|create.?file|search_replace|apply/i.test(
+            (t.kind || "") + " " + (t.title || ""),
+          );
+        return (
+          '<a data-path="' +
+          esc(p) +
+          '" href="#">' +
+          icon("file") +
+          esc(p) +
+          "</a>" +
+          (isEdit
+            ? '<button type="button" class="link" data-diff="' +
+              esc(p) +
+              '">' +
+              icon("file-diff") +
+              " Diff</button>"
+            : "")
+        );
+      })
+      .join("");
     detail.appendChild(paths);
   }
   // Input / output body — what TUI shows when a tool block is expanded.
   if (t.input) {
-    const lab = document.createElement('div');
-    lab.className = 'tool-io-label';
-    lab.textContent = 'Input';
+    const lab = document.createElement("div");
+    lab.className = "tool-io-label";
+    lab.textContent = "Input";
     detail.appendChild(lab);
-    const pre = document.createElement('pre');
-    pre.className = 'tool-io';
+    const pre = document.createElement("pre");
+    pre.className = "tool-io";
     pre.textContent = t.input;
     detail.appendChild(pre);
   }
   if (t.output) {
-    const lab = document.createElement('div');
-    lab.className = 'tool-io-label';
-    lab.textContent = 'Output';
+    const lab = document.createElement("div");
+    lab.className = "tool-io-label";
+    lab.textContent = "Output";
     detail.appendChild(lab);
-    const pre = document.createElement('pre');
-    pre.className = 'tool-io';
+    const pre = document.createElement("pre");
+    pre.className = "tool-io";
     pre.textContent = t.output;
     detail.appendChild(pre);
   }
-  if (!t.input && !t.output && !(t.paths && t.paths.length) && !metaBits.length) {
-    const empty = document.createElement('div');
-    empty.className = 'tool-meta';
-    empty.textContent = 'No extra details';
+  if (
+    !t.input &&
+    !t.output &&
+    !(t.paths && t.paths.length) &&
+    !metaBits.length
+  ) {
+    const empty = document.createElement("div");
+    empty.className = "tool-meta";
+    empty.textContent = "No extra details";
     detail.appendChild(empty);
   }
   d.appendChild(detail);
@@ -1283,12 +1547,12 @@ function visibleTimelineItems(m) {
   if (items && items.length) {
     const out = [];
     for (const item of items) {
-      if (item.kind === 'text') {
+      if (item.kind === "text") {
         if (!(item.text || item.html)) continue;
         out.push(item);
-      } else if (item.kind === 'tool' && item.tool) {
+      } else if (item.kind === "tool" && item.tool) {
         out.push(item);
-      } else if (item.kind === 'thought' && item.thought) {
+      } else if (item.kind === "thought" && item.thought) {
         out.push(item);
       }
     }
@@ -1297,35 +1561,43 @@ function visibleTimelineItems(m) {
   // Legacy shape → synthetic items
   const out = [];
   if (m.html || m.text) {
-    out.push({ kind: 'text', text: m.text || '', html: m.html || '' });
+    out.push({ kind: "text", text: m.text || "", html: m.html || "" });
   }
   if (m.tools && m.tools.length) {
-    for (const t of m.tools) out.push({ kind: 'tool', tool: t });
+    for (const t of m.tools) out.push({ kind: "tool", tool: t });
   }
   return out;
 }
 
 // ── Verb-group: consecutive toolcalls → "Read 2 files, Edited 4 files" ──
 function classifyToolVerb(t) {
-  const s = ((t && t.kind) || '') + ' ' + ((t && t.title) || '');
+  const s = ((t && t.kind) || "") + " " + ((t && t.title) || "");
   const low = s.toLowerCase();
-  if (/list.?dir|list_dir|listdir/.test(low)) return 'dir';
-  if (/search_replace|str_replace|apply.?patch|write.?file|edit|write|patch|create.?file|apply/.test(low)) {
-    return 'edit';
+  if (/list.?dir|list_dir|listdir/.test(low)) return "dir";
+  if (
+    /search_replace|str_replace|apply.?patch|write.?file|edit|write|patch|create.?file|apply/.test(
+      low,
+    )
+  ) {
+    return "edit";
   }
-  if (/grep|glob|search|find|rg\b|fuzzy/.test(low)) return 'search';
-  if (/read|open.?file|cat\b|view.?file/.test(low)) return 'file';
-  if (/web.?fetch|fetch|http|browser|web.?search|browse/.test(low)) return 'web';
-  if (/terminal|bash|shell|command|execute|run_terminal|run /.test(low)) return 'command';
-  if (/use.?tool|mcp|integration|call.?tool/.test(low)) return 'mcp';
-  return 'other';
+  if (/grep|glob|search|find|rg\b|fuzzy/.test(low)) return "search";
+  if (/read|open.?file|cat\b|view.?file/.test(low)) return "file";
+  if (/web.?fetch|fetch|http|browser|web.?search|browse/.test(low))
+    return "web";
+  if (/terminal|bash|shell|command|execute|run_terminal|run /.test(low))
+    return "command";
+  if (/use.?tool|mcp|integration|call.?tool/.test(low)) return "mcp";
+  return "other";
 }
 
 function isToolStatusRunning(status) {
-  return /run|progress|pending|in_progress|start|stream/.test(String(status || '').toLowerCase());
+  return /run|progress|pending|in_progress|start|stream/.test(
+    String(status || "").toLowerCase(),
+  );
 }
 function isToolStatusFailed(status) {
-  return /fail|error|denied|cancel/.test(String(status || '').toLowerCase());
+  return /fail|error|denied|cancel/.test(String(status || "").toLowerCase());
 }
 
 function formatToolVerbGroupLabel(tools) {
@@ -1333,24 +1605,24 @@ function formatToolVerbGroupLabel(tools) {
   let running = false;
   let failed = 0;
   const verbTable = {
-    file: ['Read', 'Reading'],
-    search: ['Searched', 'Searching'],
-    dir: ['Listed', 'Listing'],
-    edit: ['Edited', 'Editing'],
-    command: ['Ran', 'Running'],
-    web: ['Fetched', 'Fetching'],
-    mcp: ['Called', 'Calling'],
-    other: ['Ran', 'Running'],
+    file: ["Read", "Reading"],
+    search: ["Searched", "Searching"],
+    dir: ["Listed", "Listing"],
+    edit: ["Edited", "Editing"],
+    command: ["Ran", "Running"],
+    web: ["Fetched", "Fetching"],
+    mcp: ["Called", "Calling"],
+    other: ["Ran", "Running"],
   };
   const nounTable = {
-    file: ['file', 'files'],
-    search: ['pattern', 'patterns'],
-    dir: ['dir', 'dirs'],
-    edit: ['file', 'files'],
-    command: ['command', 'commands'],
-    web: ['website', 'websites'],
-    mcp: ['MCP tool', 'MCP tools'],
-    other: ['tool', 'tools'],
+    file: ["file", "files"],
+    search: ["pattern", "patterns"],
+    dir: ["dir", "dirs"],
+    edit: ["file", "files"],
+    command: ["command", "commands"],
+    web: ["website", "websites"],
+    mcp: ["MCP tool", "MCP tools"],
+    other: ["tool", "tools"],
   };
   for (const t of tools) {
     const kind = classifyToolVerb(t);
@@ -1365,10 +1637,10 @@ function formatToolVerbGroupLabel(tools) {
     const n = nounTable[b.kind] || nounTable.other;
     const verb = running ? v[1] : v[0];
     const noun = b.count === 1 ? n[0] : n[1];
-    return verb + ' ' + b.count + ' ' + noun;
+    return verb + " " + b.count + " " + noun;
   });
-  let label = parts.join(', ');
-  if (failed > 0) label += ' · ' + failed + ' failed';
+  let label = parts.join(", ");
+  if (failed > 0) label += " · " + failed + " failed";
   return { label, running, failed };
 }
 
@@ -1382,12 +1654,16 @@ function groupConsecutiveTools(items) {
   function flush() {
     if (!run.length) return;
     if (run.length === 1) {
-      out.push({ type: 'tool', tool: run[0] });
+      out.push({ type: "tool", tool: run[0] });
     } else {
       const meta = formatToolVerbGroupLabel(run);
-      const id = run.map((t) => t.id).filter(Boolean).join('|') || ('tg-' + out.length);
+      const id =
+        run
+          .map((t) => t.id)
+          .filter(Boolean)
+          .join("|") || "tg-" + out.length;
       out.push({
-        type: 'toolGroup',
+        type: "toolGroup",
         group: {
           id,
           tools: run.slice(),
@@ -1400,13 +1676,13 @@ function groupConsecutiveTools(items) {
     run = [];
   }
   for (const item of items) {
-    if (item.kind === 'tool' && item.tool) {
+    if (item.kind === "tool" && item.tool) {
       run.push(item.tool);
       continue;
     }
     flush();
-    if (item.kind === 'text') out.push({ type: 'text', item });
-    else if (item.kind === 'thought') out.push({ type: 'thought', item });
+    if (item.kind === "text") out.push({ type: "text", item });
+    else if (item.kind === "thought") out.push({ type: "thought", item });
   }
   flush();
   return out;
@@ -1417,65 +1693,82 @@ function visibleGroupedTimeline(m) {
 }
 
 function timelineNodeSig(node) {
-  if (node.type === 'text') return 't';
-  if (node.type === 'tool' && node.tool) return 'tool:' + (node.tool.id || '');
-  if (node.type === 'toolGroup' && node.group) return 'tg:' + (node.group.id || '');
-  if (node.type === 'thought' && node.item && node.item.thought) {
-    return 'th:' + (node.item.thought.id || '');
+  if (node.type === "text") return "t";
+  if (node.type === "tool" && node.tool) return "tool:" + (node.tool.id || "");
+  if (node.type === "toolGroup" && node.group)
+    return "tg:" + (node.group.id || "");
+  if (node.type === "thought" && node.item && node.item.thought) {
+    return "th:" + (node.item.thought.id || "");
   }
-  return '?';
+  return "?";
 }
 
 function domTimelineSig(timeline) {
   return Array.from(timeline.children)
-    .filter((el) => !el.classList.contains('stream-shimmer'))
+    .filter((el) => !el.classList.contains("stream-shimmer"))
     .map((el) => {
-      if (el.classList.contains('bubble')) return 't';
-      if (el.classList.contains('tool-row')) return 'tool:' + (el.dataset.toolId || '');
-      if (el.classList.contains('tool-group')) return 'tg:' + (el.dataset.groupId || '');
-      if (el.classList.contains('thought')) return 'th:' + (el.dataset.thoughtId || '');
-      return '?';
-    }).join('|');
+      if (el.classList.contains("bubble")) return "t";
+      if (el.classList.contains("tool-row"))
+        return "tool:" + (el.dataset.toolId || "");
+      if (el.classList.contains("tool-group"))
+        return "tg:" + (el.dataset.groupId || "");
+      if (el.classList.contains("thought"))
+        return "th:" + (el.dataset.thoughtId || "");
+      return "?";
+    })
+    .join("|");
 }
 
 function nodesTimelineSig(nodes) {
-  return nodes.map(timelineNodeSig).join('|');
+  return nodes.map(timelineNodeSig).join("|");
 }
 
 function renderToolGroup(group, openToolIds, openGroupIds) {
-  const d = document.createElement('details');
-  d.className = 'tool-group' +
-    (group.running ? ' running' : '') +
-    (group.failed ? ' failed' : '');
-  d.dataset.groupId = group.id || '';
+  const d = document.createElement("details");
+  d.className =
+    "tool-group" +
+    (group.running ? " running" : "") +
+    (group.failed ? " failed" : "");
+  d.dataset.groupId = group.id || "";
   d.dataset.streamKey =
-    group.label + '|' + group.running + '|' + group.failed + '|' +
-    group.tools.map((t) =>
-      (t.id || '') + ':' + (t.status || '') + ':' + (t.title || '')
-    ).join(';');
+    group.label +
+    "|" +
+    group.running +
+    "|" +
+    group.failed +
+    "|" +
+    group.tools
+      .map((t) => (t.id || "") + ":" + (t.status || "") + ":" + (t.title || ""))
+      .join(";");
   const forceOpen =
     !!group.running ||
     (openGroupIds && openGroupIds.has(group.id)) ||
     (openToolIds && group.tools.some((t) => openToolIds.has(t.id)));
   if (forceOpen) d.open = true;
-  const summary = document.createElement('summary');
+  const summary = document.createElement("summary");
   const first = group.tools[0];
-  const ico = first ? toolIconName(first) : 'tool';
-  let statusHtml = '';
+  const ico = first ? toolIconName(first) : "tool";
+  let statusHtml = "";
   if (group.running) {
-    statusHtml = statusIcon('in_progress') + '…';
+    statusHtml = statusIcon("in_progress") + "…";
   } else if (group.failed) {
-    statusHtml = statusIcon('failed') + esc(String(group.failed) + ' failed');
+    statusHtml = statusIcon("failed") + esc(String(group.failed) + " failed");
   } else {
-    statusHtml = statusIcon('completed');
+    statusHtml = statusIcon("completed");
   }
   summary.innerHTML =
-    '<span class="tool-ico">' + icon(ico) + '</span>' +
-    '<span class="tool-group-label">' + esc(group.label || '') + '</span>' +
-    '<span class="tool-status">' + statusHtml + '</span>';
+    '<span class="tool-ico">' +
+    icon(ico) +
+    "</span>" +
+    '<span class="tool-group-label">' +
+    esc(group.label || "") +
+    "</span>" +
+    '<span class="tool-status">' +
+    statusHtml +
+    "</span>";
   d.appendChild(summary);
-  const members = document.createElement('div');
-  members.className = 'tool-group-members';
+  const members = document.createElement("div");
+  members.className = "tool-group-members";
   for (const t of group.tools) {
     const open = openToolIds && openToolIds.has(t.id);
     members.appendChild(renderToolRow(t, open));
@@ -1485,27 +1778,31 @@ function renderToolGroup(group, openToolIds, openGroupIds) {
 }
 
 /** Build one timeline child for a grouped node. */
-function renderTimelineNode(node, openToolIds, openThoughtIds, openGroupIds, streamText) {
-  if (node.type === 'text' && node.item) {
-    const b = document.createElement('div');
-    b.className = 'bubble md';
-    fillTextBubble(b, node.item.text || '', node.item.html || '', {
+function renderTimelineNode(
+  node,
+  openToolIds,
+  openThoughtIds,
+  openGroupIds,
+  streamText,
+) {
+  if (node.type === "text" && node.item) {
+    const b = document.createElement("div");
+    b.className = "bubble md";
+    fillTextBubble(b, node.item.text || "", node.item.html || "", {
       stream: !!streamText,
     });
     return b;
   }
-  if (node.type === 'tool' && node.tool) {
+  if (node.type === "tool" && node.tool) {
     const open = openToolIds && openToolIds.has(node.tool.id);
     return renderToolRow(node.tool, open);
   }
-  if (node.type === 'toolGroup' && node.group) {
+  if (node.type === "toolGroup" && node.group) {
     return renderToolGroup(node.group, openToolIds, openGroupIds);
   }
-  if (node.type === 'thought' && node.item && node.item.thought) {
+  if (node.type === "thought" && node.item && node.item.thought) {
     const t = node.item.thought;
-    const open =
-      !!t.running ||
-      (openThoughtIds && openThoughtIds.has(t.id));
+    const open = !!t.running || (openThoughtIds && openThoughtIds.has(t.id));
     return renderThoughtRow(t, open);
   }
   return null;
@@ -1516,59 +1813,71 @@ function renderTimelineNode(node, openToolIds, openThoughtIds, openGroupIds, str
  * content updates. Avoids full DOM replace flicker while tokens stream.
  * Returns true if patched; false if caller should rebuild.
  */
-function patchTimelineInPlace(timeline, m, openToolIds, openThoughtIds, openGroupIds) {
+function patchTimelineInPlace(
+  timeline,
+  m,
+  openToolIds,
+  openThoughtIds,
+  openGroupIds,
+) {
   const nodes = visibleGroupedTimeline(m);
   if (nodesTimelineSig(nodes) !== domTimelineSig(timeline)) return false;
   const contentChildren = Array.from(timeline.children).filter(
-    (el) => !el.classList.contains('stream-shimmer'),
+    (el) => !el.classList.contains("stream-shimmer"),
   );
 
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
     const el = contentChildren[i];
     if (!el) return false;
-    if (node.type === 'text' && node.item) {
+    if (node.type === "text" && node.item) {
       // Only the live tail text node streams per-character.
       const streamTail = busy && i === nodes.length - 1;
-      fillTextBubble(el, node.item.text || '', node.item.html || '', {
+      fillTextBubble(el, node.item.text || "", node.item.html || "", {
         stream: streamTail,
       });
-    } else if (node.type === 'tool' && node.tool) {
+    } else if (node.type === "tool" && node.tool) {
       const t = node.tool;
       const key =
-        (t.status || '') +
-        '|' +
-        (t.title || '') +
-        '|' +
-        (t.input || '') +
-        '|' +
-        (t.output || '') +
-        '|' +
-        ((t.paths && t.paths.join(',')) || '');
+        (t.status || "") +
+        "|" +
+        (t.title || "") +
+        "|" +
+        (t.input || "") +
+        "|" +
+        (t.output || "") +
+        "|" +
+        ((t.paths && t.paths.join(",")) || "");
       if (el.dataset.streamKey !== key) {
         const wasOpen = el.open || (openToolIds && openToolIds.has(t.id));
         const next = renderToolRow(t, wasOpen);
         next.dataset.streamKey = key;
         el.replaceWith(next);
       }
-    } else if (node.type === 'toolGroup' && node.group) {
+    } else if (node.type === "toolGroup" && node.group) {
       const g = node.group;
       const key =
-        g.label + '|' + g.running + '|' + g.failed + '|' +
-        g.tools.map((t) =>
-          (t.id || '') + ':' + (t.status || '') + ':' + (t.title || '')
-        ).join(';');
+        g.label +
+        "|" +
+        g.running +
+        "|" +
+        g.failed +
+        "|" +
+        g.tools
+          .map(
+            (t) =>
+              (t.id || "") + ":" + (t.status || "") + ":" + (t.title || ""),
+          )
+          .join(";");
       if (el.dataset.streamKey !== key) {
         const wasOpen =
-          el.open ||
-          (openGroupIds && openGroupIds.has(g.id)) ||
-          !!g.running;
+          el.open || (openGroupIds && openGroupIds.has(g.id)) || !!g.running;
         const next = renderToolGroup(g, openToolIds, openGroupIds);
         if (wasOpen) next.open = true;
         next.dataset.streamKey = key;
         el.replaceWith(next);
       }
-    } else if (node.type === 'thought' && node.item && node.item.thought) {
+    } else if (node.type === "thought" && node.item && node.item.thought) {
       const th = node.item.thought;
       const forceOpen =
         !!th.running ||
@@ -1578,21 +1887,26 @@ function patchTimelineInPlace(timeline, m, openToolIds, openThoughtIds, openGrou
       el.open = forceOpen;
     }
   }
-  timeline.classList.add('stream-settled');
+  timeline.classList.add("stream-settled");
   markLatestRunningTool(timeline);
   return true;
 }
 
 /** Build timeline nodes (thoughts + text + tools) in stream order. */
 function renderAssistantTimeline(m, openToolIds, openThoughtIds, openGroupIds) {
-  const timeline = document.createElement('div');
-  timeline.className = 'assistant-timeline';
+  const timeline = document.createElement("div");
+  timeline.className = "assistant-timeline";
   const live = isLiveStreamingAssistant(m);
   const nodes = visibleGroupedTimeline(m);
   for (let i = 0; i < nodes.length; i++) {
-    const streamText = live && i === nodes.length - 1 && nodes[i].type === 'text';
+    const streamText =
+      live && i === nodes.length - 1 && nodes[i].type === "text";
     const el = renderTimelineNode(
-      nodes[i], openToolIds, openThoughtIds, openGroupIds, streamText,
+      nodes[i],
+      openToolIds,
+      openThoughtIds,
+      openGroupIds,
+      streamText,
     );
     if (el) timeline.appendChild(el);
   }
@@ -1600,7 +1914,7 @@ function renderAssistantTimeline(m, openToolIds, openThoughtIds, openGroupIds) {
   ensureStreamShimmer(timeline, m, live);
   markLatestRunningTool(timeline);
   // After first frame, only newly appended blocks (class tl-new) animate.
-  requestAnimationFrame(() => timeline.classList.add('stream-settled'));
+  requestAnimationFrame(() => timeline.classList.add("stream-settled"));
   return timeline;
 }
 
@@ -1609,11 +1923,17 @@ function renderAssistantTimeline(m, openToolIds, openThoughtIds, openGroupIds) {
  * content in place and append new nodes. Group fold (1 tool → "Read 2 files")
  * changes the prefix signature, so the caller rebuilds instead.
  */
-function appendTimelineDelta(timeline, m, openToolIds, openThoughtIds, openGroupIds) {
+function appendTimelineDelta(
+  timeline,
+  m,
+  openToolIds,
+  openThoughtIds,
+  openGroupIds,
+) {
   const nodes = visibleGroupedTimeline(m);
   // Ignore shimmer placeholder when measuring existing DOM length / signature.
   const contentChildren = Array.from(timeline.children).filter(
-    (el) => !el.classList.contains('stream-shimmer'),
+    (el) => !el.classList.contains("stream-shimmer"),
   );
   const domCount = contentChildren.length;
   if (domCount === 0 || nodes.length <= domCount) return false;
@@ -1625,41 +1945,53 @@ function appendTimelineDelta(timeline, m, openToolIds, openThoughtIds, openGroup
     const node = prefixNodes[i];
     const el = contentChildren[i];
     if (!el) return false;
-    if (node.type === 'text' && node.item) {
+    if (node.type === "text" && node.item) {
       // Prefix nodes are never the growing tail when we append after them.
-      fillTextBubble(el, node.item.text || '', node.item.html || '', {
+      fillTextBubble(el, node.item.text || "", node.item.html || "", {
         stream: false,
       });
-    } else if (node.type === 'tool' && node.tool) {
+    } else if (node.type === "tool" && node.tool) {
       const t = node.tool;
       const key =
-        (t.status || '') + '|' + (t.title || '') + '|' +
-        (t.input || '') + '|' + (t.output || '') + '|' +
-        ((t.paths && t.paths.join(',')) || '');
+        (t.status || "") +
+        "|" +
+        (t.title || "") +
+        "|" +
+        (t.input || "") +
+        "|" +
+        (t.output || "") +
+        "|" +
+        ((t.paths && t.paths.join(",")) || "");
       if (el.dataset.streamKey !== key) {
         const wasOpen = el.open || (openToolIds && openToolIds.has(t.id));
         const next = renderToolRow(t, wasOpen);
         next.dataset.streamKey = key;
         el.replaceWith(next);
       }
-    } else if (node.type === 'toolGroup' && node.group) {
+    } else if (node.type === "toolGroup" && node.group) {
       const g = node.group;
       const key =
-        g.label + '|' + g.running + '|' + g.failed + '|' +
-        g.tools.map((t) =>
-          (t.id || '') + ':' + (t.status || '') + ':' + (t.title || '')
-        ).join(';');
+        g.label +
+        "|" +
+        g.running +
+        "|" +
+        g.failed +
+        "|" +
+        g.tools
+          .map(
+            (t) =>
+              (t.id || "") + ":" + (t.status || "") + ":" + (t.title || ""),
+          )
+          .join(";");
       if (el.dataset.streamKey !== key) {
         const wasOpen =
-          el.open ||
-          (openGroupIds && openGroupIds.has(g.id)) ||
-          !!g.running;
+          el.open || (openGroupIds && openGroupIds.has(g.id)) || !!g.running;
         const next = renderToolGroup(g, openToolIds, openGroupIds);
         if (wasOpen) next.open = true;
         next.dataset.streamKey = key;
         el.replaceWith(next);
       }
-    } else if (node.type === 'thought' && node.item && node.item.thought) {
+    } else if (node.type === "thought" && node.item && node.item.thought) {
       const th = node.item.thought;
       const forceOpen =
         !!th.running ||
@@ -1670,24 +2002,31 @@ function appendTimelineDelta(timeline, m, openToolIds, openThoughtIds, openGroup
     }
   }
   // Drop shimmer before appending real content so it never sits under nodes.
-  timeline.querySelectorAll(':scope > .stream-shimmer').forEach((el) => el.remove());
+  timeline
+    .querySelectorAll(":scope > .stream-shimmer")
+    .forEach((el) => el.remove());
   for (let i = domCount; i < nodes.length; i++) {
-    const streamText = busy && i === nodes.length - 1 && nodes[i].type === 'text';
+    const streamText =
+      busy && i === nodes.length - 1 && nodes[i].type === "text";
     const el = renderTimelineNode(
-      nodes[i], openToolIds, openThoughtIds, openGroupIds, streamText,
+      nodes[i],
+      openToolIds,
+      openThoughtIds,
+      openGroupIds,
+      streamText,
     );
     if (!el) continue;
-    el.classList.add('tl-new');
+    el.classList.add("tl-new");
     timeline.appendChild(el);
   }
-  timeline.classList.add('stream-settled');
+  timeline.classList.add("stream-settled");
   markLatestRunningTool(timeline);
   return true;
 }
 
 function collectOpenToolIds(wrap) {
   const ids = new Set();
-  wrap.querySelectorAll('details.tool-row[open]').forEach((el) => {
+  wrap.querySelectorAll("details.tool-row[open]").forEach((el) => {
     const id = el.dataset.toolId;
     if (id) ids.add(id);
   });
@@ -1696,7 +2035,7 @@ function collectOpenToolIds(wrap) {
 
 function collectOpenThoughtIds(wrap) {
   const ids = new Set();
-  wrap.querySelectorAll('details.thought[open]').forEach((el) => {
+  wrap.querySelectorAll("details.thought[open]").forEach((el) => {
     const id = el.dataset.thoughtId;
     if (id) ids.add(id);
   });
@@ -1705,7 +2044,7 @@ function collectOpenThoughtIds(wrap) {
 
 function collectOpenGroupIds(wrap) {
   const ids = new Set();
-  wrap.querySelectorAll('details.tool-group[open]').forEach((el) => {
+  wrap.querySelectorAll("details.tool-group[open]").forEach((el) => {
     const id = el.dataset.groupId;
     if (id) ids.add(id);
   });
@@ -1718,93 +2057,98 @@ function collectOpenGroupIds(wrap) {
  * empty optimistic assistant from first paint.
  */
 function messageCopyPlain(m) {
-  if (!m) return '';
-  if (m.type === 'user' || m.type === 'system') return (m.text || '').trim();
-  if (m.type === 'assistant') {
+  if (!m) return "";
+  if (m.type === "user" || m.type === "system") return (m.text || "").trim();
+  if (m.type === "assistant") {
     if (m.text && String(m.text).trim()) return String(m.text);
     const items = Array.isArray(m.items) ? m.items : [];
     const parts = [];
     for (const it of items) {
-      if (it && it.kind === 'text' && it.text) parts.push(it.text);
+      if (it && it.kind === "text" && it.text) parts.push(it.text);
     }
-    return parts.join('\n\n').trim();
+    return parts.join("\n\n").trim();
   }
-  return '';
+  return "";
 }
 
 /** Visible text from rendered assistant bubbles (fallback when model data is stale). */
 function messageCopyFromDom(wrap) {
-  if (!wrap) return '';
-  if (wrap.classList.contains('user') || wrap.classList.contains('system')) {
-    const b = wrap.querySelector(':scope > .bubble');
-    return ((b && (b.innerText || b.textContent)) || '').trim();
+  if (!wrap) return "";
+  if (wrap.classList.contains("user") || wrap.classList.contains("system")) {
+    const b = wrap.querySelector(":scope > .bubble");
+    return ((b && (b.innerText || b.textContent)) || "").trim();
   }
   // Assistant: text bubbles only (skip tools / thoughts).
   const bubbles = wrap.querySelectorAll(
-    ':scope > .assistant-timeline > .bubble.md, :scope > .bubble.md',
+    ":scope > .assistant-timeline > .bubble.md, :scope > .bubble.md",
   );
   const parts = [];
   bubbles.forEach((b) => {
-    let t = (b.innerText || b.textContent || '').trim();
+    let t = (b.innerText || b.textContent || "").trim();
     // Drop code-block "Copy" button label if present at start of pre text.
-    t = t.replace(/^Copy\n?/gm, '').trim();
+    t = t.replace(/^Copy\n?/gm, "").trim();
     if (t) parts.push(t);
   });
-  return parts.join('\n\n').trim();
+  return parts.join("\n\n").trim();
 }
 
 function flashCopyBtn(copyBtn) {
-  copyBtn.classList.add('copied');
-  copyBtn.innerHTML = icon('check');
+  copyBtn.classList.add("copied");
+  copyBtn.innerHTML = icon("check");
   setTimeout(() => {
-    copyBtn.classList.remove('copied');
-    copyBtn.innerHTML = icon('copy');
+    copyBtn.classList.remove("copied");
+    copyBtn.innerHTML = icon("copy");
   }, 1200);
 }
 
 function renderMsgActions(m) {
-  const bar = document.createElement('div');
-  bar.className = 'msg-actions';
-  bar.setAttribute('role', 'toolbar');
-  bar.setAttribute('aria-label', 'Message actions');
+  const bar = document.createElement("div");
+  bar.className = "msg-actions";
+  bar.setAttribute("role", "toolbar");
+  bar.setAttribute("aria-label", "Message actions");
 
-  const copyBtn = document.createElement('button');
-  copyBtn.type = 'button';
-  copyBtn.className = 'msg-act-copy msg-act-icon';
-  copyBtn.title = 'Copy';
-  copyBtn.setAttribute('aria-label', 'Copy message');
-  copyBtn.innerHTML = icon('copy');
-  copyBtn.addEventListener('click', (e) => {
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = "msg-act-copy msg-act-icon";
+  copyBtn.title = "Copy";
+  copyBtn.setAttribute("aria-label", "Copy message");
+  copyBtn.innerHTML = icon("copy");
+  copyBtn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    const wrap = copyBtn.closest('.msg');
+    const wrap = copyBtn.closest(".msg");
     const live =
       (m && m.id && allMessages.find((x) => x && x.id === m.id)) || m;
     let text = messageCopyPlain(live);
     if (!text) text = messageCopyFromDom(wrap);
     if (!text) return;
     // Host clipboard is reliable in VS Code webviews; navigator is best-effort.
-    vscode.postMessage({ type: 'copyText', text: text });
+    vscode.postMessage({ type: "copyText", text: text });
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).catch(function () { /* host already has it */ });
+      navigator.clipboard.writeText(text).catch(function () {
+        /* host already has it */
+      });
     }
     flashCopyBtn(copyBtn);
   });
   bar.appendChild(copyBtn);
 
-  if (m.type === 'user') {
-    const editBtn = document.createElement('button');
-    editBtn.type = 'button';
-    editBtn.className = 'msg-act-edit msg-act-icon';
-    editBtn.title = 'Edit and resubmit';
-    editBtn.setAttribute('aria-label', 'Edit message');
-    editBtn.innerHTML = icon('pencil');
-    editBtn.addEventListener('click', (e) => {
+  if (m.type === "user") {
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "msg-act-edit msg-act-icon";
+    editBtn.title = "Edit and resubmit";
+    editBtn.setAttribute("aria-label", "Edit message");
+    editBtn.innerHTML = icon("pencil");
+    editBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
       // Resolve from allMessages so we always use the live list entry.
       const live =
-        (m && m.id && allMessages.find((x) => x && x.id === m.id && x.type === 'user')) || m;
+        (m &&
+          m.id &&
+          allMessages.find((x) => x && x.id === m.id && x.type === "user")) ||
+        m;
       enterUserMessageEdit(live);
     });
     bar.appendChild(editBtn);
@@ -1821,27 +2165,27 @@ let rewindOpen = false;
 let rewindIndex = 0;
 const REWIND_MODES = [
   {
-    mode: 'all',
-    label: 'Both conversation and file changes',
-    detail: 'Rewind chat and revert file snapshots from this prompt',
+    mode: "all",
+    label: "Both conversation and file changes",
+    detail: "Rewind chat and revert file snapshots from this prompt",
   },
   {
-    mode: 'conversation_only',
-    label: 'Conversation only',
-    detail: 'Rewind chat only — leave workspace files as they are',
+    mode: "conversation_only",
+    label: "Conversation only",
+    detail: "Rewind chat only — leave workspace files as they are",
   },
 ];
 
-const editBanner = document.getElementById('edit-banner');
-const editBannerCancel = document.getElementById('edit-banner-cancel');
-const rewindPopover = document.getElementById('rewind-popover');
-const rewindList = document.getElementById('rewind-list');
+const editBanner = document.getElementById("edit-banner");
+const editBannerCancel = document.getElementById("edit-banner-cancel");
+const rewindPopover = document.getElementById("rewind-popover");
+const rewindList = document.getElementById("rewind-list");
 
 function updateEditBanner() {
   if (!editBanner) return;
   editBanner.hidden = !pendingEdit;
   if (pendingEdit) {
-    composer.placeholder = 'Edit message… (Enter resubmit · Esc cancel)';
+    composer.placeholder = "Edit message… (Enter resubmit · Esc cancel)";
   } else {
     syncComposerPlaceholder();
   }
@@ -1862,7 +2206,7 @@ function cancelPendingEdit() {
   if (!pendingEdit) return;
   pendingEdit = null;
   closeRewindPopover();
-  composer.value = '';
+  composer.value = "";
   autosizeComposer();
   updateEditBanner();
   renderMessages(allMessages, { force: true });
@@ -1870,7 +2214,7 @@ function cancelPendingEdit() {
 }
 
 function enterUserMessageEdit(m) {
-  if (!m || m.type !== 'user' || !m.id) return;
+  if (!m || m.type !== "user" || !m.id) return;
   if (mentionOpen) closeMention();
   if (slashOpen) closeSlash();
   if (modelOpen) closeModelPopover();
@@ -1878,27 +2222,31 @@ function enterUserMessageEdit(m) {
   closeRewindPopover();
   pendingEdit = {
     id: m.id,
-    promptIndex: typeof m.promptIndex === 'number' ? m.promptIndex : undefined,
-    original: (m.text || '').trim(),
+    promptIndex: typeof m.promptIndex === "number" ? m.promptIndex : undefined,
+    original: (m.text || "").trim(),
   };
-  composer.value = m.text || '';
+  composer.value = m.text || "";
   autosizeComposer();
   updateEditBanner();
   // Highlight source bubble
   renderMessages(allMessages, { force: true });
   composer.focus();
   const len = composer.value.length;
-  try { composer.setSelectionRange(len, len); } catch (_) { /* ignore */ }
+  try {
+    composer.setSelectionRange(len, len);
+  } catch (_) {
+    /* ignore */
+  }
 }
 
 function restoreEditComposer(id, text) {
-  const draft = text != null ? String(text) : '';
-  const src = allMessages.find((m) => m && m.id === id && m.type === 'user');
+  const draft = text != null ? String(text) : "";
+  const src = allMessages.find((m) => m && m.id === id && m.type === "user");
   pendingEdit = {
     id: id,
     promptIndex:
-      src && typeof src.promptIndex === 'number' ? src.promptIndex : undefined,
-    original: src ? (src.text || '').trim() : '',
+      src && typeof src.promptIndex === "number" ? src.promptIndex : undefined,
+    original: src ? (src.text || "").trim() : "",
   };
   composer.value = draft;
   autosizeComposer();
@@ -1914,16 +2262,25 @@ function closeRewindPopover() {
 
 function renderRewindList() {
   if (!rewindList) return;
-  rewindList.innerHTML = REWIND_MODES.map((item, i) =>
-    '<button type="button" class="rewind-item' + (i === rewindIndex ? ' active' : '') +
-    '" data-rewind-idx="' + i + '" role="option" aria-selected="' +
-    (i === rewindIndex ? 'true' : 'false') + '">' +
-    '<span class="rewind-label">' + esc(item.label) + '</span>' +
-    '<span class="rewind-detail">' + esc(item.detail) + '</span>' +
-    '</button>'
-  ).join('');
-  const active = rewindList.querySelector('.rewind-item.active');
-  if (active) active.scrollIntoView({ block: 'nearest' });
+  rewindList.innerHTML = REWIND_MODES.map(
+    (item, i) =>
+      '<button type="button" class="rewind-item' +
+      (i === rewindIndex ? " active" : "") +
+      '" data-rewind-idx="' +
+      i +
+      '" role="option" aria-selected="' +
+      (i === rewindIndex ? "true" : "false") +
+      '">' +
+      '<span class="rewind-label">' +
+      esc(item.label) +
+      "</span>" +
+      '<span class="rewind-detail">' +
+      esc(item.detail) +
+      "</span>" +
+      "</button>",
+  ).join("");
+  const active = rewindList.querySelector(".rewind-item.active");
+  if (active) active.scrollIntoView({ block: "nearest" });
 }
 
 function openRewindPopover() {
@@ -1940,7 +2297,8 @@ function openRewindPopover() {
 
 function moveRewind(delta) {
   if (!REWIND_MODES.length) return;
-  rewindIndex = (rewindIndex + delta + REWIND_MODES.length) % REWIND_MODES.length;
+  rewindIndex =
+    (rewindIndex + delta + REWIND_MODES.length) % REWIND_MODES.length;
   renderRewindList();
 }
 
@@ -1956,12 +2314,12 @@ function acceptRewind(idx) {
   closeRewindPopover();
   pendingEdit = null;
   updateEditBanner();
-  composer.value = '';
+  composer.value = "";
   autosizeComposer();
   updateSendStopButton();
   renderMessages(allMessages, { force: true });
   vscode.postMessage({
-    type: 'editMessage',
+    type: "editMessage",
     id: pe.id,
     text: text,
     promptIndex: pe.promptIndex,
@@ -1982,46 +2340,52 @@ function anyDropdownOpen() {
  * - Toggle buttons (#btn-model / #btn-effort) are excluded so click can toggle
  * - Composer keeps slash/mention open (filter still driven by typing)
  */
-document.addEventListener('pointerdown', (e) => {
-  if (!anyDropdownOpen() && !permissionOpen && !questionOpen) return;
-  const t = e.target;
-  if (!t || !t.closest) return;
+document.addEventListener(
+  "pointerdown",
+  (e) => {
+    if (!anyDropdownOpen() && !permissionOpen && !questionOpen) return;
+    const t = e.target;
+    if (!t || !t.closest) return;
 
-  // Inside any popover surface — leave open.
-  if (t.closest(
-    '#model-popover, #effort-popover, #slash-popover, #mention-popover, ' +
-    '#rewind-popover, #permission-popover, #question-popover',
-  )) {
-    return;
-  }
+    // Inside any popover surface — leave open.
+    if (
+      t.closest(
+        "#model-popover, #effort-popover, #slash-popover, #mention-popover, " +
+          "#rewind-popover, #permission-popover, #question-popover",
+      )
+    ) {
+      return;
+    }
 
-  // Model/effort toggle buttons: their click handlers own open/close.
-  if (t.closest('#btn-model, #btn-effort')) {
-    return;
-  }
+    // Model/effort toggle buttons: their click handlers own open/close.
+    if (t.closest("#btn-model, #btn-effort")) {
+      return;
+    }
 
-  // Composer / shell: dismiss model/effort/rewind but keep slash/mention.
-  if (t.closest('#composer, .composer-shell, #edit-banner')) {
+    // Composer / shell: dismiss model/effort/rewind but keep slash/mention.
+    if (t.closest("#composer, .composer-shell, #edit-banner")) {
+      if (modelOpen) closeModelPopover();
+      if (effortOpen) closeEffortPopover();
+      if (rewindOpen) closeRewindPopover();
+      return;
+    }
+
     if (modelOpen) closeModelPopover();
     if (effortOpen) closeEffortPopover();
+    if (slashOpen) closeSlash();
+    if (mentionOpen) closeMention();
     if (rewindOpen) closeRewindPopover();
-    return;
-  }
 
-  if (modelOpen) closeModelPopover();
-  if (effortOpen) closeEffortPopover();
-  if (slashOpen) closeSlash();
-  if (mentionOpen) closeMention();
-  if (rewindOpen) closeRewindPopover();
-
-  // Modal dialogs: outside click = cancel (same as Esc).
-  if (permissionOpen) {
-    closePermissionPopover({ outcome: 'cancelled' });
-  }
-  if (questionOpen) {
-    closeQuestionPopover({ outcome: 'cancelled' });
-  }
-}, true);
+    // Modal dialogs: outside click = cancel (same as Esc).
+    if (permissionOpen) {
+      closePermissionPopover({ outcome: "cancelled" });
+    }
+    if (questionOpen) {
+      closeQuestionPopover({ outcome: "cancelled" });
+    }
+  },
+  true,
+);
 
 /** Send path when a composer edit is pending: open mode popover or no-op. */
 function trySubmitPendingEdit() {
@@ -2038,23 +2402,23 @@ function trySubmitPendingEdit() {
 }
 
 if (editBannerCancel) {
-  editBannerCancel.addEventListener('click', () => cancelPendingEdit());
+  editBannerCancel.addEventListener("click", () => cancelPendingEdit());
 }
 if (rewindList) {
-  rewindList.addEventListener('mousedown', (e) => e.preventDefault());
-  rewindList.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-rewind-idx]');
+  rewindList.addEventListener("mousedown", (e) => e.preventDefault());
+  rewindList.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-rewind-idx]");
     if (!btn) return;
-    acceptRewind(Number(btn.getAttribute('data-rewind-idx')));
+    acceptRewind(Number(btn.getAttribute("data-rewind-idx")));
   });
 }
 
 /** True when this assistant is the live streaming tail (last assistant while busy). */
 function isLiveStreamingAssistant(m) {
-  if (!busy || !m || m.type !== 'assistant') return false;
+  if (!busy || !m || m.type !== "assistant") return false;
   for (let i = allMessages.length - 1; i >= 0; i--) {
     const x = allMessages[i];
-    if (x && x.type === 'assistant') {
+    if (x && x.type === "assistant") {
       return x.id === m.id;
     }
   }
@@ -2062,49 +2426,51 @@ function isLiveStreamingAssistant(m) {
 }
 
 function renderOneMessage(m, isNew) {
-  const wrap = document.createElement('div');
-  wrap.className = 'msg ' + m.type + (isNew ? ' msg-enter' : '');
-  wrap.dataset.msgId = m.id || '';
-  if (m.type === 'user' && typeof m.promptIndex === 'number') {
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + m.type + (isNew ? " msg-enter" : "");
+  wrap.dataset.msgId = m.id || "";
+  if (m.type === "user" && typeof m.promptIndex === "number") {
     wrap.dataset.promptIndex = String(m.promptIndex);
   }
   if (isLiveStreamingAssistant(m)) {
-    wrap.classList.add('streaming');
+    wrap.classList.add("streaming");
   }
-  if (m.type === 'user') {
+  if (m.type === "user") {
     if (m.chips && m.chips.length) {
-      const chips = document.createElement('div');
-      chips.className = 'chips';
-      chips.innerHTML = m.chips.map(c =>
-        '<span class="chip">' + icon(chipIcon(c)) + esc(c) + '</span>'
-      ).join('');
+      const chips = document.createElement("div");
+      chips.className = "chips";
+      chips.innerHTML = m.chips
+        .map(
+          (c) => '<span class="chip">' + icon(chipIcon(c)) + esc(c) + "</span>",
+        )
+        .join("");
       wrap.appendChild(chips);
     }
     if (pendingEdit && m.id === pendingEdit.id) {
-      wrap.classList.add('editing');
+      wrap.classList.add("editing");
     }
-    const b = document.createElement('div');
-    b.className = 'bubble';
-    b.textContent = m.text || '';
+    const b = document.createElement("div");
+    b.className = "bubble";
+    b.textContent = m.text || "";
     wrap.appendChild(b);
     wrap.appendChild(renderMsgActions(m));
-  } else if (m.type === 'assistant') {
+  } else if (m.type === "assistant") {
     // Thoughts live on the timeline with tools/text (TUI scrollback order).
     wrap.appendChild(renderAssistantTimeline(m, null, null, null));
     wrap.appendChild(renderMsgActions(m));
   } else {
     // System lifecycle/info: full-width dashed separator with text in the middle.
-    const b = document.createElement('div');
-    b.className = 'bubble system-sep';
-    const left = document.createElement('span');
-    left.className = 'system-sep-line';
-    left.setAttribute('aria-hidden', 'true');
-    const text = document.createElement('span');
-    text.className = 'system-sep-text';
-    text.textContent = m.text || '';
-    const right = document.createElement('span');
-    right.className = 'system-sep-line';
-    right.setAttribute('aria-hidden', 'true');
+    const b = document.createElement("div");
+    b.className = "bubble system-sep";
+    const left = document.createElement("span");
+    left.className = "system-sep-line";
+    left.setAttribute("aria-hidden", "true");
+    const text = document.createElement("span");
+    text.className = "system-sep-text";
+    text.textContent = m.text || "";
+    const right = document.createElement("span");
+    right.className = "system-sep-line";
+    right.setAttribute("aria-hidden", "true");
     b.appendChild(left);
     b.appendChild(text);
     b.appendChild(right);
@@ -2117,13 +2483,18 @@ function renderOneMessage(m, isNew) {
 function isStreamingTailUpdate(prev, next) {
   if (!next.length || prev.length !== next.length) return false;
   const last = next[next.length - 1];
-  if (!last || last.type !== 'assistant') return false;
+  if (!last || last.type !== "assistant") return false;
   for (let i = 0; i < next.length - 1; i++) {
-    const a = prev[i], b = next[i];
+    const a = prev[i],
+      b = next[i];
     if (!a || !b || a.id !== b.id || a.type !== b.type) return false;
   }
   const prevLast = prev[prev.length - 1];
-  return !!(prevLast && prevLast.id === last.id && prevLast.type === 'assistant');
+  return !!(
+    prevLast &&
+    prevLast.id === last.id &&
+    prevLast.type === "assistant"
+  );
 }
 
 /** Message ids already mounted — used so re-renders don't re-play enter anim. */
@@ -2156,8 +2527,12 @@ function requestStickScroll(opts) {
     const max = Math.max(0, messagesEl.scrollHeight - messagesEl.clientHeight);
     const delta = max - messagesEl.scrollTop;
     if (delta <= 1) return;
-    if (smooth && delta > 80 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      messagesEl.scrollTo({ top: max, behavior: 'smooth' });
+    if (
+      smooth &&
+      delta > 80 &&
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      messagesEl.scrollTo({ top: max, behavior: "smooth" });
     } else {
       messagesEl.scrollTop = max;
     }
@@ -2167,10 +2542,12 @@ function requestStickScroll(opts) {
 function patchLastAssistant(m) {
   // Prefer data-msg-id; fall back to last .msg.assistant in the list.
   let wrap = m.id
-    ? messagesEl.querySelector('.msg.assistant[data-msg-id="' + CSS.escape(m.id) + '"]')
+    ? messagesEl.querySelector(
+        '.msg.assistant[data-msg-id="' + CSS.escape(m.id) + '"]',
+      )
     : null;
   if (!wrap) {
-    const nodes = messagesEl.querySelectorAll('.msg.assistant');
+    const nodes = messagesEl.querySelectorAll(".msg.assistant");
     wrap = nodes.length ? nodes[nodes.length - 1] : null;
   }
   if (!wrap) return false;
@@ -2181,12 +2558,14 @@ function patchLastAssistant(m) {
   const openGroupIds = collectOpenGroupIds(wrap);
 
   // Drop legacy top-level thought (pre-timeline); everything is in the timeline now.
-  wrap.querySelectorAll(':scope > details.thought').forEach((el) => el.remove());
+  wrap
+    .querySelectorAll(":scope > details.thought")
+    .forEach((el) => el.remove());
 
   const live = isLiveStreamingAssistant(m);
-  wrap.classList.toggle('streaming', live);
+  wrap.classList.toggle("streaming", live);
 
-  const oldTimeline = wrap.querySelector(':scope > .assistant-timeline');
+  const oldTimeline = wrap.querySelector(":scope > .assistant-timeline");
   if (oldTimeline) {
     // Empty live assistant → shimmer only (avoid thrashing rebuilds).
     if (visibleGroupedTimeline(m).length === 0) {
@@ -2195,15 +2574,38 @@ function patchLastAssistant(m) {
       return true;
     }
     // Real content arriving — drop shimmer, then patch/append/rebuild.
-    oldTimeline.querySelectorAll(':scope > .stream-shimmer').forEach((el) => el.remove());
-    if (patchTimelineInPlace(oldTimeline, m, openToolIds, openThoughtIds, openGroupIds)) {
+    oldTimeline
+      .querySelectorAll(":scope > .stream-shimmer")
+      .forEach((el) => el.remove());
+    if (
+      patchTimelineInPlace(
+        oldTimeline,
+        m,
+        openToolIds,
+        openThoughtIds,
+        openGroupIds,
+      )
+    ) {
       return true;
     }
-    if (appendTimelineDelta(oldTimeline, m, openToolIds, openThoughtIds, openGroupIds)) {
+    if (
+      appendTimelineDelta(
+        oldTimeline,
+        m,
+        openToolIds,
+        openThoughtIds,
+        openGroupIds,
+      )
+    ) {
       return true;
     }
   }
-  const nextTimeline = renderAssistantTimeline(m, openToolIds, openThoughtIds, openGroupIds);
+  const nextTimeline = renderAssistantTimeline(
+    m,
+    openToolIds,
+    openThoughtIds,
+    openGroupIds,
+  );
   if (oldTimeline) oldTimeline.replaceWith(nextTimeline);
   else wrap.appendChild(nextTimeline);
   return true;
@@ -2213,7 +2615,9 @@ function renderMessages(messages, opts) {
   const force = !!(opts && opts.force);
   const next = messages || [];
   const stick = shouldStickToBottom(
-    messagesEl.scrollTop, messagesEl.scrollHeight, messagesEl.clientHeight,
+    messagesEl.scrollTop,
+    messagesEl.scrollHeight,
+    messagesEl.clientHeight,
     busy ? 96 : 48,
   );
 
@@ -2236,7 +2640,7 @@ function renderMessages(messages, opts) {
   const prevIds = new Set(allMessages.map((m) => m && m.id).filter(Boolean));
   allMessages = next;
   emptyEl.hidden = allMessages.length > 0;
-  messagesEl.innerHTML = '';
+  messagesEl.innerHTML = "";
 
   let start = 0;
   let end = allMessages.length;
@@ -2250,9 +2654,9 @@ function renderMessages(messages, opts) {
     });
     start = w.start;
     end = w.end;
-    const top = document.createElement('div');
-    top.className = 'vspacer';
-    top.style.height = (start * EST_ROW) + 'px';
+    const top = document.createElement("div");
+    top.className = "vspacer";
+    top.style.height = start * EST_ROW + "px";
     messagesEl.appendChild(top);
   }
 
@@ -2265,9 +2669,9 @@ function renderMessages(messages, opts) {
   }
 
   if (allMessages.length > VIRT_THRESHOLD) {
-    const bottom = document.createElement('div');
-    bottom.className = 'vspacer';
-    bottom.style.height = ((allMessages.length - end) * EST_ROW) + 'px';
+    const bottom = document.createElement("div");
+    bottom.className = "vspacer";
+    bottom.style.height = (allMessages.length - end) * EST_ROW + "px";
     messagesEl.appendChild(bottom);
   }
 
@@ -2287,75 +2691,98 @@ function renderMessages(messages, opts) {
 
 /** Drop streaming class + skeleton shimmer from every non-live assistant. */
 function settleNonLiveAssistantStreams() {
-  const nodes = messagesEl.querySelectorAll('.msg.assistant');
+  const nodes = messagesEl.querySelectorAll(".msg.assistant");
   if (!nodes.length) return;
   const last = nodes[nodes.length - 1];
   nodes.forEach((el) => {
     const live = busy && el === last;
-    el.classList.toggle('streaming', live);
+    el.classList.toggle("streaming", live);
     if (!live) {
-      el.querySelectorAll('.stream-shimmer').forEach((s) => s.remove());
-      el.querySelectorAll('.tool-latest').forEach((t) => t.classList.remove('tool-latest'));
+      el.querySelectorAll(".stream-shimmer").forEach((s) => s.remove());
+      el.querySelectorAll(".tool-latest").forEach((t) =>
+        t.classList.remove("tool-latest"),
+      );
     }
   });
   if (busy && last) {
     const lastMsg =
       allMessages.length > 0 ? allMessages[allMessages.length - 1] : null;
-    if (lastMsg && lastMsg.type === 'assistant') {
-      const tl = last.querySelector(':scope > .assistant-timeline');
+    if (lastMsg && lastMsg.type === "assistant") {
+      const tl = last.querySelector(":scope > .assistant-timeline");
       if (tl) ensureStreamShimmer(tl, lastMsg, true);
     }
   }
 }
 
 function renderSticky() {
-  let html = '';
+  let html = "";
   // Always use the same chip shell for auto on/off (same icons + label + action slot)
   // so toggling does not reflow the sticky row.
   if (autoChip) {
     const on = !!autoAttachEnabled;
     const title = on
-      ? 'Auto-attached from focused editor — click × to disable'
-      : 'Auto-attach off — click to enable for focused file';
+      ? "Auto-attached from focused editor — click × to disable"
+      : "Auto-attach off — click to enable for focused file";
     const action = on
       ? '<button type="button" data-auto-toggle="0" title="Disable auto-attach">×</button>'
       : '<button type="button" data-auto-toggle="1" title="Enable auto-attach">' +
-          icon('plus') + '</button>';
+        icon("plus") +
+        "</button>";
     html +=
-      '<span class="chip chip-auto' + (on ? '' : ' chip-auto-off') + '" title="' + esc(title) + '"' +
-        (on ? '' : ' data-auto-toggle="1" role="button" tabindex="0"') + '>' +
-        '<span class="chip-badge" aria-hidden="true">' + icon('focus-2') + '</span>' +
-        icon(chipIcon(autoChip.label)) +
-        '<span class="chip-label">' + esc(autoChip.label) + '</span>' +
-        action +
-      '</span>';
+      '<span class="chip chip-auto' +
+      (on ? "" : " chip-auto-off") +
+      '" title="' +
+      esc(title) +
+      '"' +
+      (on ? "" : ' data-auto-toggle="1" role="button" tabindex="0"') +
+      ">" +
+      '<span class="chip-badge" aria-hidden="true">' +
+      icon("focus-2") +
+      "</span>" +
+      icon(chipIcon(autoChip.label)) +
+      '<span class="chip-label">' +
+      esc(autoChip.label) +
+      "</span>" +
+      action +
+      "</span>";
   }
-  html += stickyChips.map(c =>
-    '<span class="chip">' + icon(chipIcon(c.label)) +
-    '<span class="chip-label">' + esc(c.label) + '</span>' +
-    '<button type="button" data-chip-id="' + esc(c.id) + '" title="Remove">×</button></span>'
-  ).join('');
+  html += stickyChips
+    .map(
+      (c) =>
+        '<span class="chip">' +
+        icon(chipIcon(c.label)) +
+        '<span class="chip-label">' +
+        esc(c.label) +
+        "</span>" +
+        '<button type="button" data-chip-id="' +
+        esc(c.id) +
+        '" title="Remove">×</button></span>',
+    )
+    .join("");
   stickyEl.innerHTML = html;
 }
 
 function setMeta(text, spinning) {
-  meta.innerHTML = (spinning ? icon('loader', 'ti-spin') : icon('circle-dashed')) +
-    '<span>' + esc(text) + '</span>';
+  meta.innerHTML =
+    (spinning ? icon("loader", "ti-spin") : icon("circle-dashed")) +
+    "<span>" +
+    esc(text) +
+    "</span>";
 }
 
 // Top-right context bar — TUI style: 8.5K / 200K (used / context window).
 function renderContextBar(c) {
   if (!c || !c.visible || !c.text) {
     ctxBarEl.hidden = true;
-    ctxBarEl.textContent = '';
-    ctxBarEl.className = '';
-    ctxBarEl.removeAttribute('title');
+    ctxBarEl.textContent = "";
+    ctxBarEl.className = "";
+    ctxBarEl.removeAttribute("title");
     return;
   }
   ctxBarEl.hidden = false;
   ctxBarEl.textContent = c.text;
-  ctxBarEl.className = 'level-' + (c.level || 'ok');
-  ctxBarEl.title = c.title || ('Context ' + c.text);
+  ctxBarEl.className = "level-" + (c.level || "ok");
+  ctxBarEl.title = c.title || "Context " + c.text;
 }
 
 function renderTurnStatus(s) {
@@ -2364,33 +2791,33 @@ function renderTurnStatus(s) {
 
   if (!s.visible) {
     turnStatusEl.hidden = true;
-    turnStatusEl.classList.remove('busy');
+    turnStatusEl.classList.remove("busy");
     return;
   }
   turnStatusEl.hidden = false;
-  turnStatusEl.classList.toggle('busy', !!s.spinning);
-  tsProcess.textContent = s.process || '';
-  tsTime.textContent = s.time || '';
-  tsTokens.textContent = s.tokens || '';
-  tsCost.textContent = s.cost || '';
-  tsTime.style.display = s.time ? '' : 'none';
-  tsTokens.style.display = s.tokens ? '' : 'none';
-  tsCost.style.display = s.cost ? '' : 'none';
+  turnStatusEl.classList.toggle("busy", !!s.spinning);
+  tsProcess.textContent = s.process || "";
+  tsTime.textContent = s.time || "";
+  tsTokens.textContent = s.tokens || "";
+  tsCost.textContent = s.cost || "";
+  tsTime.style.display = s.time ? "" : "none";
+  tsTokens.style.display = s.tokens ? "" : "none";
+  tsCost.style.display = s.cost ? "" : "none";
 }
 
 function setBlockingLoad(active, message) {
-  const el = document.getElementById('blocking-load');
-  const label = document.getElementById('blocking-load-label');
+  const el = document.getElementById("blocking-load");
+  const label = document.getElementById("blocking-load-label");
   if (!el) return;
   if (active) {
-    if (label) label.textContent = message || 'Loading…';
+    if (label) label.textContent = message || "Loading…";
     el.hidden = false;
-    el.classList.add('active');
-    el.setAttribute('aria-busy', 'true');
+    el.classList.add("active");
+    el.setAttribute("aria-busy", "true");
   } else {
     el.hidden = true;
-    el.classList.remove('active');
-    el.setAttribute('aria-busy', 'false');
+    el.classList.remove("active");
+    el.setAttribute("aria-busy", "false");
   }
 }
 
@@ -2399,16 +2826,16 @@ function setBusy(b) {
   busy = b;
   composer.disabled = cliMissing;
   syncComposerPlaceholder();
-  if (b) setMeta('working…', true);
-  else setMeta(meta.dataset.base || 'idle', false);
+  if (b) setMeta("working…", true);
+  else setMeta(meta.dataset.base || "idle", false);
   // Always re-scope stream UI to the live tail (or clear when idle).
   settleNonLiveAssistantStreams();
   if (!b && wasBusy) {
     // Turn ended: drop any leftover shimmer + re-render tail to full markdown.
-    messagesEl.querySelectorAll('.stream-shimmer').forEach((el) => el.remove());
+    messagesEl.querySelectorAll(".stream-shimmer").forEach((el) => el.remove());
     const lastMsg =
       allMessages.length > 0 ? allMessages[allMessages.length - 1] : null;
-    if (lastMsg && lastMsg.type === 'assistant') {
+    if (lastMsg && lastMsg.type === "assistant") {
       patchLastAssistant(lastMsg);
     }
   }
@@ -2423,46 +2850,64 @@ function setBusy(b) {
  */
 function updateSendStopButton() {
   const empty = !composer.value.trim();
-  const asStop = busy && empty && !cliMissing && !queueEditActive;
-  const asQueue = busy && !empty && !cliMissing && !queueEditActive && !pendingEdit;
-  sendBtn.classList.toggle('is-stop', asStop);
+  const asStop = busy && empty && !cliMissing && !queueEditActive && !planOpen;
+  const asQueue =
+    busy &&
+    !empty &&
+    !cliMissing &&
+    !queueEditActive &&
+    !pendingEdit &&
+    !planOpen;
+  const asPlanFeedback = planOpen && !cliMissing;
+  sendBtn.classList.toggle("is-stop", asStop);
   // Allow send while busy (queues). Only block when CLI missing.
+  // Plan mode: enable even when empty (no-op) so button stays usable for feedback.
   sendBtn.disabled =
-    cliMissing || (!busy && empty && !pendingEdit && !queueEditActive);
+    cliMissing ||
+    (!planOpen && !busy && empty && !pendingEdit && !queueEditActive);
   if (cliMissing) {
     sendBtn.innerHTML = '<i class="ti ti-send" aria-hidden="true"></i>';
-    sendBtn.title = 'Install Grok Build CLI first';
-    sendBtn.setAttribute('aria-label', 'Send (disabled — CLI missing)');
+    sendBtn.title = "Install Grok Build CLI first";
+    sendBtn.setAttribute("aria-label", "Send (disabled — CLI missing)");
+  } else if (asPlanFeedback) {
+    sendBtn.innerHTML = '<i class="ti ti-edit" aria-hidden="true"></i>';
+    sendBtn.title = empty
+      ? "Type plan feedback, then press Enter / Request changes"
+      : "Request plan changes with composer text (Enter)";
+    sendBtn.setAttribute("aria-label", "Request plan changes");
   } else if (asStop) {
     sendBtn.innerHTML = '<i class="ti ti-player-stop" aria-hidden="true"></i>';
-    sendBtn.title = 'Stop current turn (Esc)';
-    sendBtn.setAttribute('aria-label', 'Stop');
+    sendBtn.title = "Stop current turn (Esc)";
+    sendBtn.setAttribute("aria-label", "Stop");
   } else if (queueEditActive) {
     sendBtn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i>';
-    sendBtn.title = 'Save queued prompt edit';
-    sendBtn.setAttribute('aria-label', 'Save queue edit');
+    sendBtn.title = "Save queued prompt edit";
+    sendBtn.setAttribute("aria-label", "Save queue edit");
   } else if (pendingEdit) {
     sendBtn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i>';
-    sendBtn.title = 'Resubmit edited message (choose rewind mode)';
-    sendBtn.setAttribute('aria-label', 'Resubmit');
+    sendBtn.title = "Resubmit edited message (choose rewind mode)";
+    sendBtn.setAttribute("aria-label", "Resubmit");
   } else if (asQueue) {
     sendBtn.innerHTML = '<i class="ti ti-stack-2" aria-hidden="true"></i>';
-    sendBtn.title = 'Queue follow-up (runs after current turn)';
-    sendBtn.setAttribute('aria-label', 'Queue');
+    sendBtn.title = "Queue follow-up (runs after current turn)";
+    sendBtn.setAttribute("aria-label", "Queue");
   } else {
     sendBtn.innerHTML = '<i class="ti ti-send" aria-hidden="true"></i>';
-    sendBtn.title = 'Send';
-    sendBtn.setAttribute('aria-label', 'Send');
+    sendBtn.title = "Send";
+    sendBtn.setAttribute("aria-label", "Send");
   }
 }
 
 function defaultComposerPlaceholder() {
-  if (cliMissing) return 'Install Grok Build CLI to chat…';
-  if (queueEditActive) return 'Edit queued prompt… (Enter save · Esc cancel)';
-  if (busy) {
-    return 'Queue a follow-up… (Enter queues · empty Enter stops)';
+  if (cliMissing) return "Install Grok Build CLI to chat…";
+  if (planOpen) {
+    return "Plan feedback… (Enter = request changes · ⌘/Ctrl+Enter approve · Esc abandon)";
   }
-  return 'Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)';
+  if (queueEditActive) return "Edit queued prompt… (Enter save · Esc cancel)";
+  if (busy) {
+    return "Queue a follow-up… (Enter queues · empty Enter stops)";
+  }
+  return "Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)";
 }
 
 function syncComposerPlaceholder() {
@@ -2472,47 +2917,55 @@ function syncComposerPlaceholder() {
 
 function renderQueue(entries) {
   queueEntries = Array.isArray(entries) ? entries.slice() : [];
-  const pane = document.getElementById('queue-pane');
-  const list = document.getElementById('queue-list');
-  const title = document.getElementById('queue-title');
+  const pane = document.getElementById("queue-pane");
+  const list = document.getElementById("queue-list");
+  const title = document.getElementById("queue-title");
   if (!pane || !list || !title) return;
   const n = queueEntries.length;
   if (n === 0) {
-    pane.classList.remove('visible');
-    list.innerHTML = '';
-    title.textContent = 'Queued';
+    pane.classList.remove("visible");
+    list.innerHTML = "";
+    title.textContent = "Queued";
     syncComposerPlaceholder();
     updateSendStopButton();
     return;
   }
-  pane.classList.add('visible');
-  title.textContent = n === 1 ? '1 queued' : n + ' queued';
-  list.innerHTML = '';
+  pane.classList.add("visible");
+  title.textContent = n === 1 ? "1 queued" : n + " queued";
+  list.innerHTML = "";
   queueEntries.forEach((e, i) => {
-    const row = document.createElement('div');
-    row.className = 'queue-row' + (e.optimistic ? ' optimistic' : '');
+    const row = document.createElement("div");
+    row.className = "queue-row" + (e.optimistic ? " optimistic" : "");
     row.dataset.id = e.id;
-    row.setAttribute('role', 'listitem');
-    const kind = (e.kind && e.kind !== 'prompt') ? e.kind : '';
-    const line = e.firstLine || e.text || '';
+    row.setAttribute("role", "listitem");
+    const kind = e.kind && e.kind !== "prompt" ? e.kind : "";
+    const line = e.firstLine || e.text || "";
     row.innerHTML =
-      '<span class="q-pos">#' + (i + 1) + '</span>' +
-      '<span class="q-body" title="' + esc(e.text || '') + '">' +
-        (kind ? '<span class="q-kind">' + esc(kind) + '</span>' : '') +
-        '<span class="q-text">' + esc(line) + '</span>' +
-      '</span>' +
+      '<span class="q-pos">#' +
+      (i + 1) +
+      "</span>" +
+      '<span class="q-body" title="' +
+      esc(e.text || "") +
+      '">' +
+      (kind ? '<span class="q-kind">' + esc(kind) + "</span>" : "") +
+      '<span class="q-text">' +
+      esc(line) +
+      "</span>" +
+      "</span>" +
       '<span class="q-actions">' +
-        '<button type="button" data-q-act="up" title="Move up" aria-label="Move up" ' +
-          (i === 0 ? 'disabled' : '') + '><i class="ti ti-arrow-up" aria-hidden="true"></i></button>' +
-        '<button type="button" data-q-act="down" title="Move down" aria-label="Move down" ' +
-          (i === n - 1 ? 'disabled' : '') + '><i class="ti ti-arrow-down" aria-hidden="true"></i></button>' +
-        '<button type="button" data-q-act="now" title="Send now" aria-label="Send now">' +
-          '<i class="ti ti-bolt" aria-hidden="true"></i></button>' +
-        '<button type="button" data-q-act="edit" title="Edit" aria-label="Edit">' +
-          '<i class="ti ti-pencil" aria-hidden="true"></i></button>' +
-        '<button type="button" data-q-act="remove" title="Remove" aria-label="Remove">' +
-          '<i class="ti ti-x" aria-hidden="true"></i></button>' +
-      '</span>';
+      '<button type="button" data-q-act="up" title="Move up" aria-label="Move up" ' +
+      (i === 0 ? "disabled" : "") +
+      '><i class="ti ti-arrow-up" aria-hidden="true"></i></button>' +
+      '<button type="button" data-q-act="down" title="Move down" aria-label="Move down" ' +
+      (i === n - 1 ? "disabled" : "") +
+      '><i class="ti ti-arrow-down" aria-hidden="true"></i></button>' +
+      '<button type="button" data-q-act="now" title="Send now" aria-label="Send now">' +
+      '<i class="ti ti-bolt" aria-hidden="true"></i></button>' +
+      '<button type="button" data-q-act="edit" title="Edit" aria-label="Edit">' +
+      '<i class="ti ti-pencil" aria-hidden="true"></i></button>' +
+      '<button type="button" data-q-act="remove" title="Remove" aria-label="Remove">' +
+      '<i class="ti ti-x" aria-hidden="true"></i></button>' +
+      "</span>";
     list.appendChild(row);
   });
   syncComposerPlaceholder();
@@ -2521,10 +2974,10 @@ function renderQueue(entries) {
 
 function setQueueEditMode(active, text) {
   queueEditActive = !!active;
-  const ban = document.getElementById('queue-edit-banner');
-  if (ban) ban.classList.toggle('visible', queueEditActive);
+  const ban = document.getElementById("queue-edit-banner");
+  if (ban) ban.classList.toggle("visible", queueEditActive);
   if (queueEditActive) {
-    composer.value = text || '';
+    composer.value = text || "";
     autosizeComposer();
     composer.focus();
   }
@@ -2534,50 +2987,55 @@ function setQueueEditMode(active, text) {
 
 function setReview(count) {
   if (count > 0) {
-    reviewBar.classList.add('visible');
-    reviewLabel.textContent = 'Review edits (' + count + ')';
+    reviewBar.classList.add("visible");
+    reviewLabel.textContent = "Review edits (" + count + ")";
   } else {
-    reviewBar.classList.remove('visible');
+    reviewBar.classList.remove("visible");
   }
 }
 
-messagesEl.addEventListener('scroll', () => {
+messagesEl.addEventListener("scroll", () => {
   if (allMessages.length > VIRT_THRESHOLD) {
     const stick = shouldStickToBottom(
-      messagesEl.scrollTop, messagesEl.scrollHeight, messagesEl.clientHeight
+      messagesEl.scrollTop,
+      messagesEl.scrollHeight,
+      messagesEl.clientHeight,
     );
     if (!stick) renderMessages(allMessages);
   }
 });
 
-messagesEl.addEventListener('click', (e) => {
-  const a = e.target.closest('a[data-path]');
+messagesEl.addEventListener("click", (e) => {
+  const a = e.target.closest("a[data-path]");
   if (a) {
     e.preventDefault();
-    vscode.postMessage({ type: 'openFile', path: a.getAttribute('data-path') });
+    vscode.postMessage({ type: "openFile", path: a.getAttribute("data-path") });
     return;
   }
-  const d = e.target.closest('[data-diff]');
+  const d = e.target.closest("[data-diff]");
   if (d) {
     e.preventDefault();
-    vscode.postMessage({ type: 'openDiff', path: d.getAttribute('data-diff') });
+    vscode.postMessage({ type: "openDiff", path: d.getAttribute("data-diff") });
   }
 });
 
-stickyEl.addEventListener('click', (e) => {
-  const toggle = e.target.closest('[data-auto-toggle]');
+stickyEl.addEventListener("click", (e) => {
+  const toggle = e.target.closest("[data-auto-toggle]");
   if (toggle) {
-    const enabled = toggle.getAttribute('data-auto-toggle') === '1';
-    vscode.postMessage({ type: 'setAutoAttach', enabled });
+    const enabled = toggle.getAttribute("data-auto-toggle") === "1";
+    vscode.postMessage({ type: "setAutoAttach", enabled });
     return;
   }
-  const btn = e.target.closest('[data-chip-id]');
+  const btn = e.target.closest("[data-chip-id]");
   if (btn) {
-    vscode.postMessage({ type: 'removeChip', id: btn.getAttribute('data-chip-id') });
+    vscode.postMessage({
+      type: "removeChip",
+      id: btn.getAttribute("data-chip-id"),
+    });
   }
 });
 
-sendBtn.addEventListener('click', () => {
+sendBtn.addEventListener("click", () => {
   if (mentionOpen) closeMention();
   if (slashOpen) closeSlash();
   if (modelOpen) closeModelPopover();
@@ -2586,87 +3044,115 @@ sendBtn.addEventListener('click', () => {
     acceptRewind(rewindIndex);
     return;
   }
+  // Plan approval: composer text is plan feedback (Request changes).
+  if (planOpen) {
+    const text = composer.value.trim();
+    if (!text) {
+      // Empty → nudge user to type feedback (do not Stop / Approve).
+      composer.focus();
+      return;
+    }
+    submitPlanRequestChanges();
+    return;
+  }
   // Busy + empty → Stop (inject/send-now is only on queue-row bolt buttons)
   if (busy && !composer.value.trim() && !queueEditActive) {
-    vscode.postMessage({ type: 'cancel' });
+    vscode.postMessage({ type: "cancel" });
     return;
   }
   if (trySubmitPendingEdit()) return;
   const text = composer.value.trim();
   // Allow send while busy: host queues a follow-up (TUI mid-turn Enter).
   if (!text) return;
-  vscode.postMessage({ type: 'send', text });
-  composer.value = '';
+  vscode.postMessage({ type: "send", text });
+  composer.value = "";
   autosizeComposer();
   updateSendStopButton();
 });
 
-btnModel.addEventListener('click', () => {
+btnModel.addEventListener("click", () => {
   if (modelOpen) closeModelPopover();
   else openModelPopover();
 });
-btnEffort.addEventListener('click', () => {
+btnEffort.addEventListener("click", () => {
   if (effortOpen) closeEffortPopover();
   else openEffortPopover();
 });
-document.getElementById('empty-start').addEventListener('click', () =>
-  vscode.postMessage({ type: 'startAgent' }));
-document.getElementById('empty-auth').addEventListener('click', () => {
-  const btn = document.getElementById('empty-auth');
-  const action = (btn && btn.getAttribute('data-action')) || 'login';
-  vscode.postMessage({ type: action === 'logout' ? 'logout' : 'login' });
+document
+  .getElementById("empty-start")
+  .addEventListener("click", () => vscode.postMessage({ type: "startAgent" }));
+document.getElementById("empty-auth").addEventListener("click", () => {
+  const btn = document.getElementById("empty-auth");
+  const action = (btn && btn.getAttribute("data-action")) || "login";
+  vscode.postMessage({ type: action === "logout" ? "logout" : "login" });
 });
-document.getElementById('empty-copy-install')?.addEventListener('click', () =>
-  vscode.postMessage({ type: 'copyInstallCommand' }));
-document.getElementById('empty-install-cmd')?.addEventListener('click', () =>
-  vscode.postMessage({ type: 'copyInstallCommand' }));
-document.getElementById('empty-install-cmd')?.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' || e.key === ' ') {
-    e.preventDefault();
-    vscode.postMessage({ type: 'copyInstallCommand' });
-  }
-});
-document.getElementById('empty-recheck')?.addEventListener('click', () =>
-  vscode.postMessage({ type: 'recheckCli' }));
-document.getElementById('empty-open-docs')?.addEventListener('click', () =>
-  vscode.postMessage({ type: 'openInstallDocs' }));
-document.getElementById('empty-set-path')?.addEventListener('click', () =>
-  vscode.postMessage({ type: 'setBinaryPath' }));
-document.getElementById('btn-review').addEventListener('click', () =>
-  vscode.postMessage({ type: 'reviewEdits' }));
+document
+  .getElementById("empty-copy-install")
+  ?.addEventListener("click", () =>
+    vscode.postMessage({ type: "copyInstallCommand" }),
+  );
+document
+  .getElementById("empty-install-cmd")
+  ?.addEventListener("click", () =>
+    vscode.postMessage({ type: "copyInstallCommand" }),
+  );
+document
+  .getElementById("empty-install-cmd")
+  ?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      vscode.postMessage({ type: "copyInstallCommand" });
+    }
+  });
+document
+  .getElementById("empty-recheck")
+  ?.addEventListener("click", () => vscode.postMessage({ type: "recheckCli" }));
+document
+  .getElementById("empty-open-docs")
+  ?.addEventListener("click", () =>
+    vscode.postMessage({ type: "openInstallDocs" }),
+  );
+document
+  .getElementById("empty-set-path")
+  ?.addEventListener("click", () =>
+    vscode.postMessage({ type: "setBinaryPath" }),
+  );
+document
+  .getElementById("btn-review")
+  .addEventListener("click", () => vscode.postMessage({ type: "reviewEdits" }));
 
-mentionList.addEventListener('mousedown', (e) => {
+mentionList.addEventListener("mousedown", (e) => {
   // Prevent composer blur before click completes.
   e.preventDefault();
 });
-mentionList.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-idx]');
+mentionList.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-idx]");
   if (!btn) return;
-  acceptMention(Number(btn.getAttribute('data-idx')));
+  acceptMention(Number(btn.getAttribute("data-idx")));
 });
-slashList.addEventListener('mousedown', (e) => {
+slashList.addEventListener("mousedown", (e) => {
   e.preventDefault();
 });
-slashList.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-slash-idx]');
+slashList.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-slash-idx]");
   if (!btn) return;
-  acceptSlash(Number(btn.getAttribute('data-slash-idx')));
+  acceptSlash(Number(btn.getAttribute("data-slash-idx")));
 });
-modelList.addEventListener('mousedown', (e) => {
+modelList.addEventListener("mousedown", (e) => {
   e.preventDefault();
 });
-modelList.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-model-idx]');
+modelList.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-model-idx]");
   if (!btn) return;
-  acceptModel(Number(btn.getAttribute('data-model-idx')));
+  acceptModel(Number(btn.getAttribute("data-model-idx")));
 });
-effortList.addEventListener('mousedown', (e) => {
+effortList.addEventListener("mousedown", (e) => {
   e.preventDefault();
 });
-effortList.addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-effort-idx]');
+effortList.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-effort-idx]");
   if (!btn) return;
-  acceptEffort(Number(btn.getAttribute('data-effort-idx')));
+  acceptEffort(Number(btn.getAttribute("data-effort-idx")));
 });
 
 /** Grow #composer with content; cap at max-height and scroll when full. */
@@ -2674,27 +3160,27 @@ function autosizeComposer() {
   if (!composer) return;
   const minPx = 44; // match #composer min-height
   const maxPx = 180;
-  composer.style.height = 'auto';
+  composer.style.height = "auto";
   const sh = composer.scrollHeight;
   const next = Math.min(Math.max(sh, minPx), maxPx);
-  composer.style.height = next + 'px';
-  composer.style.overflowY = sh > maxPx ? 'auto' : 'hidden';
+  composer.style.height = next + "px";
+  composer.style.overflowY = sh > maxPx ? "auto" : "hidden";
 }
 
-composer.addEventListener('input', () => {
+composer.addEventListener("input", () => {
   autosizeComposer();
   syncComposerMenus();
   updateSendStopButton();
 });
-composer.addEventListener('click', () => syncComposerMenus());
-composer.addEventListener('keyup', (e) => {
-  if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+composer.addEventListener("click", () => syncComposerMenus());
+composer.addEventListener("keyup", (e) => {
+  if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
     syncComposerMenus();
   }
 });
 
-btnMode.addEventListener('click', () => {
-  vscode.postMessage({ type: 'cycleMode' });
+btnMode.addEventListener("click", () => {
+  vscode.postMessage({ type: "cycleMode" });
 });
 
 /**
@@ -2702,184 +3188,202 @@ btnMode.addEventListener('click', () => {
  * Model/effort open from header buttons without focusing the composer — Esc and
  * arrow keys must work even when focus is not in the input.
  */
-window.addEventListener('keydown', (e) => {
-  if (permissionOpen) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      movePermission(1);
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      movePermission(-1);
-      return;
-    }
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      if (permissionItems.length) {
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (permissionOpen) {
+      if (e.key === "ArrowDown") {
         e.preventDefault();
-        acceptPermission(permissionIndex);
+        movePermission(1);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        movePermission(-1);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        if (permissionItems.length) {
+          e.preventDefault();
+          acceptPermission(permissionIndex);
+          return;
+        }
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closePermissionPopover({ outcome: "cancelled" });
         return;
       }
     }
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closePermissionPopover({ outcome: 'cancelled' });
-      return;
-    }
-  }
-  if (questionOpen) {
-    const inNotes = document.activeElement === questionNotes;
-    if (!inNotes && e.key === 'ArrowDown') {
-      e.preventDefault();
-      moveQuestion(1);
-      return;
-    }
-    if (!inNotes && e.key === 'ArrowUp') {
-      e.preventDefault();
-      moveQuestion(-1);
-      return;
-    }
-    if (!inNotes && (e.key === ' ' || e.key === 'Spacebar')) {
-      e.preventDefault();
-      toggleQuestionOption(questionIndex);
-      return;
-    }
-    if (!inNotes && e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      acceptQuestion();
-      return;
-    }
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeQuestionPopover({ outcome: 'cancelled' });
-      return;
-    }
-  }
-  if (modelOpen) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      moveModel(1);
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      moveModel(-1);
-      return;
-    }
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      if (modelItems.length) {
+    if (questionOpen) {
+      const inNotes = document.activeElement === questionNotes;
+      if (!inNotes && e.key === "ArrowDown") {
         e.preventDefault();
-        acceptModel(modelIndex);
+        moveQuestion(1);
+        return;
+      }
+      if (!inNotes && e.key === "ArrowUp") {
+        e.preventDefault();
+        moveQuestion(-1);
+        return;
+      }
+      if (!inNotes && (e.key === " " || e.key === "Spacebar")) {
+        e.preventDefault();
+        toggleQuestionOption(questionIndex);
+        return;
+      }
+      if (!inNotes && e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        acceptQuestion();
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeQuestionPopover({ outcome: "cancelled" });
         return;
       }
     }
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeModelPopover();
-      return;
-    }
-  }
-  if (effortOpen) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      moveEffort(1);
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      moveEffort(-1);
-      return;
-    }
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      if (effortItems.length) {
+    if (planOpen) {
+      // ⌘/Ctrl+Enter → approve; Esc → abandon.
+      // Plain Enter is handled on composer → Request changes via sendBtn.
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
-        acceptEffort(effortIndex);
+        closePlanPanel({ outcome: "approved" });
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closePlanPanel({ outcome: "abandoned" });
         return;
       }
     }
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeEffortPopover();
-      return;
-    }
-  }
-  if (rewindOpen) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      moveRewind(1);
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      moveRewind(-1);
-      return;
-    }
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      e.preventDefault();
-      acceptRewind(rewindIndex);
-      return;
-    }
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeRewindPopover();
-      return;
-    }
-  }
-  if (slashOpen) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      moveSlash(1);
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      moveSlash(-1);
-      return;
-    }
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      if (slashItems.length) {
+    if (modelOpen) {
+      if (e.key === "ArrowDown") {
         e.preventDefault();
-        acceptSlash(slashIndex);
+        moveModel(1);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        moveModel(-1);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        if (modelItems.length) {
+          e.preventDefault();
+          acceptModel(modelIndex);
+          return;
+        }
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeModelPopover();
         return;
       }
     }
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeSlash();
-      return;
-    }
-  }
-  if (mentionOpen) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      moveMention(1);
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      moveMention(-1);
-      return;
-    }
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      if (mentionItems.length) {
+    if (effortOpen) {
+      if (e.key === "ArrowDown") {
         e.preventDefault();
-        acceptMention(mentionIndex);
+        moveEffort(1);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        moveEffort(-1);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        if (effortItems.length) {
+          e.preventDefault();
+          acceptEffort(effortIndex);
+          return;
+        }
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeEffortPopover();
         return;
       }
     }
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeMention();
-      return;
+    if (rewindOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        moveRewind(1);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        moveRewind(-1);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        acceptRewind(rewindIndex);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeRewindPopover();
+        return;
+      }
     }
-  }
-}, true);
+    if (slashOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        moveSlash(1);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        moveSlash(-1);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        if (slashItems.length) {
+          e.preventDefault();
+          acceptSlash(slashIndex);
+          return;
+        }
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeSlash();
+        return;
+      }
+    }
+    if (mentionOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        moveMention(1);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        moveMention(-1);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        if (mentionItems.length) {
+          e.preventDefault();
+          acceptMention(mentionIndex);
+          return;
+        }
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeMention();
+        return;
+      }
+    }
+  },
+  true,
+);
 
-composer.addEventListener('keydown', (e) => {
+composer.addEventListener("keydown", (e) => {
   // TUI Shift+Tab: cycle Normal → Plan → Always-Approve (even with draft text).
-  if (e.key === 'Tab' && e.shiftKey) {
+  if (e.key === "Tab" && e.shiftKey) {
     e.preventDefault();
-    vscode.postMessage({ type: 'cycleMode' });
+    vscode.postMessage({ type: "cycleMode" });
     return;
   }
   // Popover nav/Esc handled on window capture above — do not also Send/Cancel.
@@ -2894,72 +3398,80 @@ composer.addEventListener('keydown', (e) => {
   ) {
     return;
   }
-  if (pendingEdit && e.key === 'Escape') {
+  if (pendingEdit && e.key === "Escape") {
     e.preventDefault();
     cancelPendingEdit();
     return;
   }
-  if (queueEditActive && e.key === 'Escape') {
+  if (queueEditActive && e.key === "Escape") {
     e.preventDefault();
-    vscode.postMessage({ type: 'queueEditCancel' });
+    vscode.postMessage({ type: "queueEditCancel" });
     setQueueEditMode(false);
-    composer.value = '';
+    composer.value = "";
     autosizeComposer();
     return;
   }
-  if (e.key === 'Enter' && !e.shiftKey) {
+  if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     // Enter with empty input while busy → send-now / stop; else send/queue
     sendBtn.click();
   }
-  if (e.key === 'Escape' && busy && !queueEditActive) {
-    vscode.postMessage({ type: 'cancel' });
+  if (e.key === "Escape" && busy && !queueEditActive) {
+    vscode.postMessage({ type: "cancel" });
   }
 });
 
 // Queue pane actions
-const queueListEl = document.getElementById('queue-list');
-const queueClearBtn = document.getElementById('queue-clear');
-const queueEditCancelBtn = document.getElementById('queue-edit-cancel');
+const queueListEl = document.getElementById("queue-list");
+const queueClearBtn = document.getElementById("queue-clear");
+const queueEditCancelBtn = document.getElementById("queue-edit-cancel");
 if (queueListEl) {
-  queueListEl.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-q-act]');
+  queueListEl.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-q-act]");
     if (!btn) return;
-    const row = btn.closest('.queue-row');
+    const row = btn.closest(".queue-row");
     if (!row) return;
     const id = row.dataset.id;
-    const act = btn.getAttribute('data-q-act');
+    const act = btn.getAttribute("data-q-act");
     const entry = queueEntries.find((x) => x.id === id);
     if (!entry) return;
-    if (act === 'remove') {
-      vscode.postMessage({ type: 'queueRemove', id, expectedVersion: entry.version || 0 });
-    } else if (act === 'now') {
-      vscode.postMessage({ type: 'queueInterject', id, expectedVersion: entry.version || 0 });
-    } else if (act === 'edit') {
-      vscode.postMessage({ type: 'queueEditStart', id });
-    } else if (act === 'up' || act === 'down') {
+    if (act === "remove") {
+      vscode.postMessage({
+        type: "queueRemove",
+        id,
+        expectedVersion: entry.version || 0,
+      });
+    } else if (act === "now") {
+      vscode.postMessage({
+        type: "queueInterject",
+        id,
+        expectedVersion: entry.version || 0,
+      });
+    } else if (act === "edit") {
+      vscode.postMessage({ type: "queueEditStart", id });
+    } else if (act === "up" || act === "down") {
       const ids = queueEntries.map((x) => x.id);
       const idx = ids.indexOf(id);
       if (idx < 0) return;
-      const j = act === 'up' ? idx - 1 : idx + 1;
+      const j = act === "up" ? idx - 1 : idx + 1;
       if (j < 0 || j >= ids.length) return;
       const tmp = ids[idx];
       ids[idx] = ids[j];
       ids[j] = tmp;
-      vscode.postMessage({ type: 'queueReorder', orderedIds: ids });
+      vscode.postMessage({ type: "queueReorder", orderedIds: ids });
     }
   });
 }
 if (queueClearBtn) {
-  queueClearBtn.addEventListener('click', () => {
-    vscode.postMessage({ type: 'queueClear' });
+  queueClearBtn.addEventListener("click", () => {
+    vscode.postMessage({ type: "queueClear" });
   });
 }
 if (queueEditCancelBtn) {
-  queueEditCancelBtn.addEventListener('click', () => {
-    vscode.postMessage({ type: 'queueEditCancel' });
+  queueEditCancelBtn.addEventListener("click", () => {
+    vscode.postMessage({ type: "queueEditCancel" });
     setQueueEditMode(false);
-    composer.value = '';
+    composer.value = "";
     autosizeComposer();
   });
 }
@@ -2968,10 +3480,10 @@ if (queueEditCancelBtn) {
 autosizeComposer();
 updateSendStopButton();
 
-window.addEventListener('message', (event) => {
+window.addEventListener("message", (event) => {
   const msg = event.data;
   if (!msg || !msg.type) return;
-  if (msg.type === 'init') {
+  if (msg.type === "init") {
     renderMessages(msg.messages || []);
     stickyChips = msg.stickyChips || [];
     autoAttachEnabled = msg.autoAttachEnabled !== false;
@@ -2981,74 +3493,75 @@ window.addEventListener('message', (event) => {
     applyModelsState(msg);
     applyModeState(msg);
     const base = !msg.cliFound
-      ? 'cli missing'
-      : (msg.agentState || 'idle') +
-        (msg.agentDetail ? ' · ' + String(msg.agentDetail).slice(0, 12) : '');
+      ? "cli missing"
+      : (msg.agentState || "idle") +
+        (msg.agentDetail ? " · " + String(msg.agentDetail).slice(0, 12) : "");
     meta.dataset.base = base;
     setBusy(!!msg.busy);
     if (msg.turnStatus) renderTurnStatus(msg.turnStatus);
     if (msg.context) renderContextBar(msg.context);
     if (msg.queue) renderQueue(msg.queue.entries || []);
-    updateEmptyAuthUi(!!msg.hasAuth, msg.authSummary || '');
+    updateEmptyAuthUi(!!msg.hasAuth, msg.authSummary || "");
     updateEmptyCliUi(
       msg.cliFound !== false,
-      msg.installCommand || '',
-      msg.installTypicalPath || '',
+      msg.installCommand || "",
+      msg.installTypicalPath || "",
     );
     // Always show empty install panel when CLI missing (even with leftover messages).
     emptyEl.hidden = msg.cliFound !== false && (msg.messages || []).length > 0;
-  } else if (msg.type === 'messages') {
+  } else if (msg.type === "messages") {
     renderMessages(msg.messages || []);
-  } else if (msg.type === 'queue') {
+  } else if (msg.type === "queue") {
     renderQueue(msg.entries || []);
-  } else if (msg.type === 'streamTail') {
+  } else if (msg.type === "streamTail") {
     // New turn injected — keep shimmer only on the live assistant tail.
     settleNonLiveAssistantStreams();
-  } else if (msg.type === 'queueEditMode') {
-    setQueueEditMode(!!msg.active, msg.text || '');
-  } else if (msg.type === 'restoreEditComposer') {
+  } else if (msg.type === "queueEditMode") {
+    setQueueEditMode(!!msg.active, msg.text || "");
+  } else if (msg.type === "restoreEditComposer") {
     restoreEditComposer(msg.id, msg.text);
-  } else if (msg.type === 'busy') {
+  } else if (msg.type === "busy") {
     setBusy(!!msg.busy);
-  } else if (msg.type === 'blockingLoad') {
-    setBlockingLoad(!!msg.active, msg.message || '');
-  } else if (msg.type === 'turnStatus') {
+  } else if (msg.type === "blockingLoad") {
+    setBlockingLoad(!!msg.active, msg.message || "");
+  } else if (msg.type === "turnStatus") {
     renderTurnStatus(msg);
-  } else if (msg.type === 'contextBar') {
+  } else if (msg.type === "contextBar") {
     renderContextBar(msg);
-  } else if (msg.type === 'models') {
+  } else if (msg.type === "models") {
     applyModelsState(msg);
-  } else if (msg.type === 'mode') {
+  } else if (msg.type === "mode") {
     applyModeState(msg);
-  } else if (msg.type === 'agentState') {
-    const base = (msg.state || 'idle') +
-      (msg.detail ? ' · ' + String(msg.detail).slice(0, 12) : '');
+  } else if (msg.type === "agentState") {
+    const base =
+      (msg.state || "idle") +
+      (msg.detail ? " · " + String(msg.detail).slice(0, 12) : "");
     meta.dataset.base = base;
     if (!busy) setMeta(base, false);
-  } else if (msg.type === 'stickyChips') {
+  } else if (msg.type === "stickyChips") {
     stickyChips = msg.chips || [];
     renderSticky();
-  } else if (msg.type === 'autoContext') {
+  } else if (msg.type === "autoContext") {
     autoAttachEnabled = !!msg.enabled;
     autoChip = msg.chip || null;
     renderSticky();
-  } else if (msg.type === 'review') {
+  } else if (msg.type === "review") {
     setReview(msg.count || 0);
-  } else if (msg.type === 'openMention') {
+  } else if (msg.type === "openMention") {
     composer.focus();
     const pos = composer.selectionStart || 0;
     const v = composer.value;
     if (!detectAtContext(v, pos)) {
-      const insert = (pos === 0 || /\s/.test(v[pos - 1] || '')) ? '@' : ' @';
+      const insert = pos === 0 || /\s/.test(v[pos - 1] || "") ? "@" : " @";
       composer.value = v.slice(0, pos) + insert + v.slice(pos);
       const next = pos + insert.length;
       composer.setSelectionRange(next, next);
       autosizeComposer();
     }
     syncMentionFromComposer();
-  } else if (msg.type === 'openModel') {
+  } else if (msg.type === "openModel") {
     openModelPopover();
-  } else if (msg.type === 'mentionResults') {
+  } else if (msg.type === "mentionResults") {
     if (msg.requestId !== mentionRequestId) return;
     mentionItems = msg.items || [];
     mentionIndex = 0;
@@ -3056,7 +3569,7 @@ window.addEventListener('message', (event) => {
       mentionOpen = true;
     }
     renderMentionList();
-  } else if (msg.type === 'slashResults') {
+  } else if (msg.type === "slashResults") {
     if (msg.requestId !== slashRequestId) return;
     slashItems = msg.items || [];
     slashIndex = 0;
@@ -3064,15 +3577,19 @@ window.addEventListener('message', (event) => {
       slashOpen = true;
     }
     renderSlashList();
-  } else if (msg.type === 'permissionPrompt') {
+  } else if (msg.type === "permissionPrompt") {
     openPermissionPrompt(msg);
-  } else if (msg.type === 'closePermissionPrompt') {
+  } else if (msg.type === "closePermissionPrompt") {
     closePermissionPopover(null);
-  } else if (msg.type === 'questionPrompt') {
+  } else if (msg.type === "questionPrompt") {
     openQuestionPrompt(msg);
-  } else if (msg.type === 'closeQuestionPrompt') {
+  } else if (msg.type === "closeQuestionPrompt") {
     closeQuestionPopover(null);
+  } else if (msg.type === "planApproval") {
+    openPlanPanel(msg);
+  } else if (msg.type === "closePlanApproval") {
+    closePlanPanel(null);
   }
 });
 
-vscode.postMessage({ type: 'ready' });
+vscode.postMessage({ type: "ready" });

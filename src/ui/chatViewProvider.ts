@@ -77,6 +77,12 @@ import {
   type PermissionPromptResult,
   type QuestionPromptPayload,
 } from "./interactivePrompt";
+import {
+  exitPlanModeResponse,
+  type ExitPlanModePromptPayload,
+  type ExitPlanModeResponse,
+} from "../agent/exitPlanMode";
+import { bannerTextForEvent } from "../agent/xaiSessionNotification";
 
 type UiMessage =
   | {
@@ -164,6 +170,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         timer?: ReturnType<typeof setTimeout>;
       }
     | undefined;
+  /** Pending exit_plan_mode popover. */
+  private pendingPlan:
+    | {
+        promptId: number;
+        resolve: (r: ExitPlanModeResponse) => void;
+        timer?: ReturnType<typeof setTimeout>;
+      }
+    | undefined;
   /** Centered loading indicator (start / new session) — nest-safe. */
   private blockingLoadCount = 0;
   /** Prompt ids already rendered as user bubbles (idle optimistic or queue adopt). */
@@ -182,8 +196,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.supportsSecondarySidebar = options?.supportsSecondarySidebar ?? true;
     this.agent.setPermissionPromptUi((p) => this.showPermissionPrompt(p));
     this.agent.setQuestionPromptUi((p) => this.showQuestionPrompt(p));
+    this.agent.setPlanApprovalUi((p) => this.showPlanApproval(p));
     this.disposables.push(
       this.agent.onSessionUpdate((n) => this.handleSessionUpdate(n)),
+      this.agent.onXaiSessionEvent((n) => this.handleXaiSessionEvent(n)),
       this.agent.onQueueChange((q) => this.handleQueueChange(q)),
       this.agent.onBusyChange((busy) => {
         this.post({ type: "busy", busy });
@@ -478,6 +494,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.endTurnStatusClock();
     this.agent.setPermissionPromptUi(undefined);
     this.agent.setQuestionPromptUi(undefined);
+    this.agent.setPlanApprovalUi(undefined);
     if (this.pendingPermission) {
       const p = this.pendingPermission;
       this.pendingPermission = undefined;
@@ -489,6 +506,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.pendingQuestion = undefined;
       if (q.timer) clearTimeout(q.timer);
       q.resolve({ outcome: "cancelled" });
+    }
+    if (this.pendingPlan) {
+      const pl = this.pendingPlan;
+      this.pendingPlan = undefined;
+      if (pl.timer) clearTimeout(pl.timer);
+      pl.resolve(exitPlanModeResponse("abandoned"));
     }
     for (const d of this.disposables) {
       d.dispose();
@@ -577,6 +600,66 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  /**
+   * Plan approval for `x.ai/exit_plan_mode` — dedicated plan panel (not a
+   * composer popover): full plan body + Approve / Request changes / Abandon.
+   */
+  private async showPlanApproval(
+    payload: ExitPlanModePromptPayload,
+  ): Promise<ExitPlanModeResponse> {
+    await this.openChat();
+    if (!(await this.waitForWebview())) {
+      throw new Error("webview not ready");
+    }
+    return new Promise<ExitPlanModeResponse>((resolve) => {
+      if (this.pendingPlan) {
+        const prev = this.pendingPlan;
+        this.pendingPlan = undefined;
+        if (prev.timer) clearTimeout(prev.timer);
+        prev.resolve(exitPlanModeResponse("abandoned"));
+      }
+      const timer = setTimeout(() => {
+        if (this.pendingPlan?.promptId === payload.promptId) {
+          this.pendingPlan = undefined;
+          this.post({ type: "closePlanApproval" });
+          this.pushSystem("Plan approval timed out");
+          resolve(exitPlanModeResponse("abandoned"));
+        }
+      }, payload.timeoutMs);
+      this.pendingPlan = {
+        promptId: payload.promptId,
+        resolve,
+        timer,
+      };
+      const planHtml = renderMarkdownToSafeHtml(payload.planContent || "");
+      this.post({
+        type: "planApproval",
+        promptId: payload.promptId,
+        toolCallId: payload.toolCallId,
+        hasPlan: payload.hasPlan,
+        planContent: payload.planContent,
+        planHtml,
+      });
+    });
+  }
+
+  /** Banners from `x.ai/session_notification` (retry, compact, subagent…). */
+  private handleXaiSessionEvent(n: {
+    sessionId: string;
+    events: import("../agent/xaiSessionNotification").XaiSessionEvent[];
+  }): void {
+    const active = this.agent.getSessionId();
+    if (active && n.sessionId && n.sessionId !== active) {
+      return;
+    }
+    for (const ev of n.events) {
+      const text = bannerTextForEvent(ev);
+      if (text) {
+        this.pushSystem(text);
+      }
+    }
+  }
+
   private beginTurnStatus(): void {
     if (!this.turnStartedAt) {
       this.turnStartedAt = Date.now();
@@ -646,6 +729,28 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * After plan Approve / Request changes / Abandon: close the live planning
+   * assistant so subsequent session/update chunks append *after* the system
+   * banner instead of growing the bubble above it.
+   */
+  private sealLiveAssistantForPlanBoundary(): void {
+    this.finalizeLiveAssistantForInject();
+    this.currentAssistantId = undefined;
+    this.currentUserId = undefined;
+    this.thoughtStartedAt = undefined;
+    this.scheduleMessagesPost(true);
+  }
+
+  /**
+   * Agent leaves plan mode on approve/abandon (`leave_plan_mode_to_default`).
+   * Keep the mode button in sync without another set_mode or "Mode: Normal" toast.
+   */
+  private syncModeAfterPlanExit(): void {
+    this.agent.adoptDefaultModeAfterPlanExit();
+    this.postModeState(this.agent.getModeState().mode);
+  }
+
   /** Current model context window from agent catalog (meta.totalContextTokens). */
   private agentContextWindow(): number | undefined {
     const catalog = this.agent.getModels();
@@ -704,6 +809,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     expectedVersion?: number;
     orderedIds?: string[];
     newText?: string;
+    feedback?: string;
   }): Promise<void> {
     switch (msg.type) {
       case "ready":
@@ -748,7 +854,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
       case "queueEditStart":
         if (msg.id) {
-          const entry = this.agent.getQueue().entries.find((e) => e.id === msg.id);
+          const entry = this.agent
+            .getQueue()
+            .entries.find((e) => e.id === msg.id);
           if (!entry) {
             this.pushSystem("That queue entry is gone.");
             break;
@@ -1103,6 +1211,39 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         }
         break;
       }
+      case "planApprovalResponse": {
+        const promptId = msg.promptId ?? 0;
+        const pending = this.pendingPlan;
+        if (!pending || pending.promptId !== promptId) {
+          break;
+        }
+        this.pendingPlan = undefined;
+        if (pending.timer) clearTimeout(pending.timer);
+        const outcome = msg.outcome ?? "abandoned";
+        // Plan decision is mid-turn. Seal the planning assistant so the next
+        // agent chunks open a *new* bubble *below* the system line (otherwise
+        // stream continues into the bubble above "Plan approved").
+        this.sealLiveAssistantForPlanBoundary();
+        if (outcome === "approved") {
+          this.pushSystem("Plan approved — implementing");
+          this.syncModeAfterPlanExit();
+          pending.resolve(exitPlanModeResponse("approved"));
+        } else if (outcome === "cancelled") {
+          const feedback = typeof msg.feedback === "string" ? msg.feedback : "";
+          this.pushSystem(
+            feedback.trim()
+              ? `Requested plan changes: ${feedback.trim()}`
+              : "Requested plan changes",
+          );
+          // Stay in plan mode for revisions; new bubble still starts below.
+          pending.resolve(exitPlanModeResponse("cancelled", feedback));
+        } else {
+          this.pushSystem("Plan abandoned");
+          this.syncModeAfterPlanExit();
+          pending.resolve(exitPlanModeResponse("abandoned"));
+        }
+        break;
+      }
       default:
         break;
     }
@@ -1166,6 +1307,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         },
         restartAgent: async () => {
           await this.runRestartAgent();
+        },
+        beginHistoryLoad: (sessionId, title) => {
+          this.beginHistoryLoad(sessionId, title);
+        },
+        endHistoryLoad: () => {
+          this.endHistoryLoad();
         },
       });
 
@@ -2125,6 +2272,34 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     <button type="button" class="secondary" id="btn-review">Open</button>
   </div>
   <div id="messages"></div>
+  <section id="plan-panel" hidden role="region" aria-label="Plan approval">
+    <div id="plan-head">
+      <div class="plan-head-left">
+        <i class="ti ti-clipboard-list" aria-hidden="true"></i>
+        <span id="plan-title">Plan approval</span>
+        <span id="plan-badge" class="plan-badge" hidden>No plan</span>
+      </div>
+      <span class="plan-hint">Esc abandon · ⌘/Ctrl+Enter approve · Request changes uses composer</span>
+    </div>
+    <div id="plan-scroll">
+      <div class="msg assistant plan-msg">
+        <div id="plan-body" class="bubble md" tabindex="0"></div>
+      </div>
+    </div>
+    <div id="plan-foot">
+      <div id="plan-actions" role="toolbar" aria-label="Plan actions">
+        <button type="button" class="secondary" id="plan-abandon" title="Discard plan and exit plan mode">
+          <i class="ti ti-x" aria-hidden="true"></i> Abandon
+        </button>
+        <button type="button" class="secondary" id="plan-request" title="Send composer text as plan feedback and keep planning">
+          <i class="ti ti-edit" aria-hidden="true"></i> Request changes
+        </button>
+        <button type="button" id="plan-approve" title="Leave plan mode and implement">
+          <i class="ti ti-check" aria-hidden="true"></i> Approve
+        </button>
+      </div>
+    </div>
+  </section>
   <div id="empty" hidden>
     <div class="hero-icon" aria-hidden="true">${GROK_MARK_SVG}</div>
     <div id="empty-ready">

@@ -56,7 +56,13 @@ export type HostAction =
   | "startAgent"
   | "restartAgent"
   /** Open Grok Extensions panel; optional tab via slash name mapping. */
-  | "openExtensions";
+  | "openExtensions"
+  /** `x.ai/compact_conversation` */
+  | "compact"
+  /** `x.ai/session/fork` (+ load forked session) */
+  | "fork"
+  /** `x.ai/session/rename` */
+  | "rename";
 
 /** Row shown in the slash dropdown. */
 export interface SlashSuggestion {

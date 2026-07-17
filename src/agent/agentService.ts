@@ -85,6 +85,28 @@ import {
   type AskUserQuestionResponse,
   type QuestionPromptPayload,
 } from "../ui/interactivePrompt";
+import {
+  exitPlanModeResponse,
+  parseExitPlanModeRequest,
+  type ExitPlanModePromptPayload,
+  type ExitPlanModeResponse,
+} from "./exitPlanMode";
+import {
+  buildCompactParams,
+  buildForkParams,
+  compactRequestBody,
+  forkRequestBody,
+  parseForkResponse,
+  parseRenameArgs,
+  parseSuccessFlag,
+  renameRequestBody,
+  type ForkResult,
+} from "./sessionAdmin";
+import {
+  bannerTextForEvent,
+  parseXaiSessionNotification,
+  type ParsedXaiSessionNotification,
+} from "./xaiSessionNotification";
 
 export type AgentState =
   | { kind: "idle" }
@@ -147,6 +169,18 @@ export class AgentService implements vscode.Disposable {
     | ((payload: QuestionPromptPayload) => Promise<AskUserQuestionResponse>)
     | undefined;
   private nextQuestionPromptId = 1;
+  /** Plan approval UI for reverse-request `x.ai/exit_plan_mode`. */
+  private planApprovalUi:
+    | ((payload: ExitPlanModePromptPayload) => Promise<ExitPlanModeResponse>)
+    | undefined;
+  private nextPlanPromptId = 1;
+  /**
+   * Host banner events from `x.ai/session_notification` (retry, compact,
+   * subagent, …). Chat listens and pushes system lines.
+   */
+  private readonly _onXaiSessionEvent =
+    new vscode.EventEmitter<ParsedXaiSessionNotification>();
+  readonly onXaiSessionEvent = this._onXaiSessionEvent.event;
   private auth: AuthService | undefined;
   private caps: AgentCaps = {
     loadSession: false,
@@ -243,6 +277,17 @@ export class AgentService implements vscode.Disposable {
     this.questionUi = handler;
   }
 
+  /**
+   * Wire host UI for `x.ai/exit_plan_mode` (plan approval).
+   */
+  setPlanApprovalUi(
+    handler:
+      | ((payload: ExitPlanModePromptPayload) => Promise<ExitPlanModeResponse>)
+      | undefined,
+  ): void {
+    this.planApprovalUi = handler;
+  }
+
   getAvailableCommands(): AvailableCommand[] {
     return this.availableCommands.slice();
   }
@@ -322,6 +367,23 @@ export class AgentService implements vscode.Disposable {
     const next = cycleMode(this.cycleModeId);
     await this.applyCycleMode(next);
     return next;
+  }
+
+  /**
+   * After plan Approve/Abandon the agent calls `leave_plan_mode_to_default`.
+   * Update host cycle UI only (no second `session/set_mode` / toast) when still
+   * showing Plan — `current_mode_update` may arrive later.
+   */
+  adoptDefaultModeAfterPlanExit(): void {
+    if (this.cycleModeId !== "plan") {
+      return;
+    }
+    this.cycleModeId = "normal";
+    this.acpModeId = "default";
+    this.autoMode = false;
+    this.permissions.setAlwaysApproveOverride(undefined);
+    this.fireModeChange();
+    logInfo("cycle mode → normal (plan exit)");
   }
 
   /**
@@ -1135,6 +1197,72 @@ export class AgentService implements vscode.Disposable {
   }
 
   /**
+   * On-demand compact — `x.ai/compact_conversation` (TUI `/compact`).
+   * Optional `userContext` preserves specific details during summarization.
+   */
+  async compactConversation(userContext?: string): Promise<void> {
+    const sessionId = this.requireSessionId();
+    const params = buildCompactParams(sessionId, userContext ?? "");
+    logInfo(
+      `compact_conversation session=${sessionId} context=${params.userContext ? "yes" : "no"}`,
+    );
+    const raw = await this.requestExt(
+      "x.ai/compact_conversation",
+      compactRequestBody(params),
+    );
+    if (!parseSuccessFlag(raw)) {
+      throw new Error("Compaction failed");
+    }
+  }
+
+  /**
+   * Rename session title — `x.ai/session/rename` (TUI `/rename` / `/title`).
+   */
+  async renameSession(title: string): Promise<void> {
+    const trimmed = parseRenameArgs(title);
+    if (!trimmed) {
+      throw new Error("Title must not be blank");
+    }
+    const sessionId = this.requireSessionId();
+    const cwd = resolveSessionCwd();
+    logInfo(`session/rename session=${sessionId} title=${trimmed}`);
+    const raw = await this.requestExt(
+      "x.ai/session/rename",
+      renameRequestBody({ sessionId, title: trimmed, cwd }),
+    );
+    if (!parseSuccessFlag(raw)) {
+      throw new Error("Rename failed");
+    }
+  }
+
+  /**
+   * Fork current session into a new peer — `x.ai/session/fork`.
+   * Does **not** load the new session; callers should `loadSession` after
+   * preparing UI history replay (same as resume).
+   */
+  async forkSession(args = ""): Promise<ForkResult> {
+    const sourceSessionId = this.requireSessionId();
+    const cwd = resolveSessionCwd();
+    const params = buildForkParams(sourceSessionId, cwd, args);
+    logInfo(
+      `session/fork source=${sourceSessionId} cwd=${cwd}` +
+        (params.directive ? ` directive=${params.directive}` : ""),
+    );
+    if (this.busy) {
+      await this.cancelTurn();
+    }
+    const raw = await this.requestExt(
+      "x.ai/session/fork",
+      forkRequestBody(params),
+    );
+    const result = parseForkResponse(raw);
+    if (!result) {
+      throw new Error("Fork failed: invalid agent response");
+    }
+    return result;
+  }
+
+  /**
    * Call an agent extension method (`x.ai/*`).
    *
    * ACP's JSON-RPC decoder only routes custom methods to `ext_method` when
@@ -1430,8 +1558,11 @@ export class AgentService implements vscode.Disposable {
     this._onSessionUpdate.dispose();
     this._onBusyChange.dispose();
     this._onTurnEnd.dispose();
+    this._onQueueChange.dispose();
     this._onAvailableCommands.dispose();
     this._onModelsChange.dispose();
+    this._onModeChange.dispose();
+    this._onXaiSessionEvent.dispose();
   }
 
   /**
@@ -1747,6 +1878,13 @@ export class AgentService implements vscode.Disposable {
       .onRequest("x.ai/ask_user_question", identity, (ctx) =>
         this.handleAskUserQuestion(ctx.params),
       )
+      // Plan approval reverse-request (TUI plan preview overlay).
+      .onRequest("_x.ai/exit_plan_mode", identity, (ctx) =>
+        this.handleExitPlanMode(ctx.params),
+      )
+      .onRequest("x.ai/exit_plan_mode", identity, (ctx) =>
+        this.handleExitPlanMode(ctx.params),
+      )
       .onNotification(acp.methods.client.session.update, (ctx) => {
         this.onSessionUpdateNotify(ctx.params);
       })
@@ -1779,6 +1917,21 @@ export class AgentService implements vscode.Disposable {
         (p: unknown) => p,
         (ctx) => {
           this.handleQueueChangedNotification(ctx.params);
+        },
+      )
+      // xAI session events: retry banners, compact, subagent, interactions.
+      .onNotification(
+        "_x.ai/session_notification",
+        (p: unknown) => p,
+        (ctx) => {
+          this.handleXaiSessionNotification(ctx.params);
+        },
+      )
+      .onNotification(
+        "x.ai/session_notification",
+        (p: unknown) => p,
+        (ctx) => {
+          this.handleXaiSessionNotification(ctx.params);
         },
       )
       .connect(stream);
@@ -1879,6 +2032,136 @@ export class AgentService implements vscode.Disposable {
       "Grok Build: open the chat panel to answer the agent question",
     );
     return { outcome: "cancelled" };
+  }
+
+  /**
+   * Handle agent `x.ai/exit_plan_mode` — user must approve, request changes,
+   * or abandon (TUI plan approval overlay). Never auto-approve (even yolo).
+   */
+  private async handleExitPlanMode(
+    raw: unknown,
+  ): Promise<ExitPlanModeResponse> {
+    const parsed = parseExitPlanModeRequest(raw);
+    if (!parsed) {
+      logWarn("exit_plan_mode: invalid params → abandoned");
+      return exitPlanModeResponse("abandoned");
+    }
+    const planContent = parsed.planContent?.trim() ?? "";
+    const hasPlan = planContent.length > 0;
+    logInfo(
+      `[exit_plan_mode] tool=${parsed.toolCallId} hasPlan=${hasPlan} session=${parsed.sessionId}`,
+    );
+
+    // Only answer for the active session; park silently otherwise (TUI parity).
+    const active = this.getSessionId();
+    if (active && parsed.sessionId && parsed.sessionId !== active) {
+      logInfo(
+        `exit_plan_mode for background session ${parsed.sessionId}; leaving unanswered for leader replay`,
+      );
+      // Leaving the reverse-request hanging is not possible with the TS SDK
+      // (we must return). Abandon so the tool does not hang forever.
+      return exitPlanModeResponse("abandoned");
+    }
+
+    const promptId = this.nextPlanPromptId++;
+    const timeoutMs = Math.max(getSettings().permissionTimeoutMs, 120_000);
+    if (this.planApprovalUi) {
+      try {
+        return await this.planApprovalUi({
+          promptId,
+          sessionId: parsed.sessionId,
+          toolCallId: parsed.toolCallId,
+          planContent: planContent || EMPTY_PLAN_PLACEHOLDER,
+          hasPlan,
+          timeoutMs,
+        });
+      } catch (err) {
+        logWarn(`exit_plan_mode UI failed: ${formatUserError(err)}`);
+      }
+    } else {
+      logWarn("exit_plan_mode: plan approval UI not registered");
+    }
+    // Fallback QuickPick if chat UI missing.
+    return this.fallbackExitPlanModePick(
+      hasPlan,
+      planContent || EMPTY_PLAN_PLACEHOLDER,
+    );
+  }
+
+  private async fallbackExitPlanModePick(
+    hasPlan: boolean,
+    planContent: string,
+  ): Promise<ExitPlanModeResponse> {
+    const preview = planContent.slice(0, 400);
+    const pick = await vscode.window.showQuickPick(
+      [
+        {
+          label: "$(check) Approve",
+          description: "Leave plan mode and implement",
+          outcome: "approved" as const,
+        },
+        {
+          label: "$(edit) Request changes",
+          description: "Send feedback and stay in plan mode",
+          outcome: "cancelled" as const,
+        },
+        {
+          label: "$(x) Abandon",
+          description: "Discard plan and exit plan mode",
+          outcome: "abandoned" as const,
+        },
+      ],
+      {
+        title: hasPlan
+          ? "Plan ready — approve to implement"
+          : "No plan written — approve or request changes",
+        placeHolder: preview.split("\n")[0] || "Plan approval",
+        ignoreFocusOut: true,
+      },
+    );
+    if (!pick) {
+      return exitPlanModeResponse("abandoned");
+    }
+    if (pick.outcome === "cancelled") {
+      const feedback = await vscode.window.showInputBox({
+        title: "Request plan changes",
+        prompt: "What should the agent change in the plan?",
+        ignoreFocusOut: true,
+      });
+      if (feedback === undefined) {
+        return exitPlanModeResponse("abandoned");
+      }
+      return exitPlanModeResponse("cancelled", feedback);
+    }
+    return exitPlanModeResponse(pick.outcome);
+  }
+
+  private handleXaiSessionNotification(raw: unknown): void {
+    const parsed = parseXaiSessionNotification(raw);
+    if (!parsed) {
+      logWarn("x.ai/session_notification: invalid payload");
+      return;
+    }
+    const active = this.getSessionId();
+    if (active && parsed.sessionId && parsed.sessionId !== active) {
+      // Still log; child/other sessions may matter later.
+      logInfo(
+        `session_notification other session=${parsed.sessionId} (active=${active})`,
+      );
+    }
+    for (const ev of parsed.events) {
+      const banner = bannerTextForEvent(ev);
+      if (banner) {
+        logInfo(
+          `[session_notification] ${ev.kind}/${"phase" in ev ? ev.phase : "?"} ${banner}`,
+        );
+      } else if (ev.kind !== "unknown") {
+        logInfo(
+          `[session_notification] ${ev.kind}/${"phase" in ev ? ev.phase : "?"}`,
+        );
+      }
+    }
+    this._onXaiSessionEvent.fire(parsed);
   }
 
   private async pumpSessionUpdates(session: ActiveSession): Promise<void> {
@@ -2187,6 +2470,16 @@ function formatUserError(err: unknown): string {
   }
   return String(err);
 }
+
+/** Placeholder when agent exits plan mode with empty plan.md (TUI parity). */
+const EMPTY_PLAN_PLACEHOLDER = `# No plan written yet
+
+The agent exited plan mode without writing a plan.
+
+- **Approve** — leave plan mode and start implementing
+- **Request changes** — send the agent back to planning
+- **Abandon** — turn plan mode off
+`;
 
 function normalizeAuthMethods(raw: unknown): AuthMethodLike[] {
   if (!Array.isArray(raw)) {

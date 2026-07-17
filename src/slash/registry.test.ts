@@ -10,9 +10,7 @@ import type { AvailableCommand } from "@agentclientprotocol/sdk";
 import type { SlashCommandDef, SlashSuggestion } from "./types.ts";
 
 /** Minimal mirror of SlashRegistry for unit tests (same merge rules). */
-function buildAll(
-  acp: AvailableCommand[] = [],
-): SlashCommandDef[] {
+function buildAll(acp: AvailableCommand[] = []): SlashCommandDef[] {
   const seen = new Set<string>();
   const out: SlashCommandDef[] = [];
   for (const cmd of HOST_COMMANDS) {
@@ -45,7 +43,9 @@ function resolve(
   const k = key.trim().toLowerCase().replace(/^\//, "");
   const host = hostCommandsByKey().get(k);
   if (host) return host;
-  return buildAll(acp).find((c) => c.name.toLowerCase() === k && c.source === "acp");
+  return buildAll(acp).find(
+    (c) => c.name.toLowerCase() === k && c.source === "acp",
+  );
 }
 
 function suggest(query: string, limit = 40): SlashSuggestion[] {
@@ -74,7 +74,9 @@ function suggest(query: string, limit = 40): SlashSuggestion[] {
     }
     if (best < Infinity) scored.push({ cmd, score: best });
   }
-  scored.sort((a, b) => a.score - b.score || a.cmd.name.localeCompare(b.cmd.name));
+  scored.sort(
+    (a, b) => a.score - b.score || a.cmd.name.localeCompare(b.cmd.name),
+  );
   return scored.slice(0, limit).map(({ cmd }) => ({
     name: cmd.name,
     display: `/${cmd.name}`,
@@ -117,9 +119,20 @@ describe("host slash catalog (full reimplement)", () => {
     const compact = resolve("compact", acp)!;
     assert.equal(compact.source, "host");
     assert.equal(compact.description, "Compact conversation history");
+    assert.equal(compact.hostAction, "compact");
     const skill = resolve("my-skill", acp)!;
     assert.equal(skill.source, "acp");
     assert.equal(skill.layer, "passthrough");
+  });
+
+  it("compact fork rename are host ext-method actions", () => {
+    assert.equal(resolve("compact")?.layer, "host");
+    assert.equal(resolve("compact")?.hostAction, "compact");
+    assert.equal(resolve("fork")?.layer, "host");
+    assert.equal(resolve("fork")?.hostAction, "fork");
+    assert.equal(resolve("rename")?.layer, "host");
+    assert.equal(resolve("rename")?.hostAction, "rename");
+    assert.equal(resolve("title")?.hostAction, "rename");
   });
 
   it("suggest fuzzy matches model", () => {

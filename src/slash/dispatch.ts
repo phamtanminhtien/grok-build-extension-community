@@ -34,6 +34,9 @@ export interface DispatchDeps {
   /** Optional host wrappers (loading indicator, system lines). */
   startAgent?: () => Promise<void>;
   restartAgent?: () => Promise<void>;
+  /** Session/load history replay (TUI `/resume` parity) for `/fork`. */
+  beginHistoryLoad?: (sessionId?: string, title?: string) => void;
+  endHistoryLoad?: () => void;
 }
 
 /**
@@ -325,6 +328,50 @@ async function runHostAction(
       const tab = tabFromSlashName(cmd.name) ?? "hooks";
       await vscode.commands.executeCommand("grok.openExtensions", { tab });
       return undefined;
+    }
+    case "compact": {
+      await deps.agent.ensureStarted();
+      const ctx = inv.args.trim();
+      await deps.agent.compactConversation(ctx || undefined);
+      return ctx
+        ? `Compaction requested (preserve: ${ctx})`
+        : "Compaction requested";
+    }
+    case "rename": {
+      const title = inv.args.trim();
+      if (!title) {
+        throw new Error("Usage: /rename <title>");
+      }
+      await deps.agent.ensureStarted();
+      await deps.agent.renameSession(title);
+      return `Session renamed to “${title}”`;
+    }
+    case "fork": {
+      await deps.agent.ensureStarted();
+      const result = await deps.agent.forkSession(inv.args);
+      const caps = deps.agent.getCapabilities();
+      if (caps.loadSession) {
+        deps.beginHistoryLoad?.(result.newSessionId, "forked session");
+        try {
+          await deps.agent.loadSession(
+            result.newSessionId,
+            result.newCwd || resolveSessionCwd(),
+          );
+          // Allow replay session/update notifications to land (resume parity).
+          await new Promise((r) => setTimeout(r, 400));
+          deps.endHistoryLoad?.();
+        } catch (err) {
+          deps.endHistoryLoad?.();
+          throw err;
+        }
+      } else {
+        deps.clearUi();
+      }
+      const msgs =
+        result.chatMessagesCopied != null
+          ? ` (${result.chatMessagesCopied} messages copied)`
+          : "";
+      return `Forked session → ${result.newSessionId}${msgs}`;
     }
     default:
       return `Unhandled host action for /${cmd.name}`;
