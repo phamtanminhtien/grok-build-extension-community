@@ -202,6 +202,12 @@
         "icon": "$(diff)"
       },
       {
+        "command": "grok.rewind",
+        "title": "Grok Build: Rewind…",
+        "category": "Grok Build",
+        "icon": "$(history)"
+      },
+      {
         "command": "grok.acceptAllEdits",
         "title": "Grok Build: Accept All Edits",
         "category": "Grok Build",

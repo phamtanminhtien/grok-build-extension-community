@@ -125,9 +125,11 @@ describe("host slash catalog (full reimplement)", () => {
     assert.equal(skill.layer, "passthrough");
   });
 
-  it("compact fork rename are host ext-method actions", () => {
+  it("compact fork rename rewind are host ext-method actions", () => {
     assert.equal(resolve("compact")?.layer, "host");
     assert.equal(resolve("compact")?.hostAction, "compact");
+    assert.equal(resolve("rewind")?.layer, "host");
+    assert.equal(resolve("rewind")?.hostAction, "rewind");
     assert.equal(resolve("fork")?.layer, "host");
     assert.equal(resolve("fork")?.hostAction, "fork");
     assert.equal(resolve("rename")?.layer, "host");

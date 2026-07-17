@@ -66,7 +66,9 @@ export interface MergeState {
   loadingHistory: boolean;
 }
 
-export function emptyAssistant(id: string): Extract<MergeUiMessage, { type: "assistant" }> {
+export function emptyAssistant(
+  id: string,
+): Extract<MergeUiMessage, { type: "assistant" }> {
   return { type: "assistant", id, items: [] };
 }
 
@@ -84,9 +86,7 @@ export function assistantPlainText(msg: {
 export function assistantHasRunningThought(msg: {
   items: readonly AssistantItem[];
 }): boolean {
-  return msg.items.some(
-    (i) => i.kind === "thought" && !!i.thought.running,
-  );
+  return msg.items.some((i) => i.kind === "thought" && !!i.thought.running);
 }
 
 /**
@@ -109,9 +109,7 @@ export function shouldCloseAssistantOnUserChunk(
 }
 
 /** Next shell prompt index = number of existing user messages. */
-export function nextPromptIndex(
-  messages: readonly MergeUiMessage[],
-): number {
+export function nextPromptIndex(messages: readonly MergeUiMessage[]): number {
   let n = 0;
   for (const m of messages) {
     if (m.type === "user") n += 1;
@@ -142,6 +140,26 @@ export function truncateFromMessageId(
 ): MergeUiMessage[] {
   const idx = messages.findIndex((m) => m.id === messageId);
   if (idx < 0) return messages.slice();
+  return messages.slice(0, idx);
+}
+
+/**
+ * Keep prompts before `targetPromptIndex` (shell: restore state before N ran).
+ * Drops the first user message with `promptIndex >= target` and everything after.
+ */
+export function truncateFromPromptIndex(
+  messages: readonly MergeUiMessage[],
+  targetPromptIndex: number,
+): MergeUiMessage[] {
+  const idx = messages.findIndex(
+    (m) =>
+      m.type === "user" &&
+      typeof m.promptIndex === "number" &&
+      m.promptIndex >= targetPromptIndex,
+  );
+  if (idx < 0) {
+    return messages.slice();
+  }
   return messages.slice(0, idx);
 }
 
@@ -206,7 +224,11 @@ function ensureAssistant(
   messages: MergeUiMessage[],
   currentAssistantId: string | undefined,
   uid: () => string,
-): { messages: MergeUiMessage[]; currentAssistantId: string; msg: Extract<MergeUiMessage, { type: "assistant" }> } {
+): {
+  messages: MergeUiMessage[];
+  currentAssistantId: string;
+  msg: Extract<MergeUiMessage, { type: "assistant" }>;
+} {
   let id = currentAssistantId;
   if (!id) {
     id = uid();
@@ -332,7 +354,10 @@ function truncateDetail(s: string, max = DETAIL_MAX): string {
  * Format rawInput / rawOutput / similar unknowns for tool expand detail.
  * Prefer common string fields over full JSON when present.
  */
-export function formatToolValue(value: unknown, maxLen = DETAIL_MAX): string | undefined {
+export function formatToolValue(
+  value: unknown,
+  maxLen = DETAIL_MAX,
+): string | undefined {
   if (value == null) {
     return undefined;
   }
@@ -413,7 +438,11 @@ export function extractToolContentText(
     const c = item as Record<string, unknown>;
     if (c.type === "content" && c.content && typeof c.content === "object") {
       const inner = c.content as Record<string, unknown>;
-      if (inner.type === "text" && typeof inner.text === "string" && inner.text) {
+      if (
+        inner.type === "text" &&
+        typeof inner.text === "string" &&
+        inner.text
+      ) {
         parts.push(inner.text);
       }
     } else if (c.type === "diff") {

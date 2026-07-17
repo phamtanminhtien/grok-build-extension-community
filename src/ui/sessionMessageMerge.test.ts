@@ -24,6 +24,7 @@ import {
   shouldApplyUserMessageChunk,
   shouldCloseAssistantOnUserChunk,
   truncateFromMessageId,
+  truncateFromPromptIndex,
   upsertAssistantTool,
   type MergeState,
   type ToolCard,
@@ -86,7 +87,10 @@ describe("applyUserMessageChunk", () => {
     assert.ok(next);
     assert.equal(next!.messages.length, 1);
     assert.equal(next!.messages[0]?.type, "user");
-    assert.equal(next!.messages[0]?.type === "user" && next!.messages[0].text, "Hi");
+    assert.equal(
+      next!.messages[0]?.type === "user" && next!.messages[0].text,
+      "Hi",
+    );
     assert.equal(
       next!.messages[0]?.type === "user" && next!.messages[0].promptIndex,
       0,
@@ -130,7 +134,10 @@ describe("timeline: text + tools in stream order", () => {
 
     assert.equal(msg.items.length, 3);
     assert.equal(msg.items[0]?.kind, "text");
-    assert.equal(msg.items[0]?.kind === "text" && msg.items[0].text, "Hello world");
+    assert.equal(
+      msg.items[0]?.kind === "text" && msg.items[0].text,
+      "Hello world",
+    );
     assert.equal(msg.items[1]?.kind, "tool");
     assert.equal(
       msg.items[1]?.kind === "tool" && msg.items[1].tool.title,
@@ -194,7 +201,10 @@ describe("timeline: text + tools in stream order", () => {
 describe("timeline: thoughts stay split across tools", () => {
   it("does not merge think → tool → think into one thought blob", () => {
     const msg = emptyAssistant("a1");
-    appendAssistantThought(msg, "Plan A ", { running: true, newId: () => "th1" });
+    appendAssistantThought(msg, "Plan A ", {
+      running: true,
+      newId: () => "th1",
+    });
     appendAssistantThought(msg, "more A", { running: true });
     finishAssistantThoughts(msg, 1200);
     upsertAssistantTool(msg, {
@@ -274,7 +284,10 @@ describe("timeline: thoughts stay split across tools", () => {
 
     const asst = state.messages.find((m) => m.type === "assistant");
     assert.ok(asst && asst.type === "assistant");
-    assert.equal(asst.items.map((i) => i.kind).join(","), "thought,tool,thought,text");
+    assert.equal(
+      asst.items.map((i) => i.kind).join(","),
+      "thought,tool,thought,text",
+    );
     if (asst.items[0]?.kind === "thought") {
       assert.equal(asst.items[0].thought.text, "Think 1");
       assert.equal(asst.items[0].thought.running, false);
@@ -294,7 +307,10 @@ describe("tool detail helpers", () => {
   it("formatToolValue prefers output/command fields", () => {
     assert.equal(formatToolValue("plain"), "plain");
     assert.equal(formatToolValue({ output: "hi" }), "hi");
-    assert.equal(formatToolValue({ command: "rg foo", description: "search" }), "rg foo\nsearch");
+    assert.equal(
+      formatToolValue({ command: "rg foo", description: "search" }),
+      "rg foo\nsearch",
+    );
     assert.equal(formatToolValue({ stdout: "out", stderr: "err" }), "out\nerr");
     assert.equal(
       formatToolValue({ type: "ReadFile", data: { raw_output: "file body" } }),
@@ -323,7 +339,10 @@ describe("applyAgentMessageChunk", () => {
     const asst = state.messages[1];
     assert.ok(asst && asst.type === "assistant");
     assert.equal(assistantPlainText(asst), "Ans");
-    assert.equal(state.messages.filter((m) => m.type === "assistant").length, 1);
+    assert.equal(
+      state.messages.filter((m) => m.type === "assistant").length,
+      1,
+    );
   });
 
   it("creates assistant when none is open (history / late stream)", () => {
@@ -378,10 +397,13 @@ describe("isStreamingTailUpdate", () => {
 
   it("false when length changes or last is not same assistant", () => {
     assert.equal(
-      isStreamingTailUpdate([{ type: "user", id: "u1" }], [
-        { type: "user", id: "u1" },
-        { type: "assistant", id: "a1" },
-      ]),
+      isStreamingTailUpdate(
+        [{ type: "user", id: "u1" }],
+        [
+          { type: "user", id: "u1" },
+          { type: "assistant", id: "a1" },
+        ],
+      ),
       false,
     );
     assert.equal(
@@ -439,6 +461,20 @@ describe("promptIndex / edit helpers", () => {
     assert.equal(messages.length, 4, "input not mutated");
   });
 
+  it("truncateFromPromptIndex keeps turns before target", () => {
+    const messages = [
+      { type: "user" as const, id: "u0", text: "a", promptIndex: 0 },
+      emptyAssistant("a0"),
+      { type: "user" as const, id: "u1", text: "b", promptIndex: 1 },
+      emptyAssistant("a1"),
+      { type: "user" as const, id: "u2", text: "c", promptIndex: 2 },
+    ];
+    const next = truncateFromPromptIndex(messages, 1);
+    assert.equal(next.length, 2);
+    assert.equal(next[0]?.id, "u0");
+    assert.deepEqual(truncateFromPromptIndex(messages, 9), messages);
+  });
+
   it("messageCopyText uses plain text for user/assistant", () => {
     assert.equal(
       messageCopyText({ type: "user", id: "u", text: "hello" }),
@@ -459,11 +495,7 @@ describe("promptIndex / edit helpers", () => {
 });
 
 describe("tool verb groups (TUI Read 2 files / Edited 4 files)", () => {
-  function tool(
-    id: string,
-    title: string,
-    status = "completed",
-  ): ToolCard {
+  function tool(id: string, title: string, status = "completed"): ToolCard {
     return { id, title, status, paths: [] };
   }
 
@@ -472,7 +504,10 @@ describe("tool verb groups (TUI Read 2 files / Edited 4 files)", () => {
     assert.equal(classifyToolVerb({ title: "Write src/a.ts" }), "edit");
     assert.equal(classifyToolVerb({ title: "search_replace" }), "edit");
     assert.equal(classifyToolVerb({ title: "Grep pattern" }), "search");
-    assert.equal(classifyToolVerb({ title: "run_terminal_command" }), "command");
+    assert.equal(
+      classifyToolVerb({ title: "run_terminal_command" }),
+      "command",
+    );
   });
 
   it("labels mixed batch like TUI", () => {

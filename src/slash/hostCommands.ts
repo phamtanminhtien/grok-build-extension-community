@@ -145,7 +145,8 @@ export const HOST_COMMANDS: SlashCommandDef[] = [
   d({
     name: "rewind",
     description: "Rewind to a previous turn",
-    layer: "passthrough",
+    layer: "host",
+    hostAction: "rewind",
   }),
   d({
     name: "jump",

@@ -341,6 +341,17 @@ export function activate(context: vscode.ExtensionContext): void {
       await diffs.pickAndOpen();
     }),
 
+    vscode.commands.registerCommand("grok.rewind", async () => {
+      try {
+        await chat.openChat();
+        await chat.runRewind();
+      } catch (err) {
+        void vscode.window.showErrorMessage(
+          `Rewind failed: ${errMessage(err)}`,
+        );
+      }
+    }),
+
     vscode.commands.registerCommand("grok.acceptAllEdits", async () => {
       const n = diffs.getEntries().length;
       if (n === 0) {

@@ -87,6 +87,16 @@ import {
   type HunkActionResult,
   type HunkFileSummary,
 } from "../diff/hunkTracker";
+import {
+  REWIND_METHODS,
+  parseRewindPointsResponse,
+  parseRewindResponse,
+  rewindExecuteParams,
+  rewindPointsParams,
+  type RewindMode,
+  type RewindPoint,
+  type RewindResult,
+} from "./rewind";
 import { toAcpExtWireMethod } from "./acpExtMethod";
 import { buildInitializeClientCapabilities } from "./clientCapabilities";
 import { BinaryNotFoundError } from "./binaryResolver";
@@ -1512,6 +1522,45 @@ export class AgentService implements vscode.Disposable {
       allActionParams(sessionId, action),
     );
     return parseHunkActionResponse(raw);
+  }
+
+  // ── Rewind (x.ai/rewind/*) ─────────────────────────────────────────
+
+  /** List rewind checkpoints (`x.ai/rewind/points`). */
+  async rewindGetPoints(): Promise<RewindPoint[]> {
+    const sessionId = this.requireSessionId();
+    logInfo(`rewind/points session=${sessionId}`);
+    const raw = await this.requestExt(
+      REWIND_METHODS.points,
+      rewindPointsParams(sessionId),
+    );
+    return parseRewindPointsResponse(raw);
+  }
+
+  /**
+   * Execute or preview a rewind (`x.ai/rewind/execute`).
+   * TUI uses `force: false` for preview and `force: true` to apply.
+   */
+  async rewindExecute(opts: {
+    targetPromptIndex: number;
+    mode: RewindMode;
+    force?: boolean;
+  }): Promise<RewindResult> {
+    const sessionId = this.requireSessionId();
+    const force = opts.force === true;
+    logInfo(
+      `rewind/execute session=${sessionId} target=${opts.targetPromptIndex} mode=${opts.mode} force=${force}`,
+    );
+    const raw = await this.requestExt(
+      REWIND_METHODS.execute,
+      rewindExecuteParams({
+        sessionId,
+        targetPromptIndex: opts.targetPromptIndex,
+        mode: opts.mode,
+        force,
+      }),
+    );
+    return parseRewindResponse(raw);
   }
 
   /**

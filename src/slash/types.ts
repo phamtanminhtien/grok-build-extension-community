@@ -63,6 +63,8 @@ export type HostAction =
   | "fork"
   /** `x.ai/session/rename` */
   | "rename"
+  /** `x.ai/rewind/points` + `x.ai/rewind/execute` picker */
+  | "rewind"
   /** List + refresh background tasks / subagents (Tasks panel). */
   | "showTasks";
 

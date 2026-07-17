@@ -50,10 +50,12 @@ import {
   formatToolValue,
   nextPromptIndex,
   truncateFromMessageId,
+  truncateFromPromptIndex,
   type AssistantItem,
   type ThoughtSegment,
   type ToolCard,
 } from "./sessionMessageMerge";
+import { modeTruncatesConversation, type RewindResult } from "../agent/rewind";
 import { parseSessionNotificationMeta } from "./sessionNotificationMeta";
 import {
   buildTurnStatusParts,
@@ -76,7 +78,7 @@ import {
   queueEntryFirstLine,
   type PromptQueueSnapshot,
 } from "../agent/promptQueue";
-import { dispatchSlash } from "../slash/dispatch";
+import { dispatchSlash, runRewindPicker } from "../slash/dispatch";
 import { slashRegistry } from "../slash/registry";
 import {
   permissionOptionIcon,
@@ -1555,6 +1557,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         endHistoryLoad: () => {
           this.endHistoryLoad();
         },
+        applyRewindResult: (result) => {
+          this.applyRewindResult(result);
+        },
       });
 
       if (outcome.kind === "handled") {
@@ -2112,6 +2117,49 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * Apply a successful agent rewind to the chat webview (TUI remove_from).
+   * Conversation modes drop later turns; files-only keeps transcript.
+   * Prefills composer with `promptText` when the shell provides it.
+   */
+  applyRewindResult(result: RewindResult): void {
+    if (modeTruncatesConversation(result.mode)) {
+      this.messages = truncateFromPromptIndex(
+        this.messages,
+        result.targetPromptIndex,
+      ) as UiMessage[];
+      this.currentUserId = undefined;
+      this.currentAssistantId = undefined;
+      this.thoughtStartedAt = undefined;
+      this.mdCache.clear();
+      this.scheduleMessagesPost(true);
+    }
+    if (result.promptText?.trim()) {
+      this.post({ type: "setComposer", text: result.promptText });
+    }
+    if (result.revertedFiles.length > 0) {
+      this.diffs?.clear();
+    }
+  }
+
+  /** Command palette / `/rewind` — pick point, mode, preview, execute. */
+  async runRewind(): Promise<void> {
+    try {
+      const message = await runRewindPicker({
+        agent: this.agent,
+        applyRewindResult: (result) => {
+          this.applyRewindResult(result);
+        },
+      });
+      if (message) {
+        this.pushSystem(message);
+      }
+    } catch (err) {
+      this.pushSystem(errMessage(err));
+      throw err;
+    }
+  }
+
+  /**
    * Edit a previous user prompt and resubmit (TUI inline-edit parity).
    * Webview owns mode selection popover (Both / Conversation only) and
    * pre-fills the composer; host rewinds then resubmits.
@@ -2158,33 +2206,23 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.pushSystem("Cancelled current turn to edit message…");
       }
 
-      const sessionId = this.agent.getSessionId();
-      if (!sessionId) {
+      if (!this.agent.getSessionId()) {
         this.pushSystem("No active session — cannot rewind to edit.");
         this.post({ type: "restoreEditComposer", id: messageId, text });
         return;
       }
 
       await this.agent.ensureStarted();
-      const res = await this.agent.requestExt<{
-        success?: boolean;
-        error?: string | null;
-        result?: { success?: boolean; error?: string | null };
-      }>("x.ai/rewind/execute", {
-        sessionId,
+      const result = await this.agent.rewindExecute({
         targetPromptIndex: promptIndex,
-        force: true,
         mode,
+        force: true,
       });
 
-      const body =
-        res && typeof res === "object" && "result" in res && res.result
-          ? res.result
-          : res;
-      if (body && body.success === false) {
+      if (!result.success) {
         this.pushSystem(
-          body.error?.trim()
-            ? `Edit failed: ${body.error}`
+          result.error?.trim()
+            ? `Edit failed: ${result.error}`
             : "Edit failed: rewind was not successful.",
         );
         this.post({ type: "restoreEditComposer", id: messageId, text });
@@ -2201,6 +2239,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.thoughtStartedAt = undefined;
       this.mdCache.clear();
       this.scheduleMessagesPost(true);
+      if (result.revertedFiles.length > 0) {
+        this.diffs?.clear();
+      }
 
       // Resubmit edited text as a new prompt (literal — not slash re-dispatch).
       await this.handleSend(text, { literal: true });
