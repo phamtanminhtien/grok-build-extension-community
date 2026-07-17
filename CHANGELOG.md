@@ -2,6 +2,26 @@
 
 All notable changes to **Grok Build - Community** are documented in this file.
 
+## [0.3.6](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.5...v0.3.6) (2026-07-17)
+
+
+### Features
+
+* add Tasks panel with live subagent detail view ([6ac1ae9](https://github.com/phamtanminhtien/grok-build-extension-community/commit/6ac1ae9ccded1de3698b52a4b0bbed405a4d1b83))
+* advertise TUI client meta and wire Extensions panel actions ([e7ff65d](https://github.com/phamtanminhtien/grok-build-extension-community/commit/e7ff65dc830259167dec1e057624be3c9081ab74))
+* **chat:** inline [@mentions](https://github.com/mentions) with color and softer bubbles ([2048e6c](https://github.com/phamtanminhtien/grok-build-extension-community/commit/2048e6cecf183e3bdd3a42364a73d892c0101c62))
+* **chat:** move context chips into composer and simplify auto-attach toggle ([bd07b03](https://github.com/phamtanminhtien/grok-build-extension-community/commit/bd07b030e1fa0fd187b879647032a0ac08418544))
+* fold reasoning effort into model popover and button label ([281321c](https://github.com/phamtanminhtien/grok-build-extension-community/commit/281321cec5a942910d55fa7155657960b733a21f))
+* host rewind via x.ai/rewind/points and execute ([aa0b3cc](https://github.com/phamtanminhtien/grok-build-extension-community/commit/aa0b3cc7434431e9faf548a3c63b85f63f553e4b))
+* show context ring by mode and compact mode button when narrow ([80356fd](https://github.com/phamtanminhtien/grok-build-extension-community/commit/80356fd2b152f8d6a55fe8b0dafa1d537435518d))
+* wire hunk-tracker Accept/Reject on diff review ([8263eb1](https://github.com/phamtanminhtien/grok-build-extension-community/commit/8263eb1388b3bce2d6d4d028210ce57663c18c13))
+
+
+### Bug Fixes
+
+* polish in-chat rewind and accept shell dry-run previews ([a57a819](https://github.com/phamtanminhtien/grok-build-extension-community/commit/a57a819a139b975864da422c0a479a9ac3aad25f))
+* show loading feedback during /compact ([9ca9fb0](https://github.com/phamtanminhtien/grok-build-extension-community/commit/9ca9fb085cd4baf62b9f5b57f28b68b80ded5e88))
+
 ## [0.3.5](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.4...v0.3.5) (2026-07-17)
 
 
