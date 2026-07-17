@@ -2,6 +2,27 @@
 
 All notable changes to **Grok Build - Community** are documented in this file.
 
+## [0.3.4](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.3...v0.3.4) (2026-07-17)
+
+
+### Features
+
+* add shimmer effect for live assistant timeline and improve styling ([316abad](https://github.com/phamtanminhtien/grok-build-extension-community/commit/316abad112bb9675d1bb40c3ef924dab9e3e00b9))
+* add TUI-style prompt queue for mid-turn follow-ups ([51ac03f](https://github.com/phamtanminhtien/grok-build-extension-community/commit/51ac03f19a77ba919ba221fda15d61891d7d95ae))
+
+
+### Bug Fixes
+
+* default grok.fs.autoSave to true ([c858e88](https://github.com/phamtanminhtien/grok-build-extension-community/commit/c858e88c192307dcf9b30a5a6befe44b11c47d63))
+* show home empty state after new session ([751024b](https://github.com/phamtanminhtien/grok-build-extension-community/commit/751024b7566185170b8564abbe4dd7b5606f3bcc))
+* update package.json to include repository, bugs, and homepage fields ([55d7a6b](https://github.com/phamtanminhtien/grok-build-extension-community/commit/55d7a6baf43421973da54170f63ef106dbddc810))
+
+
+### Documentation
+
+* add product demo GIF to README ([bf2fc48](https://github.com/phamtanminhtien/grok-build-extension-community/commit/bf2fc48757340e9e01d395130632f030cebc5738))
+* add VS Code Marketplace and Open VSX install links ([e487f18](https://github.com/phamtanminhtien/grok-build-extension-community/commit/e487f18755ff5c66e1a356b123f2720b01900659))
+
 ## [0.3.3](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.2...v0.3.3) (2026-07-16)
 
 
