@@ -7,6 +7,14 @@
   "publisher": "tienpham",
   "license": "MIT",
   "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/phamtanminhtien/grok-build-extension-community.git"
+  },
+  "bugs": {
+    "url": "https://github.com/phamtanminhtien/grok-build-extension-community/issues"
+  },
+  "homepage": "https://github.com/phamtanminhtien/grok-build-extension-community#readme",
   "galleryBanner": {
     "color": "#0B0B0F",
     "theme": "dark"
@@ -301,9 +309,9 @@
     "compile": "yarn build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node scripts/run-tests.mjs",
-    "package": "vsce package --no-dependencies --allow-missing-repository",
+    "package": "vsce package --no-dependencies",
     "publish:ovsx": "node -e \"const {execSync}=require('node:child_process');const p=require('./package.json');execSync('npx --yes ovsx publish '+p.name+'-'+p.version+'.vsix',{stdio:'inherit'})\"",
-    "publish:vsce": "vsce publish --no-dependencies --allow-missing-repository",
+    "publish:vsce": "vsce publish --no-dependencies",
     "smoke:cli": "node scripts/smoke-cli.mjs"
   },
   "dependencies": {
