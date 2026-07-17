@@ -74,6 +74,7 @@ import {
   type GrokSession,
 } from "../session/grokSession";
 import { toAcpExtWireMethod } from "./acpExtMethod";
+import { buildInitializeClientCapabilities } from "./clientCapabilities";
 import { BinaryNotFoundError } from "./binaryResolver";
 import { readTextFileHost, writeTextFileHost } from "./hostFs";
 import {
@@ -2473,16 +2474,15 @@ export class AgentService implements vscode.Disposable {
     this.connection = connection;
 
     logInfo("Sending initialize…");
-    const initResult = await connection.agent.request(
+    const clientCapabilities = buildInitializeClientCapabilities();
+    logInfo(
+      `clientCapabilities terminal=${clientCapabilities.terminal} meta=${JSON.stringify(clientCapabilities._meta)}`,
+    );
+    const initResult = await connection.agent.request<acp.InitializeResponse>(
       acp.methods.agent.initialize,
       {
         protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: {
-          fs: {
-            readTextFile: true,
-            writeTextFile: true,
-          },
-        },
+        clientCapabilities,
       },
     );
 

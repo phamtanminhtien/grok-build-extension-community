@@ -1,9 +1,15 @@
 /**
- * ACP list wrappers for the Extensions panel (thin browse UI).
+ * ACP list + action wrappers for the Extensions panel.
  */
 
 import type { AgentService } from "../agent/agentService";
 import { resolveSessionCwd } from "../config/settings";
+import {
+  parseActionOutcome,
+  toExtRequest,
+  type ActionOutcome,
+  type ExtensionAction,
+} from "./actions.ts";
 import type {
   ExtensionsTabPayload,
   HooksListResponse,
@@ -11,8 +17,8 @@ import type {
   McpServersListResponse,
   PluginsListResponse,
   SkillsListResponse,
-} from "./extensionsTypes";
-import type { ExtensionsTab } from "./tabs";
+} from "./extensionsTypes.ts";
+import type { ExtensionsTab } from "./tabs.ts";
 
 export type {
   ExtensionRow,
@@ -29,9 +35,9 @@ export type {
   PluginsListResponse,
   SkillInfo,
   SkillsListResponse,
-} from "./extensionsTypes";
+} from "./extensionsTypes.ts";
 
-export { rowsForTab } from "./rows";
+export { rowsForTab } from "./rows.ts";
 
 function unwrapResult<T>(raw: unknown): T {
   if (raw && typeof raw === "object" && "result" in raw) {
@@ -100,4 +106,23 @@ export async function fetchExtensionsTab(
       return { tab, data: { servers: data?.servers ?? [] } };
     }
   }
+}
+
+/**
+ * Run a management action and return a normalized outcome.
+ * Caller should refresh the tab after success.
+ */
+export async function runExtensionAction(
+  agent: AgentService,
+  action: ExtensionAction,
+): Promise<ActionOutcome> {
+  const sessionId = agent.getSessionId() ?? undefined;
+  const cwd = resolveSessionCwd();
+  const req = toExtRequest(action, { sessionId, cwd });
+  if (!req) {
+    throw new Error("No active session — start the agent first");
+  }
+  await agent.ensureStarted();
+  const raw = await agent.requestExt(req.method, req.params);
+  return parseActionOutcome(raw);
 }

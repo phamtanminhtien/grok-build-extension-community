@@ -5,8 +5,10 @@
 
 import * as vscode from "vscode";
 import type { AgentService } from "../agent/agentService";
-import { logError, logWarn } from "../log/output";
-import { fetchExtensionsTab } from "./extensionsData";
+import { logError, logInfo, logWarn } from "../log/output";
+import type { ExtensionAction } from "./actions";
+import { tabToolbarActions } from "./actions";
+import { fetchExtensionsTab, runExtensionAction } from "./extensionsData";
 import { rowsForTab, type ExtensionRow } from "./rows";
 import {
   EXTENSIONS_TAB_LABELS,
@@ -102,7 +104,12 @@ export class ExtensionsPanel implements vscode.Disposable {
     if (!msg || typeof msg !== "object") {
       return;
     }
-    const m = msg as { type?: string; tab?: string; path?: string };
+    const m = msg as {
+      type?: string;
+      tab?: string;
+      path?: string;
+      action?: ExtensionAction;
+    };
 
     switch (m.type) {
       case "ready":
@@ -122,8 +129,48 @@ export class ExtensionsPanel implements vscode.Disposable {
           await openPathInEditor(m.path.trim());
         }
         break;
+      case "runAction":
+        if (m.action && typeof m.action === "object") {
+          await this.handleAction(m.action);
+        }
+        break;
       default:
         break;
+    }
+  }
+
+  private async handleAction(action: ExtensionAction): Promise<void> {
+    this.loading = true;
+    this.postState();
+    try {
+      await this.agent.ensureStarted();
+      const outcome = await runExtensionAction(this.agent, action);
+      logInfo(
+        `extensions action ${action.kind}: ${outcome.message}` +
+          (outcome.requiresRestart ? " (restart recommended)" : ""),
+      );
+      if (outcome.ok === false) {
+        void vscode.window.showWarningMessage(outcome.message);
+      } else {
+        void vscode.window.setStatusBarMessage(
+          `Grok: ${outcome.message}`,
+          4000,
+        );
+        if (outcome.requiresRestart) {
+          void vscode.window.showInformationMessage(
+            `${outcome.message} — restart the agent for full effect.`,
+          );
+        }
+      }
+      // Always refresh current tab after an action attempt.
+      this.cache.delete(this.tab);
+      await this.loadTab(this.tab, true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logWarn(`extensions action failed: ${message}`);
+      void vscode.window.showErrorMessage(`Grok Extensions: ${message}`);
+      this.loading = false;
+      this.postState();
     }
   }
 
@@ -171,6 +218,7 @@ export class ExtensionsPanel implements vscode.Disposable {
       tab: this.tab,
       loading: this.loading,
       agentReady: this.agent.getState().kind === "ready",
+      toolbarActions: tabToolbarActions(this.tab),
     });
   }
 
@@ -319,6 +367,21 @@ export class ExtensionsPanel implements vscode.Disposable {
   .row-actions {
     display: flex; flex-direction: column; gap: 4px; align-items: flex-end;
   }
+  .row-btns {
+    display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end;
+  }
+  button.act {
+    border: none;
+    border-radius: 4px;
+    padding: 2px 8px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    background: var(--btn-sec);
+    color: var(--btn-sec-fg);
+  }
+  button.act:hover { filter: brightness(1.08); }
+  button.act:disabled { opacity: 0.5; cursor: default; }
   .badges { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
   .badge {
     font-size: 10px;
@@ -347,7 +410,8 @@ export class ExtensionsPanel implements vscode.Disposable {
     <div class="tabs">${tabButtons}</div>
     <div class="actions">
       <input id="filter" type="search" placeholder="Filter…" />
-      <button type="button" class="btn" id="refresh" title="Refresh">
+      <span id="toolbar-extra"></span>
+      <button type="button" class="btn" id="refresh" title="Refresh list">
         <i class="ti ti-refresh"></i> Refresh
       </button>
     </div>
@@ -362,10 +426,12 @@ let currentTab = ${JSON.stringify(this.tab)};
 let rows = [];
 let loading = false;
 let errorMsg = '';
+let toolbarActions = [];
 
 const listEl = document.getElementById('list');
 const statusEl = document.getElementById('status');
 const filterEl = document.getElementById('filter');
+const toolbarExtra = document.getElementById('toolbar-extra');
 
 function setActiveTab(tab) {
   currentTab = tab;
@@ -375,7 +441,23 @@ function setActiveTab(tab) {
   }
 }
 
+function renderToolbar() {
+  toolbarExtra.innerHTML = '';
+  for (const a of toolbarActions) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = a.label || a.id;
+    btn.disabled = loading;
+    btn.addEventListener('click', () => {
+      if (a.action) vscode.postMessage({ type: 'runAction', action: a.action });
+    });
+    toolbarExtra.appendChild(btn);
+  }
+}
+
 function render() {
+  renderToolbar();
   const q = (filterEl.value || '').toLowerCase().trim();
   const filtered = !q
     ? rows
@@ -410,6 +492,10 @@ function render() {
     const open = r.path
       ? '<a class="path" data-path="' + escapeAttr(r.path) + '" href="#">Open</a>'
       : '';
+    const acts = (r.actions || []).map((a, j) =>
+      '<button type="button" class="act" data-row="' + i + '" data-act="' + j + '"' +
+      (loading ? ' disabled' : '') + '>' + escapeHtml(a.label || a.id) + '</button>'
+    ).join('');
     return '<div class="row' + (r.isHeader ? ' header' : '') + '" data-i="' + i + '">' +
       '<div>' +
         '<div class="title">' + escapeHtml(r.title || '') + '</div>' +
@@ -418,7 +504,7 @@ function render() {
       '</div>' +
       '<div class="row-actions">' +
         '<div class="badges">' + badges + '</div>' +
-        open +
+        '<div class="row-btns">' + acts + open + '</div>' +
       '</div>' +
     '</div>';
   }).join('');
@@ -428,6 +514,15 @@ function render() {
       e.preventDefault();
       const path = a.getAttribute('data-path');
       if (path) vscode.postMessage({ type: 'openPath', path });
+    });
+  });
+  listEl.querySelectorAll('button.act').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ri = Number(btn.getAttribute('data-row'));
+      const aj = Number(btn.getAttribute('data-act'));
+      const row = filtered[ri];
+      const action = row && row.actions && row.actions[aj] && row.actions[aj].action;
+      if (action) vscode.postMessage({ type: 'runAction', action });
     });
   });
 }
@@ -461,6 +556,7 @@ window.addEventListener('message', (event) => {
   if (msg.type === 'state') {
     if (msg.tab) setActiveTab(msg.tab);
     loading = !!msg.loading;
+    if (Array.isArray(msg.toolbarActions)) toolbarActions = msg.toolbarActions;
     render();
   } else if (msg.type === 'loading') {
     if (msg.tab) setActiveTab(msg.tab);
@@ -503,9 +599,7 @@ async function openPathInEditor(path: string): Promise<void> {
     await vscode.window.showTextDocument(doc, { preview: true });
   } catch (err) {
     logError(`openPath ${path}`, err);
-    void vscode.window.showWarningMessage(
-      `Could not open path: ${path}`,
-    );
+    void vscode.window.showWarningMessage(`Could not open path: ${path}`);
   }
 }
 

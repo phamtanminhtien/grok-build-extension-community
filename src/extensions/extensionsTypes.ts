@@ -2,7 +2,10 @@
  * Wire + UI types for the Extensions panel (no vscode / agent imports).
  */
 
-import type { ExtensionsTab } from "./tabs";
+import type { ExtensionAction, RowActionButton } from "./actions.ts";
+import type { ExtensionsTab } from "./tabs.ts";
+
+export type { ExtensionAction, RowActionButton };
 
 export interface HookInfo {
   name: string;
@@ -115,6 +118,8 @@ export interface ExtensionRow {
   path?: string;
   badges?: string[];
   isHeader?: boolean;
+  /** Per-row management buttons (enable/disable/install…). */
+  actions?: RowActionButton[];
 }
 
 // re-export tab type for convenience

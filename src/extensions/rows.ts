@@ -2,10 +2,14 @@
  * Pure row mappers for the Extensions panel (unit-testable without vscode).
  */
 
-import type {
-  ExtensionRow,
-  ExtensionsTabPayload,
-} from "./extensionsTypes";
+import {
+  hooksEnableDisable,
+  marketplacePluginButtons,
+  mcpToggleButton,
+  pluginsEnableDisable,
+  skillsToggleButton,
+} from "./actions.ts";
+import type { ExtensionRow, ExtensionsTabPayload } from "./extensionsTypes.ts";
 
 export type {
   ExtensionRow,
@@ -22,7 +26,7 @@ export type {
   PluginsListResponse,
   SkillInfo,
   SkillsListResponse,
-} from "./extensionsTypes";
+} from "./extensionsTypes.ts";
 
 /** Normalize a tab payload into list rows for the webview. */
 export function rowsForTab(payload: ExtensionsTabPayload): ExtensionRow[] {
@@ -40,25 +44,34 @@ export function rowsForTab(payload: ExtensionsTabPayload): ExtensionRow[] {
         detail: h.command || h.url || h.sourceDir || "",
         path: h.sourceDir || h.command || undefined,
         badges: h.disabled ? ["disabled"] : [],
+        actions: h.name
+          ? [hooksEnableDisable(h.name, !!h.disabled)]
+          : undefined,
       }));
     case "plugins":
-      return payload.data.plugins.map((p) => ({
-        title: p.name,
-        subtitle: [
-          p.scope,
-          p.enabled === false ? "disabled" : "enabled",
-          p.version ? `v${p.version}` : undefined,
-          p.skillCount != null ? `${p.skillCount} skills` : undefined,
-        ]
-          .filter(Boolean)
-          .join(" · "),
-        detail: p.description || p.root || "",
-        path: p.root,
-        badges: p.enabled === false ? ["disabled"] : [],
-      }));
+      return payload.data.plugins.map((p) => {
+        const id = p.id || p.name;
+        const enabled = p.enabled !== false;
+        return {
+          title: p.name,
+          subtitle: [
+            p.scope,
+            enabled ? "enabled" : "disabled",
+            p.version ? `v${p.version}` : undefined,
+            p.skillCount != null ? `${p.skillCount} skills` : undefined,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          detail: p.description || p.root || "",
+          path: p.root,
+          badges: enabled ? [] : ["disabled"],
+          actions: id ? [pluginsEnableDisable(id, enabled)] : undefined,
+        };
+      });
     case "marketplace": {
       const rows: ExtensionRow[] = [];
       for (const src of payload.data.sources) {
+        const sourceKey = src.sourceUrlOrPath || src.sourceName;
         rows.push({
           title: src.sourceName,
           subtitle: src.sourceKind || src.sourceUrlOrPath || "source",
@@ -70,6 +83,11 @@ export function rowsForTab(payload: ExtensionsTabPayload): ExtensionRow[] {
           isHeader: true,
         });
         for (const p of src.plugins ?? []) {
+          const rel = p.relativePath ?? "";
+          const actions =
+            sourceKey && rel
+              ? marketplacePluginButtons(sourceKey, rel, p.installStatus)
+              : [];
           rows.push({
             title: p.name,
             subtitle: [
@@ -81,25 +99,30 @@ export function rowsForTab(payload: ExtensionsTabPayload): ExtensionRow[] {
               .join(" · "),
             detail: p.description || "",
             badges: p.installStatus ? [p.installStatus] : [],
+            actions: actions.length ? actions : undefined,
           });
         }
       }
       return rows;
     }
     case "skills":
-      return payload.data.skills.map((s) => ({
-        title: s.displayName || s.name,
-        subtitle: [
-          s.scope,
-          s.enabled === false ? "disabled" : "enabled",
-          s.pluginName ? `plugin: ${s.pluginName}` : undefined,
-        ]
-          .filter(Boolean)
-          .join(" · "),
-        detail: s.shortDescription || s.description || s.path || "",
-        path: s.path,
-        badges: s.enabled === false ? ["disabled"] : [],
-      }));
+      return payload.data.skills.map((s) => {
+        const enabled = s.enabled !== false;
+        return {
+          title: s.displayName || s.name,
+          subtitle: [
+            s.scope,
+            enabled ? "enabled" : "disabled",
+            s.pluginName ? `plugin: ${s.pluginName}` : undefined,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          detail: s.shortDescription || s.description || s.path || "",
+          path: s.path,
+          badges: enabled ? [] : ["disabled"],
+          actions: s.name ? [skillsToggleButton(s.name, enabled)] : undefined,
+        };
+      });
     case "mcp":
       return payload.data.servers.map((s) => {
         const toolCount =
@@ -109,19 +132,22 @@ export function rowsForTab(payload: ExtensionsTabPayload): ExtensionRow[] {
           s.session?.tools?.length ??
           0;
         const status = s.status || s.session?.status;
+        const enabled = s.enabled !== false;
+        const name = s.name;
         return {
           title: s.displayName || s.name,
           subtitle: [
             s.source || s.type,
             status,
-            s.enabled === false ? "disabled" : "enabled",
+            enabled ? "enabled" : "disabled",
             toolCount ? `${toolCount} tools` : undefined,
             s.sourceLabel || s.configSource,
           ]
             .filter(Boolean)
             .join(" · "),
           detail: "",
-          badges: s.enabled === false ? ["disabled"] : status ? [status] : [],
+          badges: enabled ? (status ? [status] : []) : ["disabled"],
+          actions: name ? [mcpToggleButton(name, enabled)] : undefined,
         };
       });
   }
