@@ -55,7 +55,7 @@ function writeTextFile(path, content):
   doc = open or showTextDocument optional
   edit = WorkspaceEdit replacing full range or create file
   await workspace.applyEdit(edit)
-  // optional: save if setting grok.fs.autoSave === true
+  // save when grok.fs.autoSave is true (default)
 ```
 
 Policies (settings):
@@ -63,7 +63,7 @@ Policies (settings):
 | Setting | Default | Meaning |
 |---------|---------|---------|
 | `grok.fs.preferOpenBuffers` | `true` | Read from TextDocument when open |
-| `grok.fs.autoSave` | `false` | Save after host write |
+| `grok.fs.autoSave` | `true` | Save after host write |
 | `grok.fs.maxReadBytes` | e.g. 5_000_000 | Hard cap |
 
 ### Interaction with agent-side tools

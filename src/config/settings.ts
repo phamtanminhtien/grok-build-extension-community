@@ -39,7 +39,7 @@ export function getSettings(): GrokSettings {
       "**/*.pem",
     ],
     preferOpenBuffers: cfg.get<boolean>("fs.preferOpenBuffers") ?? true,
-    autoSave: cfg.get<boolean>("fs.autoSave") ?? false,
+    autoSave: cfg.get<boolean>("fs.autoSave") ?? true,
     maxReadBytes: cfg.get<number>("fs.maxReadBytes") ?? 5_000_000,
   };
 }

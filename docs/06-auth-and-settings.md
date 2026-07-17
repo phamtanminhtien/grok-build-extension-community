@@ -91,7 +91,7 @@ All settings under namespace **`grok`**.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `grok.fs.preferOpenBuffers` | boolean | `true` | Read open editors first |
-| `grok.fs.autoSave` | boolean | `false` | Save after host write |
+| `grok.fs.autoSave` | boolean | `true` | Save after host write |
 | `grok.fs.maxReadBytes` | number | `5000000` | Cap for host reads |
 
 ### UI

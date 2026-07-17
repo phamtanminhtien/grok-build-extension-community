@@ -283,8 +283,8 @@
         },
         "grok.fs.autoSave": {
           "type": "boolean",
-          "default": false,
-          "markdownDescription": "Save after host `fs/write_text_file`."
+          "default": true,
+          "markdownDescription": "Save after host `fs/write_text_file` so agent edits do not leave files dirty/unsaved."
         },
         "grok.fs.maxReadBytes": {
           "type": "number",
