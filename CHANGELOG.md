@@ -2,6 +2,14 @@
 
 All notable changes to **Grok Build - Community** are documented in this file.
 
+## [0.3.8](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.7...v0.3.8) (2026-07-18)
+
+
+### Features
+
+* **billing:** enhance billing usage response with auto-topup and effective usage percentage ([7fe0549](https://github.com/phamtanminhtien/grok-build-extension-community/commit/7fe05494352048834bcd62a6a02cf1bc6c2e0c86))
+* **chat:** improve layout of session rewind items and popover width ([ea049d1](https://github.com/phamtanminhtien/grok-build-extension-community/commit/ea049d1cd98c7688d95b278e9dbcbd5fbca92f27))
+
 ## [0.3.7](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.6...v0.3.7) (2026-07-18)
 
 
