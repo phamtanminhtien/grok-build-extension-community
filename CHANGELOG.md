@@ -2,6 +2,14 @@
 
 All notable changes to **Grok Build - Community** are documented in this file.
 
+## [0.3.7](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.6...v0.3.7) (2026-07-18)
+
+
+### Features
+
+* **billing:** implement billing usage display and parsing logic ([42b10e5](https://github.com/phamtanminhtien/grok-build-extension-community/commit/42b10e5fa4cb2e62c6bdc02e248b1f9d91f18dd0))
+* **tooltip:** implement custom tooltip functionality for enhanced user experience ([5e5a868](https://github.com/phamtanminhtien/grok-build-extension-community/commit/5e5a86849224bfaef6fbdf5252967fdea1a30c2b))
+
 ## [0.3.6](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.5...v0.3.6) (2026-07-17)
 
 
