@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  billingUsageResponseShape,
+  buildBillingUsageParts,
   buildContextBarParts,
   buildTurnStatusParts,
   formatContextBar,
@@ -11,6 +13,7 @@ import {
   formatThoughtHeader,
   formatTokensCompact,
   formatTokensContextBar,
+  parseBillingUsageResponse,
   processLabelForSessionUpdate,
   resolveContextWindowSize,
 } from "./turnStatusFormat.ts";
@@ -80,6 +83,116 @@ describe("formatContextTokens / formatCost", () => {
     assert.equal(formatCost(1.2, "USD"), "$1.20");
     assert.equal(formatCost(0, "USD"), undefined);
     assert.equal(formatCost(undefined), undefined);
+  });
+});
+
+describe("billing usage", () => {
+  it("prefers creditUsagePercent over legacy cents", () => {
+    const usage = parseBillingUsageResponse({
+      config: {
+        creditUsagePercent: 42.5,
+        monthlyLimit: { val: 1000 },
+        used: { val: 990 },
+        currentPeriod: {
+          type: "USAGE_PERIOD_TYPE_WEEKLY",
+          start: "2026-07-01T00:00:00Z",
+          end: "2026-08-01T00:00:00Z",
+        },
+      },
+    });
+    assert.equal(usage?.usagePct, 42.5);
+    assert.equal(usage?.periodType, "USAGE_PERIOD_TYPE_WEEKLY");
+    assert.equal(usage?.periodEndIso, "2026-08-01T00:00:00Z");
+  });
+
+  it("falls back to used divided by monthlyLimit", () => {
+    const usage = parseBillingUsageResponse({
+      result: {
+        config: {
+          monthlyLimit: { val: 4000 },
+          used: { val: 1000 },
+          billingPeriodEnd: "2026-08-01T00:00:00Z",
+        },
+      },
+    });
+    assert.equal(usage?.usagePct, 25);
+    assert.equal(usage?.periodEndIso, "2026-08-01T00:00:00Z");
+  });
+
+  it("matches TUI fallback to 0% when config has no usage fields", () => {
+    const usage = parseBillingUsageResponse({
+      config: {},
+      subscription_tier: "SuperGrok",
+    });
+    assert.equal(usage?.usagePct, 0);
+    assert.equal(buildBillingUsageParts(usage).text, "Usage 0%");
+  });
+
+  it("accepts nested envelopes and snake_case fields", () => {
+    const usage = parseBillingUsageResponse({
+      result: {
+        result: {
+          config: {
+            credit_usage_percent: 33.4,
+            current_period: {
+              start: "2026-07-01T00:00:00Z",
+              end: "2026-07-08T00:00:00Z",
+            },
+          },
+        },
+      },
+    });
+    assert.equal(usage?.usagePct, 33.4);
+    assert.equal(usage?.periodStartIso, "2026-07-01T00:00:00Z");
+    assert.equal(usage?.periodEndIso, "2026-07-08T00:00:00Z");
+  });
+
+  it("accepts raw JSON strings and content text blocks", () => {
+    const json = JSON.stringify({
+      config: {
+        creditUsagePercent: 12,
+        currentPeriod: { end: "2026-08-01T00:00:00Z" },
+      },
+    });
+    assert.equal(parseBillingUsageResponse(json)?.usagePct, 12);
+    assert.equal(
+      parseBillingUsageResponse({ content: [{ type: "text", text: json }] })
+        ?.periodEndIso,
+      "2026-08-01T00:00:00Z",
+    );
+  });
+
+  it("summarizes empty response shapes without dumping values", () => {
+    assert.equal(
+      billingUsageResponseShape({ result: { value: "{\"config\":null}" } }),
+      "object keys=result -> object keys=value -> string-json -> object keys=config",
+    );
+  });
+
+  it("warns when usage is ahead of linear pace to reset", () => {
+    const parts = buildBillingUsageParts(
+      {
+        usagePct: 50,
+        periodType: "USAGE_PERIOD_TYPE_WEEKLY",
+        periodStartIso: "2026-07-01T00:00:00Z",
+        periodEndIso: "2026-07-11T00:00:00Z",
+      },
+      Date.parse("2026-07-03T00:00:00Z"),
+    );
+    assert.equal(parts.visible, true);
+    assert.equal(parts.text, "Usage 50% !");
+    assert.equal(parts.level, "critical");
+    assert.match(parts.title, /^Weekly limit: 50%\nNext reset: /);
+    assert.match(parts.warning, /faster than linear allowance/);
+  });
+
+  it("uses monthly label in billing tooltip", () => {
+    const parts = buildBillingUsageParts({
+      usagePct: 10,
+      periodType: "USAGE_PERIOD_TYPE_MONTHLY",
+      periodEndIso: "2026-08-01T00:00:00Z",
+    });
+    assert.match(parts.title, /^Monthly limit: 10%\nNext reset: /);
   });
 });
 

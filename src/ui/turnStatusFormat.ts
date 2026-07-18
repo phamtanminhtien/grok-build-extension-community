@@ -18,6 +18,25 @@ export interface SessionUsageSnapshot {
   turnOutputTokens?: number;
 }
 
+export interface BillingUsageSnapshot {
+  /** Included credit usage percentage (0-100), matching TUI billing summary. */
+  usagePct: number;
+  /** Usage period type, e.g. `USAGE_PERIOD_TYPE_WEEKLY`. */
+  periodType?: string;
+  /** RFC 3339 usage period start, when the billing response provides it. */
+  periodStartIso?: string;
+  /** RFC 3339 usage refresh/reset timestamp. */
+  periodEndIso?: string;
+}
+
+export interface BillingUsageParts {
+  visible: boolean;
+  text: string;
+  level: "ok" | "warn" | "critical";
+  title: string;
+  warning: string;
+}
+
 export interface TurnStatusView {
   busy: boolean;
   /** Human process label: Thinking / Responding / tool title. */
@@ -25,6 +44,41 @@ export interface TurnStatusView {
   /** Elapsed ms for the current turn (0 when idle). */
   elapsedMs: number;
   usage: SessionUsageSnapshot;
+}
+
+interface CentLike {
+  val?: number;
+}
+
+interface BillingPeriodLike {
+  type?: string;
+  periodType?: string;
+  period_type?: string;
+  start?: string;
+  end?: string;
+}
+
+interface BillingConfigLike {
+  creditUsagePercent?: number;
+  credit_usage_percent?: number;
+  currentPeriod?: BillingPeriodLike;
+  current_period?: BillingPeriodLike;
+  monthlyLimit?: CentLike;
+  monthly_limit?: CentLike;
+  used?: CentLike;
+  billingPeriodStart?: string;
+  billing_period_start?: string;
+  billingPeriodEnd?: string;
+  billing_period_end?: string;
+}
+
+interface BillingResponseLike {
+  result?: BillingResponseLike;
+  config?: BillingConfigLike;
+  raw?: unknown;
+  value?: unknown;
+  text?: unknown;
+  content?: Array<{ text?: unknown }>;
 }
 
 /** Format elapsed like TUI: `0.5s`, `5.2s`, `32s`, `1m20s`, `1h2m`. */
@@ -187,6 +241,223 @@ export function contextUsageLevel(
     return "warn";
   }
   return "ok";
+}
+
+function finiteNumber(n: unknown): number | undefined {
+  return typeof n === "number" && Number.isFinite(n) ? n : undefined;
+}
+
+function clampPct(pct: number): number {
+  return Math.max(0, Math.min(100, pct));
+}
+
+function parseJsonString(raw: string): unknown {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return raw;
+  }
+}
+
+function asBillingObject(raw: unknown): BillingResponseLike | undefined {
+  if (typeof raw === "string") {
+    const parsed = parseJsonString(raw);
+    return parsed !== raw ? asBillingObject(parsed) : undefined;
+  }
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+  return raw as BillingResponseLike;
+}
+
+function unwrapBillingResponse(raw: unknown): BillingResponseLike | undefined {
+  let current: unknown = raw;
+  for (let i = 0; i < 8; i += 1) {
+    const obj = asBillingObject(current);
+    if (!obj) {
+      return undefined;
+    }
+    if (obj.config && typeof obj.config === "object") {
+      return obj;
+    }
+    current =
+      obj.result ??
+      obj.raw ??
+      obj.value ??
+      obj.text ??
+      obj.content?.find((block) => typeof block?.text === "string")?.text;
+  }
+  return undefined;
+}
+
+export function billingUsageResponseShape(raw: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = raw;
+  for (let i = 0; i < 4; i += 1) {
+    if (typeof current === "string") {
+      const parsed = parseJsonString(current);
+      parts.push(parsed === current ? "string" : "string-json");
+      current = parsed === current ? undefined : parsed;
+      continue;
+    }
+    if (!current || typeof current !== "object") {
+      parts.push(current == null ? "nullish" : typeof current);
+      break;
+    }
+    const obj = current as BillingResponseLike;
+    const keys = Object.keys(obj).slice(0, 8).join(",");
+    parts.push(`object keys=${keys}`);
+    if (obj.config) {
+      break;
+    }
+    current =
+      obj.result ??
+      obj.raw ??
+      obj.value ??
+      obj.text ??
+      obj.content?.find((block) => typeof block?.text === "string")?.text;
+  }
+  return parts.join(" -> ");
+}
+
+/**
+ * TUI billing parity: prefer `creditUsagePercent`, fallback to `used/monthlyLimit`.
+ */
+export function parseBillingUsageResponse(
+  raw: unknown,
+): BillingUsageSnapshot | undefined {
+  const wrapper = unwrapBillingResponse(raw);
+  const config = wrapper?.config;
+  if (!config) {
+    return undefined;
+  }
+
+  const explicitPct = finiteNumber(
+    config.creditUsagePercent ?? config.credit_usage_percent,
+  );
+  const limit = finiteNumber(
+    (config.monthlyLimit ?? config.monthly_limit)?.val,
+  ) ?? 0;
+  const used = finiteNumber(config.used?.val) ?? 0;
+  const usagePct =
+    explicitPct != null
+      ? clampPct(explicitPct)
+      : limit > 0
+        ? clampPct((used / limit) * 100)
+        : 0;
+
+  const currentPeriod = config.currentPeriod ?? config.current_period;
+  const periodType =
+    currentPeriod?.type ?? currentPeriod?.periodType ?? currentPeriod?.period_type;
+  const periodStartIso =
+    currentPeriod?.start ?? config.billingPeriodStart ?? config.billing_period_start;
+  const periodEndIso =
+    currentPeriod?.end ?? config.billingPeriodEnd ?? config.billing_period_end;
+  return {
+    usagePct,
+    periodType,
+    periodStartIso,
+    periodEndIso,
+  };
+}
+
+function billingPaceWarning(
+  usage: BillingUsageSnapshot,
+  nowMs: number,
+): string {
+  if (!usage.periodStartIso || !usage.periodEndIso || usage.usagePct <= 0) {
+    return "";
+  }
+  const startMs = Date.parse(usage.periodStartIso);
+  const endMs = Date.parse(usage.periodEndIso);
+  if (
+    !Number.isFinite(startMs) ||
+    !Number.isFinite(endMs) ||
+    endMs <= startMs ||
+    nowMs <= startMs
+  ) {
+    return "";
+  }
+
+  const expectedPct = clampPct(((nowMs - startMs) / (endMs - startMs)) * 100);
+  if (expectedPct <= 0 || usage.usagePct <= expectedPct + 5) {
+    return "";
+  }
+  const paceRatio = usage.usagePct / expectedPct;
+  if (paceRatio < 1.2) {
+    return "";
+  }
+  const faster = Math.round((paceRatio - 1) * 100);
+  return `Usage pace is ${faster}% faster than linear allowance to reset.`;
+}
+
+function formatResetTitle(periodEndIso?: string): string {
+  if (!periodEndIso) {
+    return "";
+  }
+  const dt = new Date(periodEndIso);
+  if (!Number.isFinite(dt.getTime())) {
+    return "";
+  }
+  return dt.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function billingUsageLabel(periodType?: string): string {
+  if (periodType?.includes("WEEKLY")) {
+    return "Weekly limit";
+  }
+  if (periodType?.includes("MONTHLY")) {
+    return "Monthly limit";
+  }
+  return "Usage";
+}
+
+export function buildBillingUsageParts(
+  usage: BillingUsageSnapshot | undefined,
+  nowMs = Date.now(),
+): BillingUsageParts {
+  if (!usage || !Number.isFinite(usage.usagePct)) {
+    return {
+      visible: false,
+      text: "",
+      level: "ok",
+      title: "",
+      warning: "",
+    };
+  }
+  const usagePct = clampPct(usage.usagePct);
+  const warning = billingPaceWarning({ ...usage, usagePct }, nowMs);
+  const level =
+    usagePct >= 95 || warning
+      ? "critical"
+      : usagePct >= 90
+        ? "warn"
+        : "ok";
+  const label = billingUsageLabel(usage.periodType);
+  const reset = formatResetTitle(usage.periodEndIso);
+  const title = [
+    `${label}: ${Math.floor(usagePct)}%`,
+    reset ? `Next reset: ${reset}` : "",
+    warning,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return {
+    visible: true,
+    text: `Usage ${Math.floor(usagePct)}%${warning ? " !" : ""}`,
+    level,
+    title,
+    warning,
+  };
 }
 
 /** Cost display: `$0.020`, `$1.20`, `€0.50` — omit free/zero. */

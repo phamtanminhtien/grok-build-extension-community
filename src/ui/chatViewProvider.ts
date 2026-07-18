@@ -70,8 +70,12 @@ import {
 } from "../agent/rewind";
 import { parseSessionNotificationMeta } from "./sessionNotificationMeta";
 import {
+  billingUsageResponseShape,
+  buildBillingUsageParts,
   buildTurnStatusParts,
   formatThoughtHeader,
+  parseBillingUsageResponse,
+  type BillingUsageSnapshot,
   processLabelForSessionUpdate,
   type SessionUsageSnapshot,
 } from "./turnStatusFormat";
@@ -198,6 +202,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private turnStartedAt: number | undefined;
   private turnProcess = "";
   private sessionUsage: SessionUsageSnapshot = {};
+  private billingUsage: BillingUsageSnapshot | undefined;
+  private billingRefreshInFlight: Promise<void> | undefined;
   private turnStatusTimer: ReturnType<typeof setInterval> | undefined;
   /** Wall-clock start of the current assistant's thought stream (live only). */
   private thoughtStartedAt: number | undefined;
@@ -275,7 +281,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           this.scheduleMessagesPost(true);
         }
       }),
-      this.agent.onStateChange((state) =>
+      this.agent.onStateChange((state) => {
         this.post({
           type: "agentState",
           state: state.kind,
@@ -286,8 +292,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
                 ? state.message
                 : "",
           model: getSettings().model || "default",
-        }),
-      ),
+        });
+        if (state.kind === "ready") {
+          void this.refreshBillingUsage();
+        } else if (this.billingUsage) {
+          this.billingUsage = undefined;
+          this.postTurnStatus();
+        }
+      }),
       this.agent.onAvailableCommands((cmds) => {
         slashRegistry.setAcpCommands(cmds);
       }),
@@ -324,6 +336,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         }
         // Clock + busy UI: onBusyChange(false) runs in sendPrompt finally.
         this.postTurnStatus();
+        void this.refreshBillingUsage();
       }),
       vscode.window.onDidChangeActiveTextEditor(() => this.postAutoContext()),
       vscode.window.onDidChangeTextEditorSelection((e) => {
@@ -346,6 +359,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       // Profile / gate from agent (auth/info + check_subscription).
       this.agent.onAuthProfileChange(() => {
         void this.pushFullState();
+        void this.refreshBillingUsage();
       }),
       // Keep empty-state Sign in / Log out + account label in sync when the
       // CLI mutates ~/.grok/auth.json (grok login / grok logout).
@@ -862,9 +876,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       },
       this.agentContextWindow(),
     );
+    const billingUsage = buildBillingUsageParts(this.billingUsage);
     this.post({
       type: "turnStatus",
       ...parts,
+      billingUsage,
       queueCount: qn,
     });
     // Always push context bar (even when process row is hidden when idle).
@@ -872,6 +888,32 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       type: "contextBar",
       ...parts.context,
     });
+  }
+
+  private async refreshBillingUsage(): Promise<void> {
+    if (this.billingRefreshInFlight) {
+      return this.billingRefreshInFlight;
+    }
+    this.billingRefreshInFlight = (async () => {
+      try {
+        const raw = await this.agent.requestExt<unknown>("x.ai/billing", {});
+        const next = parseBillingUsageResponse(raw);
+        if (next) {
+          this.billingUsage = next;
+          logInfo(
+            `billing usage ${Math.floor(next.usagePct)}% reset=${next.periodEndIso ?? ""}`,
+          );
+          this.postTurnStatus();
+        } else {
+          logInfo(`billing usage empty response (${billingUsageResponseShape(raw)})`);
+        }
+      } catch (err) {
+        logInfo(`billing usage unavailable: ${errMessage(err)}`);
+      } finally {
+        this.billingRefreshInFlight = undefined;
+      }
+    })();
+    return this.billingRefreshInFlight;
   }
 
   private async onMessage(msg: {
@@ -3609,6 +3651,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
               <circle class="ctx-ring-fill" cx="18" cy="18" r="14" fill="none" stroke-width="3.5" stroke-linecap="round" transform="rotate(-90 18 18)" stroke-dasharray="87.96" stroke-dashoffset="87.96" />
             </svg>
             <span class="ctx-usage-text" id="ctx-usage-text">—</span>
+          </div>
+          <div id="billing-usage" class="billing-usage" hidden title="Credit usage" aria-label="Credit usage">
+            <span class="billing-sep" aria-hidden="true">|</span>
+            <i class="ti ti-battery-2" aria-hidden="true"></i>
+            <span id="billing-usage-text">Usage 0%</span>
           </div>
           <div id="sticky" class="composer-sticky is-empty" aria-label="Attached context" aria-hidden="true"></div>
           <div class="actions-right">

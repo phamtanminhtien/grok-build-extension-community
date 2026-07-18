@@ -3145,6 +3145,82 @@ footer {
   color: var(--vscode-errorForeground, #f85149);
 }
 
+.billing-usage {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  min-width: 0;
+  max-width: 9em;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  user-select: none;
+  white-space: nowrap;
+}
+.billing-usage::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  display: none;
+  width: max-content;
+  max-width: min(260px, 72vw);
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--vscode-editorHoverWidget-background, var(--input-bg));
+  color: var(--vscode-editorHoverWidget-foreground, var(--fg));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--fg) 14%, transparent),
+    0 8px 22px color-mix(in srgb, var(--bg) 55%, #000);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-align: left;
+  white-space: pre-line;
+  pointer-events: none;
+}
+.billing-usage:hover::after,
+.billing-usage:focus-visible::after {
+  display: block;
+}
+.billing-usage[hidden] {
+  display: none !important;
+}
+.billing-usage .billing-sep {
+  color: color-mix(in srgb, var(--muted) 55%, transparent);
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 1;
+  margin: 0 1px;
+  opacity: 0.9;
+}
+.billing-usage i {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+.billing-usage span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.billing-usage.level-ok span:last-child,
+.billing-usage.level-ok i {
+  color: var(--fg);
+}
+.billing-usage.level-warn span:last-child,
+.billing-usage.level-warn i {
+  color: var(--vscode-editorWarning-foreground, #d29922);
+}
+.billing-usage.level-critical span:last-child,
+.billing-usage.level-critical i {
+  color: var(--vscode-errorForeground, #f85149);
+}
+
 /* ── Buttons ── */
 button {
   border: none;

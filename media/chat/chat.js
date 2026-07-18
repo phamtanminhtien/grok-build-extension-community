@@ -74,6 +74,8 @@ const ctxUsageTextEl = document.getElementById("ctx-usage-text");
 const ctxRingFillEl = ctxUsageEl
   ? ctxUsageEl.querySelector(".ctx-ring-fill")
   : null;
+const billingUsageEl = document.getElementById("billing-usage");
+const billingUsageTextEl = document.getElementById("billing-usage-text");
 /** Circumference for r=14 circle progress (2πr). */
 const CTX_RING_C = 2 * Math.PI * 14;
 const turnStatusEl = document.getElementById("turn-status");
@@ -3695,9 +3697,32 @@ function renderContextBar(c) {
   }
 }
 
+function renderBillingUsage(b) {
+  const hide = !b || !b.visible || !b.text;
+  if (!billingUsageEl) return;
+  if (hide) {
+    billingUsageEl.hidden = true;
+    billingUsageEl.className = "billing-usage";
+    billingUsageEl.removeAttribute("title");
+    billingUsageEl.removeAttribute("aria-label");
+    billingUsageEl.removeAttribute("data-tooltip");
+    if (billingUsageTextEl) billingUsageTextEl.textContent = "Usage 0%";
+    return;
+  }
+  const level = b.level || "ok";
+  const title = b.title || b.text;
+  billingUsageEl.hidden = false;
+  billingUsageEl.className = "billing-usage level-" + level;
+  billingUsageEl.title = title;
+  billingUsageEl.setAttribute("aria-label", title);
+  billingUsageEl.setAttribute("data-tooltip", title);
+  if (billingUsageTextEl) billingUsageTextEl.textContent = b.text;
+}
+
 function renderTurnStatus(s) {
   if (!s) return;
   if (s.context) renderContextBar(s.context);
+  if (s.billingUsage) renderBillingUsage(s.billingUsage);
 
   if (!s.visible) {
     turnStatusEl.hidden = true;
