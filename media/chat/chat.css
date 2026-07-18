@@ -1579,6 +1579,7 @@ header button.linkish:focus-visible {
 .session-rewind-item {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 2px;
   width: 100%;
   text-align: left;
@@ -1595,10 +1596,12 @@ header button.linkish:focus-visible {
   background: var(--list-hover, color-mix(in srgb, var(--fg) 10%, transparent));
 }
 .session-rewind-item .sr-label {
+  width: 100%;
   font-size: 12px;
   font-weight: 500;
 }
 .session-rewind-item .sr-detail {
+  width: 100%;
   font-size: 11px;
   color: var(--muted);
 }
@@ -2134,7 +2137,7 @@ footer {
 #rewind-popover {
   left: auto;
   right: 12px;
-  width: min(260px, calc(100% - 24px));
+  width: min(360px, calc(100% - 24px));
   z-index: 25;
   max-height: min(220px, 36vh);
 }
@@ -2387,6 +2390,7 @@ footer {
 .rewind-item {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 2px;
   width: 100%;
   text-align: left;
@@ -2403,10 +2407,12 @@ footer {
   background: var(--list-hover, color-mix(in srgb, var(--fg) 10%, transparent));
 }
 .rewind-item .rewind-label {
+  width: 100%;
   font-size: 12px;
   font-weight: 500;
 }
 .rewind-item .rewind-detail {
+  width: 100%;
   font-size: 11px;
   color: var(--muted);
 }
