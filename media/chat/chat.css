@@ -3161,34 +3161,6 @@ footer {
   user-select: none;
   white-space: nowrap;
 }
-.billing-usage::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 8px);
-  z-index: 30;
-  display: none;
-  width: max-content;
-  max-width: min(260px, 72vw);
-  padding: 7px 9px;
-  border-radius: var(--radius-sm);
-  background: var(--vscode-editorHoverWidget-background, var(--input-bg));
-  color: var(--vscode-editorHoverWidget-foreground, var(--fg));
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--fg) 14%, transparent),
-    0 8px 22px color-mix(in srgb, var(--bg) 55%, #000);
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.35;
-  letter-spacing: 0;
-  text-align: left;
-  white-space: pre-line;
-  pointer-events: none;
-}
-.billing-usage:hover::after,
-.billing-usage:focus-visible::after {
-  display: block;
-}
 .billing-usage[hidden] {
   display: none !important;
 }
@@ -3219,6 +3191,31 @@ footer {
 .billing-usage.level-critical span:last-child,
 .billing-usage.level-critical i {
   color: var(--vscode-errorForeground, #f85149);
+}
+
+#app-tooltip {
+  position: fixed;
+  z-index: 10000;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--vscode-editorHoverWidget-background, var(--input-bg));
+  color: var(--vscode-editorHoverWidget-foreground, var(--fg));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--fg) 14%, transparent),
+    0 8px 22px color-mix(in srgb, var(--bg) 55%, #000);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-align: left;
+  white-space: pre-line;
+  pointer-events: none;
+}
+
+#app-tooltip[hidden] {
+  display: none !important;
 }
 
 /* ── Buttons ── */

@@ -76,6 +76,11 @@ const ctxRingFillEl = ctxUsageEl
   : null;
 const billingUsageEl = document.getElementById("billing-usage");
 const billingUsageTextEl = document.getElementById("billing-usage-text");
+const appTooltip = document.createElement("div");
+appTooltip.id = "app-tooltip";
+appTooltip.setAttribute("role", "tooltip");
+appTooltip.hidden = true;
+document.body.appendChild(appTooltip);
 /** Circumference for r=14 circle progress (2πr). */
 const CTX_RING_C = 2 * Math.PI * 14;
 const turnStatusEl = document.getElementById("turn-status");
@@ -220,8 +225,7 @@ function setModelButtonLabel(label) {
 
   const effortBit = effortText ? " · " + effortText : "";
   if (btnModel) {
-    btnModel.title =
-      "Model: " + currentModelLabel + effortBit + " (same catalog as TUI)";
+    setTooltip(btnModel, "");
     btnModel.setAttribute(
       "aria-label",
       "Model " +
@@ -231,6 +235,99 @@ function setModelButtonLabel(label) {
     btnModel.setAttribute("aria-expanded", modelOpen ? "true" : "false");
   }
 }
+
+function tooltipAttr(text) {
+  return ' data-tooltip="' + esc(text) + '"';
+}
+
+function setTooltip(el, text) {
+  if (!el) return;
+  const value = String(text || "").trim();
+  if (!value) {
+    el.removeAttribute("data-tooltip");
+    el.removeAttribute("aria-describedby");
+    if (el.getAttribute("title") === "") el.removeAttribute("title");
+    return;
+  }
+  el.setAttribute("data-tooltip", value);
+  el.setAttribute("aria-describedby", "app-tooltip");
+  // Avoid native hover fighting the custom tooltip inside VS Code webviews.
+  el.title = "";
+}
+
+let activeTooltipTarget = null;
+
+function hideTooltip() {
+  activeTooltipTarget = null;
+  appTooltip.hidden = true;
+  appTooltip.textContent = "";
+}
+
+function positionTooltip(target) {
+  if (!target || appTooltip.hidden) return;
+  const r = target.getBoundingClientRect();
+  const margin = 8;
+  const gap = 8;
+  const tw = appTooltip.offsetWidth;
+  const th = appTooltip.offsetHeight;
+  let top = r.top - th - gap;
+  if (top < margin) top = r.bottom + gap;
+  let left = r.left + r.width / 2 - tw / 2;
+  left = Math.max(margin, Math.min(left, window.innerWidth - tw - margin));
+  top = Math.max(margin, Math.min(top, window.innerHeight - th - margin));
+  appTooltip.style.left = left + "px";
+  appTooltip.style.top = top + "px";
+}
+
+function showTooltip(target) {
+  if (!target || target.disabled || target.hidden) return;
+  const text = target.getAttribute("data-tooltip");
+  if (!text) return;
+  activeTooltipTarget = target;
+  appTooltip.textContent = text;
+  appTooltip.hidden = false;
+  positionTooltip(target);
+}
+
+document.addEventListener(
+  "pointerover",
+  (e) => {
+    const target = e.target && e.target.closest("[data-tooltip]");
+    if (target) showTooltip(target);
+  },
+  true,
+);
+document.addEventListener(
+  "pointerout",
+  (e) => {
+    if (
+      activeTooltipTarget &&
+      (!e.relatedTarget || !activeTooltipTarget.contains(e.relatedTarget))
+    ) {
+      hideTooltip();
+    }
+  },
+  true,
+);
+document.addEventListener(
+  "focusin",
+  (e) => showTooltip(e.target && e.target.closest("[data-tooltip]")),
+  true,
+);
+document.addEventListener(
+  "focusout",
+  (e) => {
+    if (
+      activeTooltipTarget &&
+      (!e.relatedTarget || !activeTooltipTarget.contains(e.relatedTarget))
+    ) {
+      hideTooltip();
+    }
+  },
+  true,
+);
+window.addEventListener("scroll", hideTooltip, true);
+window.addEventListener("resize", hideTooltip);
 
 function syncEffortLabelFromItems() {
   const hit = effortItems.find((e) => e.id === currentEffortId);
@@ -277,7 +374,7 @@ function applyModeState(s) {
   modeBtnLabel.textContent = label;
   const css = s.modeCss || modeCssForId(currentMode);
   btnMode.className = "secondary " + css;
-  btnMode.title = s.modeTitle || "Mode: " + label + " (Shift+Tab)";
+  setTooltip(btnMode, s.modeTitle || "Mode: " + label + "\nShift+Tab to cycle");
 }
 
 function applyModelsState(s) {
@@ -1794,7 +1891,7 @@ function attachCopyButtons(root) {
     const btn = document.createElement("button");
     btn.className = "copy-code";
     btn.type = "button";
-    btn.title = "Copy";
+    setTooltip(btn, "Copy code");
     btn.setAttribute("aria-label", "Copy code");
     btn.innerHTML = icon("copy");
     btn.addEventListener("click", (e) => {
@@ -2662,7 +2759,7 @@ function renderMsgActions(m) {
   const copyBtn = document.createElement("button");
   copyBtn.type = "button";
   copyBtn.className = "msg-act-copy msg-act-icon";
-  copyBtn.title = "Copy";
+  setTooltip(copyBtn, "Copy message");
   copyBtn.setAttribute("aria-label", "Copy message");
   copyBtn.innerHTML = icon("copy");
   copyBtn.addEventListener("click", (e) => {
@@ -2689,7 +2786,7 @@ function renderMsgActions(m) {
     const editBtn = document.createElement("button");
     editBtn.type = "button";
     editBtn.className = "msg-act-edit msg-act-icon";
-    editBtn.title = "Edit and resubmit";
+    setTooltip(editBtn, "Edit and resubmit");
     editBtn.setAttribute("aria-label", "Edit message");
     editBtn.innerHTML = icon("pencil");
     editBtn.addEventListener("click", (e) => {
@@ -2709,7 +2806,7 @@ function renderMsgActions(m) {
       const rewindBtn = document.createElement("button");
       rewindBtn.type = "button";
       rewindBtn.className = "msg-act-rewind msg-act-icon";
-      rewindBtn.title = "Rewind to this turn";
+      setTooltip(rewindBtn, "Rewind to this turn");
       rewindBtn.setAttribute("aria-label", "Rewind to this turn");
       rewindBtn.innerHTML = icon("arrow-back-up");
       rewindBtn.addEventListener("click", (e) => {
@@ -3657,11 +3754,15 @@ function renderContextBar(c) {
       ctxBarEl.textContent = "";
       ctxBarEl.className = "";
       ctxBarEl.removeAttribute("title");
+      ctxBarEl.removeAttribute("data-tooltip");
+      ctxBarEl.removeAttribute("aria-describedby");
     }
     if (ctxUsageEl) {
       ctxUsageEl.hidden = true;
       ctxUsageEl.className = "ctx-usage";
       ctxUsageEl.removeAttribute("title");
+      ctxUsageEl.removeAttribute("data-tooltip");
+      ctxUsageEl.removeAttribute("aria-describedby");
       if (ctxUsageTextEl) ctxUsageTextEl.textContent = "—";
       if (ctxRingFillEl) {
         ctxRingFillEl.style.strokeDasharray = String(CTX_RING_C);
@@ -3680,14 +3781,14 @@ function renderContextBar(c) {
     ctxBarEl.hidden = false;
     ctxBarEl.textContent = c.text;
     ctxBarEl.className = "level-" + level;
-    ctxBarEl.title = title;
+    setTooltip(ctxBarEl, title);
   }
 
   // Composer: mode | circle progress | tokens / context window.
   if (ctxUsageEl) {
     ctxUsageEl.hidden = false;
     ctxUsageEl.className = "ctx-usage level-" + level;
-    ctxUsageEl.title = title;
+    setTooltip(ctxUsageEl, title);
     if (ctxUsageTextEl) ctxUsageTextEl.textContent = c.text;
     if (ctxRingFillEl) {
       const offset = CTX_RING_C * (1 - pct / 100);
@@ -3706,6 +3807,7 @@ function renderBillingUsage(b) {
     billingUsageEl.removeAttribute("title");
     billingUsageEl.removeAttribute("aria-label");
     billingUsageEl.removeAttribute("data-tooltip");
+    billingUsageEl.removeAttribute("aria-describedby");
     if (billingUsageTextEl) billingUsageTextEl.textContent = "Usage 0%";
     return;
   }
@@ -3713,9 +3815,8 @@ function renderBillingUsage(b) {
   const title = b.title || b.text;
   billingUsageEl.hidden = false;
   billingUsageEl.className = "billing-usage level-" + level;
-  billingUsageEl.title = title;
+  setTooltip(billingUsageEl, title);
   billingUsageEl.setAttribute("aria-label", title);
-  billingUsageEl.setAttribute("data-tooltip", title);
   if (billingUsageTextEl) billingUsageTextEl.textContent = b.text;
 }
 
@@ -3928,33 +4029,36 @@ function updateSendStopButton() {
     (!planOpen && !busy && empty && !pendingEdit && !queueEditActive);
   if (cliMissing) {
     sendBtn.innerHTML = '<i class="ti ti-send" aria-hidden="true"></i>';
-    sendBtn.title = "Install Grok Build CLI first";
+    setTooltip(sendBtn, "Install Grok Build CLI first");
     sendBtn.setAttribute("aria-label", "Send (disabled — CLI missing)");
   } else if (asPlanFeedback) {
     sendBtn.innerHTML = '<i class="ti ti-edit" aria-hidden="true"></i>';
-    sendBtn.title = empty
-      ? "Type plan feedback, then press Enter / Request changes"
-      : "Request plan changes with composer text (Enter)";
+    setTooltip(
+      sendBtn,
+      empty
+        ? "Type plan feedback, then press Enter / Request changes"
+        : "Request plan changes with composer text (Enter)",
+    );
     sendBtn.setAttribute("aria-label", "Request plan changes");
   } else if (asStop) {
     sendBtn.innerHTML = '<i class="ti ti-player-stop" aria-hidden="true"></i>';
-    sendBtn.title = "Stop current turn (Esc)";
+    setTooltip(sendBtn, "Stop current turn (Esc)");
     sendBtn.setAttribute("aria-label", "Stop");
   } else if (queueEditActive) {
     sendBtn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i>';
-    sendBtn.title = "Save queued prompt edit";
+    setTooltip(sendBtn, "Save queued prompt edit");
     sendBtn.setAttribute("aria-label", "Save queue edit");
   } else if (pendingEdit) {
     sendBtn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i>';
-    sendBtn.title = "Resubmit edited message (choose rewind mode)";
+    setTooltip(sendBtn, "Resubmit edited message (choose rewind mode)");
     sendBtn.setAttribute("aria-label", "Resubmit");
   } else if (asQueue) {
     sendBtn.innerHTML = '<i class="ti ti-stack-2" aria-hidden="true"></i>';
-    sendBtn.title = "Queue follow-up (runs after current turn)";
+    setTooltip(sendBtn, "Queue follow-up (runs after current turn)");
     sendBtn.setAttribute("aria-label", "Queue");
   } else {
     sendBtn.innerHTML = '<i class="ti ti-send" aria-hidden="true"></i>';
-    sendBtn.title = "Send";
+    setTooltip(sendBtn, "Send");
     sendBtn.setAttribute("aria-label", "Send");
   }
 }
@@ -4038,10 +4142,14 @@ function renderTasks(items, runningCount) {
       esc(elapsed) +
       "</span>" +
       '<span class="t-actions">' +
-      '<button type="button" data-t-act="view" title="View output" aria-label="View output" ' +
+      '<button type="button" data-t-act="view" title="" aria-label="View output"' +
+      tooltipAttr("View output") +
+      " " +
       (canView ? "" : "disabled") +
       '><i class="ti ti-eye" aria-hidden="true"></i></button>' +
-      '<button type="button" data-t-act="kill" title="Stop" aria-label="Stop" ' +
+      '<button type="button" data-t-act="kill" title="" aria-label="Stop"' +
+      tooltipAttr("Stop task") +
+      " " +
       (canKill ? "" : "disabled") +
       '><i class="ti ti-x" aria-hidden="true"></i></button>' +
       "</span>";
@@ -4087,17 +4195,27 @@ function renderQueue(entries) {
       "</span>" +
       "</span>" +
       '<span class="q-actions">' +
-      '<button type="button" data-q-act="up" title="Move up" aria-label="Move up" ' +
+      '<button type="button" data-q-act="up" title="" aria-label="Move up"' +
+      tooltipAttr("Move up") +
+      " " +
       (i === 0 ? "disabled" : "") +
       '><i class="ti ti-arrow-up" aria-hidden="true"></i></button>' +
-      '<button type="button" data-q-act="down" title="Move down" aria-label="Move down" ' +
+      '<button type="button" data-q-act="down" title="" aria-label="Move down"' +
+      tooltipAttr("Move down") +
+      " " +
       (i === n - 1 ? "disabled" : "") +
       '><i class="ti ti-arrow-down" aria-hidden="true"></i></button>' +
-      '<button type="button" data-q-act="now" title="Send now" aria-label="Send now">' +
+      '<button type="button" data-q-act="now" title="" aria-label="Send now"' +
+      tooltipAttr("Send now") +
+      ">" +
       '<i class="ti ti-bolt" aria-hidden="true"></i></button>' +
-      '<button type="button" data-q-act="edit" title="Edit" aria-label="Edit">' +
+      '<button type="button" data-q-act="edit" title="" aria-label="Edit"' +
+      tooltipAttr("Edit queued prompt") +
+      ">" +
       '<i class="ti ti-pencil" aria-hidden="true"></i></button>' +
-      '<button type="button" data-q-act="remove" title="Remove" aria-label="Remove">' +
+      '<button type="button" data-q-act="remove" title="" aria-label="Remove"' +
+      tooltipAttr("Remove queued prompt") +
+      ">" +
       '<i class="ti ti-x" aria-hidden="true"></i></button>' +
       "</span>";
     list.appendChild(row);
