@@ -21,12 +21,20 @@ export interface SessionUsageSnapshot {
 export interface BillingUsageSnapshot {
   /** Included credit usage percentage (0-100), matching TUI billing summary. */
   usagePct: number;
+  /** Usage as a percentage of total budget (included + on-demand), TUI `effective_usage_pct`. */
+  effectiveUsagePct?: number;
   /** Usage period type, e.g. `USAGE_PERIOD_TYPE_WEEKLY`. */
   periodType?: string;
   /** RFC 3339 usage period start, when the billing response provides it. */
   periodStartIso?: string;
   /** RFC 3339 usage refresh/reset timestamp. */
   periodEndIso?: string;
+  /** Legacy pay-as-you-go state. */
+  payAsYouGo?: boolean;
+  onDemandCapCents?: number;
+  onDemandUsedCents?: number;
+  prepaidBalanceCents?: number;
+  autoTopup?: AutoTopupInfo;
 }
 
 export interface BillingUsageParts {
@@ -50,6 +58,12 @@ interface CentLike {
   val?: number;
 }
 
+interface AutoTopupInfo {
+  enabled: boolean;
+  topupAmountCents?: number;
+  maxAmountCents?: number;
+}
+
 interface BillingPeriodLike {
   type?: string;
   periodType?: string;
@@ -70,15 +84,30 @@ interface BillingConfigLike {
   billing_period_start?: string;
   billingPeriodEnd?: string;
   billing_period_end?: string;
+  onDemandCap?: CentLike;
+  on_demand_cap?: CentLike;
+  onDemandUsed?: CentLike;
+  on_demand_used?: CentLike;
+  prepaidBalance?: CentLike;
+  prepaid_balance?: CentLike;
 }
 
 interface BillingResponseLike {
   result?: BillingResponseLike;
   config?: BillingConfigLike;
+  rule?: AutoTopupRuleLike;
   raw?: unknown;
   value?: unknown;
   text?: unknown;
   content?: Array<{ text?: unknown }>;
+}
+
+interface AutoTopupRuleLike {
+  enabled?: boolean;
+  topupAmount?: CentLike;
+  topup_amount?: CentLike;
+  maxAmountPerMonth?: CentLike;
+  max_amount_per_month?: CentLike;
 }
 
 /** Format elapsed like TUI: `0.5s`, `5.2s`, `32s`, `1m20s`, `1h2m`. */
@@ -274,6 +303,10 @@ function asBillingObject(raw: unknown): BillingResponseLike | undefined {
   return raw as BillingResponseLike;
 }
 
+function centVal(cent: CentLike | undefined, fallback = 0): number {
+  return finiteNumber(cent?.val) ?? fallback;
+}
+
 function unwrapBillingResponse(raw: unknown): BillingResponseLike | undefined {
   let current: unknown = raw;
   for (let i = 0; i < 8; i += 1) {
@@ -281,7 +314,10 @@ function unwrapBillingResponse(raw: unknown): BillingResponseLike | undefined {
     if (!obj) {
       return undefined;
     }
-    if (obj.config && typeof obj.config === "object") {
+    if (
+      (obj.config && typeof obj.config === "object") ||
+      (obj.rule && typeof obj.rule === "object")
+    ) {
       return obj;
     }
     current =
@@ -329,6 +365,7 @@ export function billingUsageResponseShape(raw: unknown): string {
  */
 export function parseBillingUsageResponse(
   raw: unknown,
+  autoTopupRaw?: unknown,
 ): BillingUsageSnapshot | undefined {
   const wrapper = unwrapBillingResponse(raw);
   const config = wrapper?.config;
@@ -339,16 +376,29 @@ export function parseBillingUsageResponse(
   const explicitPct = finiteNumber(
     config.creditUsagePercent ?? config.credit_usage_percent,
   );
-  const limit = finiteNumber(
-    (config.monthlyLimit ?? config.monthly_limit)?.val,
-  ) ?? 0;
-  const used = finiteNumber(config.used?.val) ?? 0;
+  const limit = centVal(config.monthlyLimit ?? config.monthly_limit);
+  const used = centVal(config.used);
+  const hasCreditPct = explicitPct != null;
   const usagePct =
-    explicitPct != null
+    hasCreditPct
       ? clampPct(explicitPct)
       : limit > 0
         ? clampPct((used / limit) * 100)
         : 0;
+  const onDemandCap = centVal(config.onDemandCap ?? config.on_demand_cap);
+  const payAsYouGo = onDemandCap > 0;
+  const onDemandUsed = finiteNumber(
+    (config.onDemandUsed ?? config.on_demand_used)?.val,
+  ) ?? Math.max(used - limit, 0);
+  const effectiveUsagePct = payAsYouGo
+    ? usagePct >= 100
+      ? clampPct((onDemandUsed / onDemandCap) * 100)
+      : hasCreditPct
+        ? usagePct
+        : limit + onDemandCap > 0
+          ? clampPct((used / (limit + onDemandCap)) * 100)
+          : 0
+    : usagePct;
 
   const currentPeriod = config.currentPeriod ?? config.current_period;
   const periodType =
@@ -359,40 +409,37 @@ export function parseBillingUsageResponse(
     currentPeriod?.end ?? config.billingPeriodEnd ?? config.billing_period_end;
   return {
     usagePct,
+    effectiveUsagePct,
     periodType,
     periodStartIso,
     periodEndIso,
+    payAsYouGo,
+    onDemandCapCents: payAsYouGo ? onDemandCap : undefined,
+    onDemandUsedCents: payAsYouGo ? onDemandUsed : undefined,
+    prepaidBalanceCents: finiteNumber(
+      (config.prepaidBalance ?? config.prepaid_balance)?.val,
+    ),
+    autoTopup:
+      parseAutoTopupRuleResponse(autoTopupRaw) ??
+      parseAutoTopupRuleResponse(wrapper),
   };
 }
 
-function billingPaceWarning(
-  usage: BillingUsageSnapshot,
-  nowMs: number,
-): string {
-  if (!usage.periodStartIso || !usage.periodEndIso || usage.usagePct <= 0) {
-    return "";
+function parseAutoTopupRuleResponse(raw: unknown): AutoTopupInfo | undefined {
+  const wrapper = unwrapBillingResponse(raw);
+  const rule = wrapper?.rule;
+  if (!rule || typeof rule !== "object") {
+    return undefined;
   }
-  const startMs = Date.parse(usage.periodStartIso);
-  const endMs = Date.parse(usage.periodEndIso);
-  if (
-    !Number.isFinite(startMs) ||
-    !Number.isFinite(endMs) ||
-    endMs <= startMs ||
-    nowMs <= startMs
-  ) {
-    return "";
-  }
-
-  const expectedPct = clampPct(((nowMs - startMs) / (endMs - startMs)) * 100);
-  if (expectedPct <= 0 || usage.usagePct <= expectedPct + 5) {
-    return "";
-  }
-  const paceRatio = usage.usagePct / expectedPct;
-  if (paceRatio < 1.2) {
-    return "";
-  }
-  const faster = Math.round((paceRatio - 1) * 100);
-  return `Usage pace is ${faster}% faster than linear allowance to reset.`;
+  return {
+    enabled: rule.enabled === true,
+    topupAmountCents: finiteNumber(
+      (rule.topupAmount ?? rule.topup_amount)?.val,
+    ),
+    maxAmountCents: finiteNumber(
+      (rule.maxAmountPerMonth ?? rule.max_amount_per_month)?.val,
+    ),
+  };
 }
 
 function formatResetTitle(periodEndIso?: string): string {
@@ -421,10 +468,108 @@ function billingUsageLabel(periodType?: string): string {
   return "Usage";
 }
 
+function formatDollars(cents: number): string {
+  const dollars = Math.abs(cents) / 100;
+  return Number.isInteger(dollars) ? `$${dollars.toFixed(0)}` : `$${dollars.toFixed(2)}`;
+}
+
+function billingUsageSummary(usage: BillingUsageSnapshot, usagePct: number): string {
+  const label = billingUsageLabel(usage.periodType);
+  const reset = formatResetTitle(usage.periodEndIso);
+  const lines = [`${label}: ${Math.floor(usagePct)}%`];
+  if (reset) {
+    lines.push(`Next reset: ${reset}`);
+  }
+
+  const prepaid = Math.abs(usage.prepaidBalanceCents ?? 0);
+  if (prepaid > 0) {
+    lines.push("");
+    lines.push(`Credits: ${formatDollars(prepaid)}`);
+    const topup = usage.autoTopup;
+    if (topup?.enabled && topup.topupAmountCents != null) {
+      lines.push(`Auto topup: ${formatDollars(topup.topupAmountCents)}`);
+      if (topup.maxAmountCents != null) {
+        lines.push(`Max monthly topup: ${formatDollars(topup.maxAmountCents)}`);
+      }
+    } else {
+      lines.push("Auto topup: disabled");
+    }
+  }
+
+  if (usage.payAsYouGo) {
+    const used = Math.abs(usage.onDemandUsedCents ?? 0) / 100;
+    const cap = Math.abs(usage.onDemandCapCents ?? 0) / 100;
+    lines.push("");
+    lines.push(
+      `Pay-as-you-go: $${used.toFixed(2)} used of $${cap.toFixed(2)} limit`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
+const LOW_BALANCE_CENTS = 1000;
+const PAY_AS_YOU_GO_CRITICAL_CENTS = 500;
+
+function billingUsageWarning(
+  usage: BillingUsageSnapshot,
+  usagePct: number,
+): { text: string; critical: boolean } | undefined {
+  const creditsCents = Math.abs(usage.prepaidBalanceCents ?? 0);
+  if (creditsCents <= 0) {
+    if (usage.payAsYouGo) {
+      if (usagePct >= 100) {
+        const cap = Math.abs(usage.onDemandCapCents ?? 0);
+        const used = Math.abs(usage.onDemandUsedCents ?? 0);
+        const remaining = Math.max(cap - used, 0);
+        if (remaining <= LOW_BALANCE_CENTS) {
+          return {
+            text: `Pay-as-you-go limit left: ${formatDollars(remaining)}`,
+            critical: remaining <= PAY_AS_YOU_GO_CRITICAL_CENTS,
+          };
+        }
+      }
+      return undefined;
+    }
+
+    const effectivePct = usage.effectiveUsagePct ?? usagePct;
+    if (effectivePct > 90) {
+      const remaining = Math.max(100 - Math.floor(effectivePct), 0);
+      return {
+        text: `${billingUsageLabel(usage.periodType)} left: ${remaining}%`,
+        critical: effectivePct > 95,
+      };
+    }
+    return undefined;
+  }
+
+  if (usagePct < 100) {
+    return undefined;
+  }
+
+  const topup = usage.autoTopup;
+  if (!topup) {
+    return undefined;
+  }
+  if (!topup.enabled) {
+    return creditsCents <= LOW_BALANCE_CENTS
+      ? { text: `Credits left: ${formatDollars(creditsCents)}`, critical: true }
+      : undefined;
+  }
+  if (topup.maxAmountCents == null) {
+    return undefined;
+  }
+  const topupAmount = Math.abs(topup.topupAmountCents ?? 0);
+  return topupAmount > 0 && creditsCents < topupAmount
+    ? { text: `Credits left: ${formatDollars(creditsCents)}`, critical: true }
+    : undefined;
+}
+
 export function buildBillingUsageParts(
   usage: BillingUsageSnapshot | undefined,
   nowMs = Date.now(),
 ): BillingUsageParts {
+  void nowMs;
   if (!usage || !Number.isFinite(usage.usagePct)) {
     return {
       visible: false,
@@ -435,18 +580,16 @@ export function buildBillingUsageParts(
     };
   }
   const usagePct = clampPct(usage.usagePct);
-  const warning = billingPaceWarning({ ...usage, usagePct }, nowMs);
+  const warningInfo = billingUsageWarning({ ...usage, usagePct }, usagePct);
+  const warning = warningInfo?.text ?? "";
   const level =
-    usagePct >= 95 || warning
+    warningInfo?.critical || usagePct >= 95
       ? "critical"
-      : usagePct >= 90
+      : warning || usagePct >= 90
         ? "warn"
         : "ok";
-  const label = billingUsageLabel(usage.periodType);
-  const reset = formatResetTitle(usage.periodEndIso);
   const title = [
-    `${label}: ${Math.floor(usagePct)}%`,
-    reset ? `Next reset: ${reset}` : "",
+    billingUsageSummary(usage, usagePct),
     warning,
   ]
     .filter(Boolean)

@@ -897,7 +897,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.billingRefreshInFlight = (async () => {
       try {
         const raw = await this.agent.requestExt<unknown>("x.ai/billing", {});
-        const next = parseBillingUsageResponse(raw);
+        let autoTopupRaw: unknown | undefined;
+        try {
+          autoTopupRaw = await this.agent.requestExt<unknown>(
+            "x.ai/auto-topup-rule",
+            {},
+          );
+        } catch (err) {
+          logInfo(`billing auto-topup unavailable: ${errMessage(err)}`);
+        }
+        const next = parseBillingUsageResponse(raw, autoTopupRaw);
         if (next) {
           this.billingUsage = next;
           logInfo(

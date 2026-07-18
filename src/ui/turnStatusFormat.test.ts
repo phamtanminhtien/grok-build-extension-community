@@ -101,6 +101,7 @@ describe("billing usage", () => {
       },
     });
     assert.equal(usage?.usagePct, 42.5);
+    assert.equal(usage?.effectiveUsagePct, 42.5);
     assert.equal(usage?.periodType, "USAGE_PERIOD_TYPE_WEEKLY");
     assert.equal(usage?.periodEndIso, "2026-08-01T00:00:00Z");
   });
@@ -169,21 +170,22 @@ describe("billing usage", () => {
     );
   });
 
-  it("warns when usage is ahead of linear pace to reset", () => {
-    const parts = buildBillingUsageParts(
-      {
-        usagePct: 50,
-        periodType: "USAGE_PERIOD_TYPE_WEEKLY",
-        periodStartIso: "2026-07-01T00:00:00Z",
-        periodEndIso: "2026-07-11T00:00:00Z",
-      },
-      Date.parse("2026-07-03T00:00:00Z"),
-    );
+  it("matches TUI usage warning thresholds", () => {
+    const parts = buildBillingUsageParts({
+      usagePct: 92,
+      effectiveUsagePct: 92,
+    });
     assert.equal(parts.visible, true);
-    assert.equal(parts.text, "Usage 50% !");
-    assert.equal(parts.level, "critical");
-    assert.match(parts.title, /^Weekly limit: 50%\nNext reset: /);
-    assert.match(parts.warning, /faster than linear allowance/);
+    assert.equal(parts.text, "Usage 92% !");
+    assert.equal(parts.level, "warn");
+    assert.equal(parts.warning, "Usage left: 8%");
+
+    const critical = buildBillingUsageParts({
+      usagePct: 97,
+      effectiveUsagePct: 97,
+    });
+    assert.equal(critical.level, "critical");
+    assert.equal(critical.warning, "Usage left: 3%");
   });
 
   it("uses monthly label in billing tooltip", () => {
@@ -193,6 +195,46 @@ describe("billing usage", () => {
       periodEndIso: "2026-08-01T00:00:00Z",
     });
     assert.match(parts.title, /^Monthly limit: 10%\nNext reset: /);
+  });
+
+  it("includes TUI pay-as-you-go summary and warning", () => {
+    const usage = parseBillingUsageResponse({
+      config: {
+        creditUsagePercent: 100,
+        onDemandCap: { val: 5000 },
+        onDemandUsed: { val: 4650 },
+      },
+    });
+    const parts = buildBillingUsageParts(usage);
+    assert.match(
+      parts.title,
+      /Pay-as-you-go: \$46\.50 used of \$50\.00 limit/,
+    );
+    assert.equal(parts.warning, "Pay-as-you-go limit left: $3.50");
+    assert.equal(parts.level, "critical");
+  });
+
+  it("includes TUI credits and auto-topup summary", () => {
+    const usage = parseBillingUsageResponse(
+      {
+        config: {
+          creditUsagePercent: 100,
+          prepaidBalance: { val: 1500 },
+        },
+      },
+      {
+        rule: {
+          enabled: true,
+          topupAmount: { val: 2000 },
+          maxAmountPerMonth: { val: 10000 },
+        },
+      },
+    );
+    const parts = buildBillingUsageParts(usage);
+    assert.match(parts.title, /Credits: \$15/);
+    assert.match(parts.title, /Auto topup: \$20/);
+    assert.match(parts.title, /Max monthly topup: \$100/);
+    assert.equal(parts.warning, "Credits left: $15");
   });
 });
 
