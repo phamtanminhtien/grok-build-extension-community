@@ -97,6 +97,29 @@ import {
   type RewindPoint,
   type RewindResult,
 } from "./rewind";
+import {
+  WORKTREE_METHODS,
+  applyWorktreeParams,
+  createWorktreeParams,
+  formatStatusToast,
+  gcWorktreeParams,
+  listWorktreeParams,
+  parseApplyResponse,
+  parseCreateWorktreeResponse,
+  parseGcReport,
+  parseRemoveWorktreeResponse,
+  parseWorktreeListResponse,
+  parseWorktreeShowResponse,
+  parseWorktreeStatusNotification,
+  removeWorktreeParams,
+  showWorktreeParams,
+  type ApplyMode,
+  type ApplyResult,
+  type CreateWorktreeResult,
+  type GcReport,
+  type RemoveWorktreeResult,
+  type WorktreeRecord,
+} from "./worktree";
 import { toAcpExtWireMethod } from "./acpExtMethod";
 import { buildInitializeClientCapabilities } from "./clientCapabilities";
 import { BinaryNotFoundError } from "./binaryResolver";
@@ -1592,6 +1615,104 @@ export class AgentService implements vscode.Disposable {
     return parseRewindResponse(raw);
   }
 
+  // ── Worktrees (x.ai/git/worktree/*) ────────────────────────────────
+
+  /** List tracked worktrees (`x.ai/git/worktree/list`). */
+  async listWorktrees(opts?: {
+    repo?: string;
+    types?: string[];
+    includeAll?: boolean;
+  }): Promise<WorktreeRecord[]> {
+    logInfo(
+      `worktree/list includeAll=${opts?.includeAll === true} repo=${opts?.repo ?? ""}`,
+    );
+    const raw = await this.requestExt(
+      WORKTREE_METHODS.list,
+      listWorktreeParams(opts),
+    );
+    return parseWorktreeListResponse(raw);
+  }
+
+  /** Show one worktree by id or path. */
+  async showWorktree(idOrPath: string): Promise<WorktreeRecord | null> {
+    logInfo(`worktree/show ${idOrPath}`);
+    const raw = await this.requestExt(
+      WORKTREE_METHODS.show,
+      showWorktreeParams(idOrPath),
+    );
+    return parseWorktreeShowResponse(raw);
+  }
+
+  /** Remove a worktree by id or path. */
+  async removeWorktree(opts: {
+    idOrPath: string;
+    force?: boolean;
+    dryRun?: boolean;
+  }): Promise<RemoveWorktreeResult> {
+    logInfo(
+      `worktree/remove ${opts.idOrPath} force=${opts.force === true} dryRun=${opts.dryRun === true}`,
+    );
+    const raw = await this.requestExt(
+      WORKTREE_METHODS.remove,
+      removeWorktreeParams(opts),
+    );
+    return parseRemoveWorktreeResponse(raw);
+  }
+
+  /** Apply worktree changes back into the main working tree. */
+  async applyWorktree(opts: {
+    sessionId: string;
+    worktreePath: string;
+    mode?: ApplyMode;
+  }): Promise<ApplyResult | null> {
+    logInfo(
+      `worktree/apply session=${opts.sessionId} path=${opts.worktreePath} mode=${opts.mode ?? "overwrite"}`,
+    );
+    const raw = await this.requestExt(
+      WORKTREE_METHODS.apply,
+      applyWorktreeParams(opts),
+    );
+    return parseApplyResponse(raw);
+  }
+
+  /**
+   * Create a worktree for the current session (async; progress via
+   * `x.ai/git/worktree/status` notifications).
+   */
+  async createWorktree(opts: {
+    sessionId: string;
+    sourcePath: string;
+    label?: string;
+    copyMode?: "clean" | "dirty";
+    gitRef?: string;
+    worktreeType?: "linked" | "standalone" | "git";
+  }): Promise<CreateWorktreeResult | null> {
+    logInfo(
+      `worktree/create session=${opts.sessionId} source=${opts.sourcePath} label=${opts.label ?? ""}`,
+    );
+    const raw = await this.requestExt(
+      WORKTREE_METHODS.create,
+      createWorktreeParams(opts),
+    );
+    return parseCreateWorktreeResponse(raw);
+  }
+
+  /** Garbage-collect dead / expired worktrees. */
+  async gcWorktrees(opts?: {
+    dryRun?: boolean;
+    maxAge?: string;
+    force?: boolean;
+  }): Promise<GcReport> {
+    logInfo(
+      `worktree/gc dryRun=${opts?.dryRun === true} force=${opts?.force === true}`,
+    );
+    const raw = await this.requestExt(
+      WORKTREE_METHODS.gc,
+      gcWorktreeParams(opts),
+    );
+    return parseGcReport(raw);
+  }
+
   /**
    * Call an agent extension method (`x.ai/*`).
    *
@@ -2038,6 +2159,34 @@ export class AgentService implements vscode.Disposable {
         return;
       }
       throw err;
+    }
+  }
+
+  private handleWorktreeStatusNotification(raw: unknown): void {
+    const ev = parseWorktreeStatusNotification(unwrapExtParams(raw));
+    if (!ev) {
+      logWarn("x.ai/git/worktree/status: invalid payload");
+      return;
+    }
+    const toast = formatStatusToast(ev);
+    logInfo(`[worktree/status] ${ev.status} ${ev.message ?? ""}`);
+    if (ev.status === "error") {
+      void vscode.window.showErrorMessage(toast);
+      return;
+    }
+    if (ev.status === "created") {
+      void vscode.window.showInformationMessage(toast);
+      return;
+    }
+    // Progress-style events: keep noise low (notification only for useful phases).
+    if (
+      ev.status === "progress" ||
+      ev.status === "analyzing" ||
+      ev.status === "copyingChanges" ||
+      ev.status === "copyingIgnored"
+    ) {
+      // Status bar / output only — avoid toast spam on every file.
+      return;
     }
   }
 
@@ -2640,6 +2789,21 @@ export class AgentService implements vscode.Disposable {
         (p: unknown) => p,
         (ctx) => {
           this.handleTaskExtNotification(ctx.params);
+        },
+      )
+      // Worktree creation / copy progress.
+      .onNotification(
+        "_x.ai/git/worktree/status",
+        (p: unknown) => p,
+        (ctx) => {
+          this.handleWorktreeStatusNotification(ctx.params);
+        },
+      )
+      .onNotification(
+        "x.ai/git/worktree/status",
+        (p: unknown) => p,
+        (ctx) => {
+          this.handleWorktreeStatusNotification(ctx.params);
         },
       )
       .connect(stream);

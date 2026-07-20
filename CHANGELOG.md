@@ -2,127 +2,126 @@
 
 All notable changes to **Grok Build - Community** are documented in this file.
 
-## [0.3.8](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.7...v0.3.8) (2026-07-18)
-
-
-### Features
-
-* **billing:** enhance billing usage response with auto-topup and effective usage percentage ([7fe0549](https://github.com/phamtanminhtien/grok-build-extension-community/commit/7fe05494352048834bcd62a6a02cf1bc6c2e0c86))
-* **chat:** improve layout of session rewind items and popover width ([ea049d1](https://github.com/phamtanminhtien/grok-build-extension-community/commit/ea049d1cd98c7688d95b278e9dbcbd5fbca92f27))
-
-## [0.3.7](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.6...v0.3.7) (2026-07-18)
-
+## Unreleased
 
 ### Features
 
-* **billing:** implement billing usage display and parsing logic ([42b10e5](https://github.com/phamtanminhtien/grok-build-extension-community/commit/42b10e5fa4cb2e62c6bdc02e248b1f9d91f18dd0))
-* **tooltip:** implement custom tooltip functionality for enhanced user experience ([5e5a868](https://github.com/phamtanminhtien/grok-build-extension-community/commit/5e5a86849224bfaef6fbdf5252967fdea1a30c2b))
-
-## [0.3.6](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.5...v0.3.6) (2026-07-17)
-
-
-### Features
-
-* add Tasks panel with live subagent detail view ([6ac1ae9](https://github.com/phamtanminhtien/grok-build-extension-community/commit/6ac1ae9ccded1de3698b52a4b0bbed405a4d1b83))
-* advertise TUI client meta and wire Extensions panel actions ([e7ff65d](https://github.com/phamtanminhtien/grok-build-extension-community/commit/e7ff65dc830259167dec1e057624be3c9081ab74))
-* **chat:** inline [@mentions](https://github.com/mentions) with color and softer bubbles ([2048e6c](https://github.com/phamtanminhtien/grok-build-extension-community/commit/2048e6cecf183e3bdd3a42364a73d892c0101c62))
-* **chat:** move context chips into composer and simplify auto-attach toggle ([bd07b03](https://github.com/phamtanminhtien/grok-build-extension-community/commit/bd07b030e1fa0fd187b879647032a0ac08418544))
-* fold reasoning effort into model popover and button label ([281321c](https://github.com/phamtanminhtien/grok-build-extension-community/commit/281321cec5a942910d55fa7155657960b733a21f))
-* host rewind via x.ai/rewind/points and execute ([aa0b3cc](https://github.com/phamtanminhtien/grok-build-extension-community/commit/aa0b3cc7434431e9faf548a3c63b85f63f553e4b))
-* show context ring by mode and compact mode button when narrow ([80356fd](https://github.com/phamtanminhtien/grok-build-extension-community/commit/80356fd2b152f8d6a55fe8b0dafa1d537435518d))
-* wire hunk-tracker Accept/Reject on diff review ([8263eb1](https://github.com/phamtanminhtien/grok-build-extension-community/commit/8263eb1388b3bce2d6d4d028210ce57663c18c13))
-
-
-### Bug Fixes
-
-* polish in-chat rewind and accept shell dry-run previews ([a57a819](https://github.com/phamtanminhtien/grok-build-extension-community/commit/a57a819a139b975864da422c0a479a9ac3aad25f))
-* show loading feedback during /compact ([9ca9fb0](https://github.com/phamtanminhtien/grok-build-extension-community/commit/9ca9fb085cd4baf62b9f5b57f28b68b80ded5e88))
-
-## [0.3.5](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.4...v0.3.5) (2026-07-17)
-
-
-### Features
-
-* add Fix with Grok from diagnostics hover and Quick Fix ([b85a535](https://github.com/phamtanminhtien/grok-build-extension-community/commit/b85a53556a5f22a2e180030a32b71e38cc490d8c))
-* attach images in chat via paste, drop, and dialog ([3330397](https://github.com/phamtanminhtien/grok-build-extension-community/commit/33303975277391c6edf591e462ae6c8bab463bcc))
-* Enhance authentication flow and subscription management ([c7c5370](https://github.com/phamtanminhtien/grok-build-extension-community/commit/c7c53702063ac74a4c551022f7239ecbbfcb91f5))
-* icon-only copy button on markdown code blocks ([013ac61](https://github.com/phamtanminhtien/grok-build-extension-community/commit/013ac614ba2e5f776fae53c26e5f3b5136efc719))
-* plan approval UI, session_notification banners, session admin ([c6f281b](https://github.com/phamtanminhtien/grok-build-extension-community/commit/c6f281bd3cc28b2b8b70384b6f91825d939922ea))
-* sync permission mode and model defaults with CLI config.toml ([6395f8f](https://github.com/phamtanminhtien/grok-build-extension-community/commit/6395f8fa85e1ebc792833193a51a388df64823fd))
-* update chat command icons and add editor title integration ([02097b5](https://github.com/phamtanminhtien/grok-build-extension-community/commit/02097b5eb5af22e19737b49c43bef334214af2b5))
-
-## [0.3.4](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.3...v0.3.4) (2026-07-17)
-
-
-### Features
-
-* add shimmer effect for live assistant timeline and improve styling ([316abad](https://github.com/phamtanminhtien/grok-build-extension-community/commit/316abad112bb9675d1bb40c3ef924dab9e3e00b9))
-* add TUI-style prompt queue for mid-turn follow-ups ([51ac03f](https://github.com/phamtanminhtien/grok-build-extension-community/commit/51ac03f19a77ba919ba221fda15d61891d7d95ae))
-
-
-### Bug Fixes
-
-* default grok.fs.autoSave to true ([c858e88](https://github.com/phamtanminhtien/grok-build-extension-community/commit/c858e88c192307dcf9b30a5a6befe44b11c47d63))
-* show home empty state after new session ([751024b](https://github.com/phamtanminhtien/grok-build-extension-community/commit/751024b7566185170b8564abbe4dd7b5606f3bcc))
-* update package.json to include repository, bugs, and homepage fields ([55d7a6b](https://github.com/phamtanminhtien/grok-build-extension-community/commit/55d7a6baf43421973da54170f63ef106dbddc810))
-
+- **worktrees:** QuickPick manager for `x.ai/git/worktree/*` — list, create, open folder, apply, remove, GC; `/worktrees` slash + command palette; creation status notifications
+- **cli:** enforce minimum Grok CLI version via `grok.minCliVersion` (default `0.1.0`) with upgrade prompt
 
 ### Documentation
 
-* add product demo GIF to README ([bf2fc48](https://github.com/phamtanminhtien/grok-build-extension-community/commit/bf2fc48757340e9e01d395130632f030cebc5738))
-* add VS Code Marketplace and Open VSX install links ([e487f18](https://github.com/phamtanminhtien/grok-build-extension-community/commit/e487f18755ff5c66e1a356b123f2720b01900659))
+- expand Remote-SSH / WSL install matrix and troubleshooting in README
 
-## [0.3.3](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.2...v0.3.3) (2026-07-16)
-
+## [0.3.8](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.7...v0.3.8) (2026-07-18)
 
 ### Features
 
-* update display name in README and package.json to "Grok Build Community Edition" ([bf2b7bd](https://github.com/phamtanminhtien/grok-build-extension-community/commit/bf2b7bd0fbb5b671a88b5711b7788cb5556f5019))
+- **billing:** enhance billing usage response with auto-topup and effective usage percentage ([7fe0549](https://github.com/phamtanminhtien/grok-build-extension-community/commit/7fe05494352048834bcd62a6a02cf1bc6c2e0c86))
+- **chat:** improve layout of session rewind items and popover width ([ea049d1](https://github.com/phamtanminhtien/grok-build-extension-community/commit/ea049d1cd98c7688d95b278e9dbcbd5fbca92f27))
 
-## [0.3.2](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.1...v0.3.2) (2026-07-16)
-
+## [0.3.7](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.6...v0.3.7) (2026-07-18)
 
 ### Features
 
-* add Extensions editor panel for hooks, plugins, skills, MCP ([6b6faf2](https://github.com/phamtanminhtien/grok-build-extension-community/commit/6b6faf2cd264bd6a37be39b795e1b2eacb146380))
-* **auth:** support browser login/logout via ACP like CLI ([541b91e](https://github.com/phamtanminhtien/grok-build-extension-community/commit/541b91ee55e82fd36bc65e47d43db08bc1f3919b))
-* block agent use until Grok CLI is installed ([101b56e](https://github.com/phamtanminhtien/grok-build-extension-community/commit/101b56e67ef7e95b7ef389b035be83de8ce45538))
-* **chat:** add @ mention popover above composer like grok-build TUI ([0ef1e6b](https://github.com/phamtanminhtien/grok-build-extension-community/commit/0ef1e6b0b32ab7d894b10465da79dbc690510140))
-* **chat:** add message copy/edit, tool verb groups, and clean streaming ([9db0955](https://github.com/phamtanminhtien/grok-build-extension-community/commit/9db095509348f49f2deaf622f101e13df5ab2a56))
-* **chat:** add Shift+Tab mode cycle like TUI ([1fee227](https://github.com/phamtanminhtien/grok-build-extension-community/commit/1fee22763e29dbcd4669dd366b2f826158a4b81a))
-* **chat:** enhance assistant message handling with timeline support for text and tool events ([7b52f1a](https://github.com/phamtanminhtien/grok-build-extension-community/commit/7b52f1a95ac282b1500aedb2688178542ca6c908))
-* **chat:** enhance assistant timeline with thought segments and tool details ([bad0c99](https://github.com/phamtanminhtien/grok-build-extension-community/commit/bad0c99e884c6b4c453615e9946a213a1740c194))
-* **chat:** implement message chunk handling and caching for improved performance ([4d58aad](https://github.com/phamtanminhtien/grok-build-extension-community/commit/4d58aad7ea6f2e20f3d9321bbd48ec68af73c74f))
-* **chat:** implement turn status tracking and context bar for usage display ([d147d9c](https://github.com/phamtanminhtien/grok-build-extension-community/commit/d147d9c9940d54dc929c27819659e23c596cce20))
-* **chat:** permission/question popovers, stop button while busy ([6f310f6](https://github.com/phamtanminhtien/grok-build-extension-community/commit/6f310f6f932b17a3b880dae173106fd6818cf310))
-* **chat:** show focused-file auto-attach chip with toggle ([a87729c](https://github.com/phamtanminhtien/grok-build-extension-community/commit/a87729c5d12834fd78cfa41adb36b96517fd0343))
-* enhance authentication UX and sync with CLI session ([05521e5](https://github.com/phamtanminhtien/grok-build-extension-community/commit/05521e54be30bb5fb0774a8590515578aa32dd2a))
-* implement slash command registry and UI integration ([6ae53b1](https://github.com/phamtanminhtien/grok-build-extension-community/commit/6ae53b1a0b7118d19bf8a2707311fdb98c8e01dd))
-* **l2:** markdown, @ context, model pick, diffs, session history ([768528f](https://github.com/phamtanminhtien/grok-build-extension-community/commit/768528f357d1eaeb1895bf9ec5103eded80d1589))
-* polish chat shell — new session action, loading, icon send ([acd2e30](https://github.com/phamtanminhtien/grok-build-extension-community/commit/acd2e307811cf7a70b6ef86b78839bcab5ec69df))
-* rename package to grok-build-community-edition and update related references ([e827cca](https://github.com/phamtanminhtien/grok-build-extension-community/commit/e827cca5fb3b338cc6db4d8cad5c726c595e446c))
-* **session:** align history list with Grok TUI sources and UI ([62564fc](https://github.com/phamtanminhtien/grok-build-extension-community/commit/62564fcd651784e394ef6fbfca6c263411a5d4aa))
-* **session:** resume from ~/.grok/sessions like the TUI ([2245f63](https://github.com/phamtanminhtien/grok-build-extension-community/commit/2245f63a680398841c82a8324fbdabccf95d2812))
-* test harness, virtual list helper, and sanitized markdown ([fafcaa2](https://github.com/phamtanminhtien/grok-build-extension-community/commit/fafcaa2fad9a730cc8c4afe93c243bf095064a7d))
+- **billing:** implement billing usage display and parsing logic ([42b10e5](https://github.com/phamtanminhtien/grok-build-extension-community/commit/42b10e5fa4cb2e62c6bdc02e248b1f9d91f18dd0))
+- **tooltip:** implement custom tooltip functionality for enhanced user experience ([5e5a868](https://github.com/phamtanminhtien/grok-build-extension-community/commit/5e5a86849224bfaef6fbdf5252967fdea1a30c2b))
 
+## [0.3.6](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.5...v0.3.6) (2026-07-17)
+
+### Features
+
+- add Tasks panel with live subagent detail view ([6ac1ae9](https://github.com/phamtanminhtien/grok-build-extension-community/commit/6ac1ae9ccded1de3698b52a4b0bbed405a4d1b83))
+- advertise TUI client meta and wire Extensions panel actions ([e7ff65d](https://github.com/phamtanminhtien/grok-build-extension-community/commit/e7ff65dc830259167dec1e057624be3c9081ab74))
+- **chat:** inline [@mentions](https://github.com/mentions) with color and softer bubbles ([2048e6c](https://github.com/phamtanminhtien/grok-build-extension-community/commit/2048e6cecf183e3bdd3a42364a73d892c0101c62))
+- **chat:** move context chips into composer and simplify auto-attach toggle ([bd07b03](https://github.com/phamtanminhtien/grok-build-extension-community/commit/bd07b030e1fa0fd187b879647032a0ac08418544))
+- fold reasoning effort into model popover and button label ([281321c](https://github.com/phamtanminhtien/grok-build-extension-community/commit/281321cec5a942910d55fa7155657960b733a21f))
+- host rewind via x.ai/rewind/points and execute ([aa0b3cc](https://github.com/phamtanminhtien/grok-build-extension-community/commit/aa0b3cc7434431e9faf548a3c63b85f63f553e4b))
+- show context ring by mode and compact mode button when narrow ([80356fd](https://github.com/phamtanminhtien/grok-build-extension-community/commit/80356fd2b152f8d6a55fe8b0dafa1d537435518d))
+- wire hunk-tracker Accept/Reject on diff review ([8263eb1](https://github.com/phamtanminhtien/grok-build-extension-community/commit/8263eb1388b3bce2d6d4d028210ce57663c18c13))
 
 ### Bug Fixes
 
-* **chat:** auto-load model catalog from agent like TUI ([2ce8144](https://github.com/phamtanminhtien/grok-build-extension-community/commit/2ce8144e08237c3348e998da8aa3fe2c775147df))
-* **chat:** close popovers on outside click and Esc without input focus ([81816c4](https://github.com/phamtanminhtien/grok-build-extension-community/commit/81816c4f62b3f4c3b2806532c4caa568ba5235e1))
-* **chat:** fix assistant copy and lighten busy turn-status colors ([0ea4e1c](https://github.com/phamtanminhtien/grok-build-extension-community/commit/0ea4e1c7fcd68ee604a19a76e929676ff2847f85))
-* **session:** hide empty sessions like TUI /resume ([8bb98d4](https://github.com/phamtanminhtien/grok-build-extension-community/commit/8bb98d45d53f172b3ffc243a3306e145a5e02154))
-* **ui:** stop showing session UUIDs in history and status ([c1746aa](https://github.com/phamtanminhtien/grok-build-extension-community/commit/c1746aa4967b3db419096eed6a6263bf669f99aa))
-* use agent model context window for the usage bar ([4982505](https://github.com/phamtanminhtien/grok-build-extension-community/commit/4982505fd34e6355a43abe09394e4b1a0519f6d7))
+- polish in-chat rewind and accept shell dry-run previews ([a57a819](https://github.com/phamtanminhtien/grok-build-extension-community/commit/a57a819a139b975864da422c0a479a9ac3aad25f))
+- show loading feedback during /compact ([9ca9fb0](https://github.com/phamtanminhtien/grok-build-extension-community/commit/9ca9fb085cd4baf62b9f5b57f28b68b80ded5e88))
 
+## [0.3.5](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.4...v0.3.5) (2026-07-17)
+
+### Features
+
+- add Fix with Grok from diagnostics hover and Quick Fix ([b85a535](https://github.com/phamtanminhtien/grok-build-extension-community/commit/b85a53556a5f22a2e180030a32b71e38cc490d8c))
+- attach images in chat via paste, drop, and dialog ([3330397](https://github.com/phamtanminhtien/grok-build-extension-community/commit/33303975277391c6edf591e462ae6c8bab463bcc))
+- Enhance authentication flow and subscription management ([c7c5370](https://github.com/phamtanminhtien/grok-build-extension-community/commit/c7c53702063ac74a4c551022f7239ecbbfcb91f5))
+- icon-only copy button on markdown code blocks ([013ac61](https://github.com/phamtanminhtien/grok-build-extension-community/commit/013ac614ba2e5f776fae53c26e5f3b5136efc719))
+- plan approval UI, session_notification banners, session admin ([c6f281b](https://github.com/phamtanminhtien/grok-build-extension-community/commit/c6f281bd3cc28b2b8b70384b6f91825d939922ea))
+- sync permission mode and model defaults with CLI config.toml ([6395f8f](https://github.com/phamtanminhtien/grok-build-extension-community/commit/6395f8fa85e1ebc792833193a51a388df64823fd))
+- update chat command icons and add editor title integration ([02097b5](https://github.com/phamtanminhtien/grok-build-extension-community/commit/02097b5eb5af22e19737b49c43bef334214af2b5))
+
+## [0.3.4](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.3...v0.3.4) (2026-07-17)
+
+### Features
+
+- add shimmer effect for live assistant timeline and improve styling ([316abad](https://github.com/phamtanminhtien/grok-build-extension-community/commit/316abad112bb9675d1bb40c3ef924dab9e3e00b9))
+- add TUI-style prompt queue for mid-turn follow-ups ([51ac03f](https://github.com/phamtanminhtien/grok-build-extension-community/commit/51ac03f19a77ba919ba221fda15d61891d7d95ae))
+
+### Bug Fixes
+
+- default grok.fs.autoSave to true ([c858e88](https://github.com/phamtanminhtien/grok-build-extension-community/commit/c858e88c192307dcf9b30a5a6befe44b11c47d63))
+- show home empty state after new session ([751024b](https://github.com/phamtanminhtien/grok-build-extension-community/commit/751024b7566185170b8564abbe4dd7b5606f3bcc))
+- update package.json to include repository, bugs, and homepage fields ([55d7a6b](https://github.com/phamtanminhtien/grok-build-extension-community/commit/55d7a6baf43421973da54170f63ef106dbddc810))
+
+### Documentation
+
+- add product demo GIF to README ([bf2fc48](https://github.com/phamtanminhtien/grok-build-extension-community/commit/bf2fc48757340e9e01d395130632f030cebc5738))
+- add VS Code Marketplace and Open VSX install links ([e487f18](https://github.com/phamtanminhtien/grok-build-extension-community/commit/e487f18755ff5c66e1a356b123f2720b01900659))
+
+## [0.3.3](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.2...v0.3.3) (2026-07-16)
+
+### Features
+
+- update display name in README and package.json to "Grok Build Community Edition" ([bf2b7bd](https://github.com/phamtanminhtien/grok-build-extension-community/commit/bf2b7bd0fbb5b671a88b5711b7788cb5556f5019))
+
+## [0.3.2](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.1...v0.3.2) (2026-07-16)
+
+### Features
+
+- add Extensions editor panel for hooks, plugins, skills, MCP ([6b6faf2](https://github.com/phamtanminhtien/grok-build-extension-community/commit/6b6faf2cd264bd6a37be39b795e1b2eacb146380))
+- **auth:** support browser login/logout via ACP like CLI ([541b91e](https://github.com/phamtanminhtien/grok-build-extension-community/commit/541b91ee55e82fd36bc65e47d43db08bc1f3919b))
+- block agent use until Grok CLI is installed ([101b56e](https://github.com/phamtanminhtien/grok-build-extension-community/commit/101b56e67ef7e95b7ef389b035be83de8ce45538))
+- **chat:** add @ mention popover above composer like grok-build TUI ([0ef1e6b](https://github.com/phamtanminhtien/grok-build-extension-community/commit/0ef1e6b0b32ab7d894b10465da79dbc690510140))
+- **chat:** add message copy/edit, tool verb groups, and clean streaming ([9db0955](https://github.com/phamtanminhtien/grok-build-extension-community/commit/9db095509348f49f2deaf622f101e13df5ab2a56))
+- **chat:** add Shift+Tab mode cycle like TUI ([1fee227](https://github.com/phamtanminhtien/grok-build-extension-community/commit/1fee22763e29dbcd4669dd366b2f826158a4b81a))
+- **chat:** enhance assistant message handling with timeline support for text and tool events ([7b52f1a](https://github.com/phamtanminhtien/grok-build-extension-community/commit/7b52f1a95ac282b1500aedb2688178542ca6c908))
+- **chat:** enhance assistant timeline with thought segments and tool details ([bad0c99](https://github.com/phamtanminhtien/grok-build-extension-community/commit/bad0c99e884c6b4c453615e9946a213a1740c194))
+- **chat:** implement message chunk handling and caching for improved performance ([4d58aad](https://github.com/phamtanminhtien/grok-build-extension-community/commit/4d58aad7ea6f2e20f3d9321bbd48ec68af73c74f))
+- **chat:** implement turn status tracking and context bar for usage display ([d147d9c](https://github.com/phamtanminhtien/grok-build-extension-community/commit/d147d9c9940d54dc929c27819659e23c596cce20))
+- **chat:** permission/question popovers, stop button while busy ([6f310f6](https://github.com/phamtanminhtien/grok-build-extension-community/commit/6f310f6f932b17a3b880dae173106fd6818cf310))
+- **chat:** show focused-file auto-attach chip with toggle ([a87729c](https://github.com/phamtanminhtien/grok-build-extension-community/commit/a87729c5d12834fd78cfa41adb36b96517fd0343))
+- enhance authentication UX and sync with CLI session ([05521e5](https://github.com/phamtanminhtien/grok-build-extension-community/commit/05521e54be30bb5fb0774a8590515578aa32dd2a))
+- implement slash command registry and UI integration ([6ae53b1](https://github.com/phamtanminhtien/grok-build-extension-community/commit/6ae53b1a0b7118d19bf8a2707311fdb98c8e01dd))
+- **l2:** markdown, @ context, model pick, diffs, session history ([768528f](https://github.com/phamtanminhtien/grok-build-extension-community/commit/768528f357d1eaeb1895bf9ec5103eded80d1589))
+- polish chat shell — new session action, loading, icon send ([acd2e30](https://github.com/phamtanminhtien/grok-build-extension-community/commit/acd2e307811cf7a70b6ef86b78839bcab5ec69df))
+- rename package to grok-build-community-edition and update related references ([e827cca](https://github.com/phamtanminhtien/grok-build-extension-community/commit/e827cca5fb3b338cc6db4d8cad5c726c595e446c))
+- **session:** align history list with Grok TUI sources and UI ([62564fc](https://github.com/phamtanminhtien/grok-build-extension-community/commit/62564fcd651784e394ef6fbfca6c263411a5d4aa))
+- **session:** resume from ~/.grok/sessions like the TUI ([2245f63](https://github.com/phamtanminhtien/grok-build-extension-community/commit/2245f63a680398841c82a8324fbdabccf95d2812))
+- test harness, virtual list helper, and sanitized markdown ([fafcaa2](https://github.com/phamtanminhtien/grok-build-extension-community/commit/fafcaa2fad9a730cc8c4afe93c243bf095064a7d))
+
+### Bug Fixes
+
+- **chat:** auto-load model catalog from agent like TUI ([2ce8144](https://github.com/phamtanminhtien/grok-build-extension-community/commit/2ce8144e08237c3348e998da8aa3fe2c775147df))
+- **chat:** close popovers on outside click and Esc without input focus ([81816c4](https://github.com/phamtanminhtien/grok-build-extension-community/commit/81816c4f62b3f4c3b2806532c4caa568ba5235e1))
+- **chat:** fix assistant copy and lighten busy turn-status colors ([0ea4e1c](https://github.com/phamtanminhtien/grok-build-extension-community/commit/0ea4e1c7fcd68ee604a19a76e929676ff2847f85))
+- **session:** hide empty sessions like TUI /resume ([8bb98d4](https://github.com/phamtanminhtien/grok-build-extension-community/commit/8bb98d45d53f172b3ffc243a3306e145a5e02154))
+- **ui:** stop showing session UUIDs in history and status ([c1746aa](https://github.com/phamtanminhtien/grok-build-extension-community/commit/c1746aa4967b3db419096eed6a6263bf669f99aa))
+- use agent model context window for the usage bar ([4982505](https://github.com/phamtanminhtien/grok-build-extension-community/commit/4982505fd34e6355a43abe09394e4b1a0519f6d7))
 
 ### CI
 
-* add GitHub Actions for CI and marketplace/Open VSX release ([cb853a3](https://github.com/phamtanminhtien/grok-build-extension-community/commit/cb853a34d70b1069ac8fc688d79ad39c5dfb0097))
-* fix Node 22 for tests and clarify release triggers ([719e9e6](https://github.com/phamtanminhtien/grok-build-extension-community/commit/719e9e66ecdfac32584117abbe989a716a45a971))
-* fix release-please summary step shell quoting ([10e4584](https://github.com/phamtanminhtien/grok-build-extension-community/commit/10e45849657ea13abab490e78dd6c8f5570301e1))
-* set up Google release-please for automated version PRs ([b659b08](https://github.com/phamtanminhtien/grok-build-extension-community/commit/b659b08f8d07ac0ed701409b42403dafba4f46e1))
-* switch GitHub Actions from npm to yarn ([c09e771](https://github.com/phamtanminhtien/grok-build-extension-community/commit/c09e771590d0060966853e69c317c44f9b5ed967))
+- add GitHub Actions for CI and marketplace/Open VSX release ([cb853a3](https://github.com/phamtanminhtien/grok-build-extension-community/commit/cb853a34d70b1069ac8fc688d79ad39c5dfb0097))
+- fix Node 22 for tests and clarify release triggers ([719e9e6](https://github.com/phamtanminhtien/grok-build-extension-community/commit/719e9e66ecdfac32584117abbe989a716a45a971))
+- fix release-please summary step shell quoting ([10e4584](https://github.com/phamtanminhtien/grok-build-extension-community/commit/10e45849657ea13abab490e78dd6c8f5570301e1))
+- set up Google release-please for automated version PRs ([b659b08](https://github.com/phamtanminhtien/grok-build-extension-community/commit/b659b08f8d07ac0ed701409b42403dafba4f46e1))
+- switch GitHub Actions from npm to yarn ([c09e771](https://github.com/phamtanminhtien/grok-build-extension-community/commit/c09e771590d0060966853e69c317c44f9b5ed967))
 
 ## [0.3.1] — 2026-07-16
 

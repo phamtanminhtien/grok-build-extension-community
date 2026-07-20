@@ -9,6 +9,11 @@ import {
 export interface GrokSettings {
   binaryPath: string;
   /**
+   * Minimum `grok` CLI semver required to start the agent.
+   * Empty / "off" disables the gate. Default `0.1.0`.
+   */
+  minCliVersion: string;
+  /**
    * Default model from `~/.grok/config.toml` `[models].default`
    * (shared with CLI/TUI).
    */
@@ -44,6 +49,7 @@ export function getSettings(): GrokSettings {
   const models = loadModelsConfig();
   return {
     binaryPath: (cfg.get<string>("binaryPath") ?? "").trim(),
+    minCliVersion: (cfg.get<string>("minCliVersion") ?? "0.1.0").trim(),
     model: models.defaultModel,
     reasoningEffort: models.defaultReasoningEffort,
     alwaysApprove: isAlwaysApproveMode(permissionMode),

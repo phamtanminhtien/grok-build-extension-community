@@ -26,6 +26,7 @@ import {
   type RewindResult,
 } from "../agent/rewind";
 import { formatTasksReport } from "../agent/tasksStore";
+import { runWorktreePicker } from "../agent/worktreePicker";
 import { parseInvocation } from "./detect";
 import { HOST_COMMANDS } from "./hostCommands";
 import type { SlashRegistry } from "./registry";
@@ -421,6 +422,12 @@ async function runHostAction(
         /* ignore */
       }
       return formatTasksReport(deps.agent.getTasks());
+    }
+    case "showWorktrees": {
+      await runWorktreePicker(deps.agent, {
+        cwd: resolveSessionCwd(),
+      });
+      return undefined;
     }
     case "rewind": {
       if (deps.runRewind) {

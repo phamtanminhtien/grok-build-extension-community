@@ -158,7 +158,7 @@ Synced with implementation as of **v0.3.8** (2026-07-20).
 2. ~~Whether `session/load` supports listing~~ → Local `~/.grok/sessions` index + capability-gated load.
 3. ~~Product name / publisher id~~ → ADR-014.
 4. **Telemetry:** extension-side vs agent-only — still open (default: none in extension).
-5. **Minimum `grok` version gate** for marketplace VSIX — still open (no hard gate yet).
+5. ~~**Minimum `grok` version gate**~~ → Accepted: `grok.minCliVersion` default `0.1.0`; unparseable allowed; empty/`off` disables.
 6. Whether to support `grok agent serve` (WebSocket) for remote agent — no for 0.3.x.
 7. **Terminal hybrid** (Reveal in Terminal) without full host PTY — optional L2 residual.
 8. **Binary download / bundle** — product packaging decision for L3.

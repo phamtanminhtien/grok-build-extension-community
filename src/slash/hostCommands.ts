@@ -445,6 +445,13 @@ export const HOST_COMMANDS: SlashCommandDef[] = [
     hostAction: "showTasks",
   }),
   d({
+    name: "worktrees",
+    aliases: ["worktree", "wt"],
+    description: "List and manage Grok git worktrees",
+    layer: "host",
+    hostAction: "showWorktrees",
+  }),
+  d({
     name: "queue",
     description: "List the prompts queued behind the running turn",
     layer: "passthrough",

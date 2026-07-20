@@ -2,6 +2,11 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { getSettings, type GrokSettings } from "../config/settings";
 import { logError, logInfo, logWarn } from "../log/output";
 import { getGrokVersion, resolveGrokBinary } from "./binaryResolver";
+import {
+  checkMinCliVersion,
+  CliVersionTooOldError,
+  parseSemverPrefix,
+} from "./minCliVersion";
 
 export interface SpawnedAgent {
   binary: string;
@@ -30,6 +35,18 @@ export async function spawnAgentProcess(options?: {
   const settings = options?.settings ?? getSettings();
   const binary = await resolveGrokBinary(settings.binaryPath);
   const version = await getGrokVersion(binary);
+  const versionCheck = checkMinCliVersion(version, settings.minCliVersion);
+  if (!versionCheck.ok) {
+    logError(
+      `CLI version gate failed: raw=${versionCheck.raw} min=${settings.minCliVersion}`,
+    );
+    throw new CliVersionTooOldError(versionCheck);
+  }
+  if (!parseSemverPrefix(version)) {
+    logWarn(
+      `Could not parse grok version ("${version}"); min-version gate skipped`,
+    );
+  }
   const args = buildAgentArgs(settings);
 
   logInfo(`Spawning: ${binary} ${args.join(" ")}`);

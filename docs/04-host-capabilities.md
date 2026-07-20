@@ -15,7 +15,7 @@ fidelity (unsaved buffers, integrated terminals, encoding).
 | Git               | `x.ai/git/*`                        | Agent-side     | No dedicated host git UI                       |
 | Hunk tracker      | client `_meta` + agent              | **Yes**        | Accept/Reject on diff review                   |
 | Fuzzy open        | `x.ai/search/*`                     | **No**         | In-chat `@` picker only (not ACP bridge)       |
-| Worktree          | `x.ai/git/worktree/*`               | **No**         | L3 remaining                                   |
+| Worktree          | `x.ai/git/worktree/*`               | **Yes**        | QuickPick UI + status notifications            |
 
 ## Filesystem capability
 
@@ -141,7 +141,7 @@ Optional deny-list setting: `grok.context.excludeGlob`.
 | `x.ai/search/fuzzy/open` → QuickOpen | **Not implemented** (L3)                        |
 | In-chat `@` file fuzzy pick          | **Shipped** (host-only, not ACP search methods) |
 | `x.ai/git/*` dedicated UI            | **Not implemented** — agent tools only          |
-| `x.ai/git/worktree/*` UI             | **Not implemented** (L3)                        |
+| `x.ai/git/worktree/*` UI             | **Shipped** — list/create/open/apply/remove/GC  |
 
 When implementing fuzzy open: use `vscode.workspace.findFiles` / QuickPick and
 return selected URI to the agent. Do not fight VS Code SCM ownership for git.

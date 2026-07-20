@@ -25,8 +25,12 @@ On failure: show empty-state with install instructions and a path to set
 | Binary resolve | Before spawn             |
 | Protocol       | `initialize` negotiation |
 
-**Hard minimum-version gate:** not yet enforced (L3 acceptance item). When
-added: compare `grok --version` to a floor and block with upgrade guidance.
+**Hard minimum-version gate:** enforced via `grok.minCliVersion` (default
+`0.1.0`). On spawn, `grok --version` is parsed for the first `MAJOR.MINOR.PATCH`
+and compared to the floor. Below-min blocks with upgrade prompt (copy install
+command / docs / open setting). Empty / `off` / `0` disables the gate.
+Unparseable version strings are allowed (warn only) so a hung/unknown probe
+does not brick the host.
 
 ## Spawn specification
 

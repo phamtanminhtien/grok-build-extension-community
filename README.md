@@ -34,16 +34,38 @@ The VSIX does **not** bundle the `grok` binary. Install the CLI on the machine t
 
 ### Remote-SSH / WSL
 
-Install `grok` **on the remote**, not only locally. Point `grok.binaryPath` at the remote path if needed.
+The extension host runs **on the remote** when you use Remote-SSH or WSL. The
+CLI must be installed **there**, not only on your laptop.
+
+1. Open the remote window (SSH host or WSL distro).
+2. In a **remote** terminal, install Grok Build CLI:
+   - macOS/Linux remote: `curl -fsSL https://x.ai/cli/install.sh | bash`
+   - Ensure `~/.grok/bin` is on the remote `PATH` (or set `grok.binaryPath` to
+     the absolute remote path, e.g. `/home/you/.grok/bin/grok`).
+3. Sign in on the remote: `grok login`, or use **Grok Build: Login** / **Set API Key**
+   in the remote VS Code window (credentials land in remote `~/.grok/`).
+4. Confirm: remote terminal `grok --version` and **Grok Build: Start Agent**.
+
+**Notes**
+
+| Topic             | Detail                                                                         |
+| ----------------- | ------------------------------------------------------------------------------ |
+| Binary location   | Local macOS/Homebrew `grok` is **invisible** to a Linux remote host            |
+| Sessions / config | `~/.grok/sessions`, `config.toml`, worktrees are **remote** home               |
+| Worktrees         | Created under remote `~/.grok/worktrees/…` — open those paths on the remote    |
+| Min version       | Extension enforces `grok.minCliVersion` (default `0.1.0`) against remote CLI   |
+| Auth              | Browser login still works via `openExternal`; paste token if loopback needs it |
 
 ### Troubleshooting
 
-| Symptom               | What to try                                                   |
-| --------------------- | ------------------------------------------------------------- |
-| Binary not found      | Install CLI · set `grok.binaryPath` · Output → **Grok Build** |
-| Workspace not trusted | **Manage Workspace Trust**                                    |
-| Auth / 401            | **Login** / **Set API Key**, or `grok login`                  |
-| Stuck agent           | **Grok Build: Restart Agent**                                 |
+| Symptom                  | What to try                                                   |
+| ------------------------ | ------------------------------------------------------------- |
+| Binary not found         | Install CLI · set `grok.binaryPath` · Output → **Grok Build** |
+| CLI too old              | Upgrade CLI · or adjust `grok.minCliVersion`                  |
+| Works locally, fails SSH | Install `grok` **on the remote**; check remote PATH           |
+| Workspace not trusted    | **Manage Workspace Trust**                                    |
+| Auth / 401               | **Login** / **Set API Key**, or `grok login`                  |
+| Stuck agent              | **Grok Build: Restart Agent**                                 |
 
 ---
 
@@ -93,6 +115,7 @@ Install `grok` **on the remote**, not only locally. Point `grok.binaryPath` at t
 - **New session** · **Home** welcome screen · **Resume** from `~/.grok/sessions` via ACP `session/load` when advertised
 - **Rewind** (`x.ai/rewind/*`, dry-run preview then execute) · **`/compact`** host action with loading feedback
 - **`/fork`** branch session (`x.ai/session/fork`) · **`/rename`** session title · **`/context`** / **`/session-info`**
+- **Worktrees** — **Grok Build: Worktrees…** / `/worktrees` list · create · open folder · apply to main · remove · GC (`x.ai/git/worktree/*`)
 - **Slash registry** — host commands, ACP passthrough (skills / agent builtins), TUI-only names listed as unsupported
 
 ### Extensions

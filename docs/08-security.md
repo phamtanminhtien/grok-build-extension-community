@@ -104,9 +104,9 @@ Core controls (0.3.x):
 Productization residual ([09-roadmap](09-roadmap.md) L3 acceptance):
 
 - [ ] Formal security sign-off pass for marketplace “stable”
-- [ ] Min binary version gate + upgrade prompts
+- [x] Min binary version gate + upgrade prompts
 - [ ] Accessibility pass on chat + permissions
-- [ ] Deeper Remote-SSH/WSL threat/install review
+- [x] Deeper Remote-SSH/WSL threat/install review _(README matrix; formal threat model TBD)_
 
 ## Next
 

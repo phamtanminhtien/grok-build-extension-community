@@ -3,10 +3,10 @@
 Phased delivery. Each phase has **entry criteria**, **scope**, and
 **acceptance checks**.
 
-**As of v0.3.8 (2026-07-20):** L0–L2 core complete; L3 partially shipped ahead
-of the original sequence (Tasks, plan UI, Extensions panel, rewind, billing).
-Remaining work is mostly terminal host, remote docs/fixes, worktree UI, binary
-packaging, and productization checklists.
+**As of post-0.3.8 (2026-07-20):** L0–L2 core complete; L3 mostly shipped
+(Tasks, plan UI, Extensions, rewind, billing, **worktree UI**, min CLI gate,
+Remote-SSH/WSL docs). Remaining: terminal hybrid residual, binary packaging,
+CI mock-ACP, a11y/security formal sign-off.
 
 ## Phase L0 — Protocol wire-up
 
@@ -91,7 +91,7 @@ Verified headless 2026-07-16: `initialize` + `session/new` + prompt → `L0 OK` 
 - [x] `x.ai/auth/*` polished browser login (`get_url`, `submit_code`, `info`, `check_subscription`, `logout`)
 - [x] Select `x.ai/session` ops: compact, rewind
 - [x] Virtualized message list / performance (windowed DOM + host markdown throttle)
-- [ ] Remote-SSH/WSL documentation + fixes _(basic notes in root README; deeper QA TBD)_
+- [x] Remote-SSH/WSL documentation + fixes _(README install matrix; deeper live QA still welcome)_
 
 ### Acceptance
 
@@ -112,7 +112,7 @@ Spec: [superpowers/specs/2026-07-16-l2-full-polish-design.md](superpowers/specs/
 
 | Item                                              | Status (v0.3.8)                                                                 |
 | ------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Worktree UI (`x.ai/git/worktree/*`)               | **Not started**                                                                 |
+| Worktree UI (`x.ai/git/worktree/*`)               | **Shipped** — QuickPick + `/worktrees` + status notifications                   |
 | Plan mode surface                                 | **Partial** — plan approval UI, `exitPlanMode`, session_notification banners    |
 | Subagent / background task visualization          | **Shipped** — Tasks panel, status bar badge, `/tasks`, live subagent transcript |
 | Fuzzy open bridge (`x.ai/search/*` → QuickOpen)   | **Not started** as agent bridge; in-chat `@` fuzzy file pick exists             |
@@ -125,12 +125,13 @@ Spec: [superpowers/specs/2026-07-16-l2-full-polish-design.md](superpowers/specs/
 | Fix with Grok (diagnostics)                       | **Shipped** — hover / Quick Fix                                                 |
 | Billing usage display                             | **Shipped**                                                                     |
 | Hunk-tracker Accept/Reject                        | **Shipped**                                                                     |
+| Min CLI version gate                              | **Shipped** — `grok.minCliVersion` (default `0.1.0`) + upgrade prompt           |
 
 ### Acceptance
 
 - [ ] Product checklist signed off
 - [ ] Security productization residual complete ([08](08-security.md) residual list)
-- [ ] Version gate + upgrade prompts reliable
+- [x] Version gate + upgrade prompts reliable
 - [ ] Accessibility pass on chat + permissions
 
 ---
@@ -152,8 +153,8 @@ Spec: [superpowers/specs/2026-07-16-l2-full-polish-design.md](superpowers/specs/
 
 ## Suggested next work (priority)
 
-1. **Close L2 residual** — Remote-SSH/WSL QA + docs; optional terminal hybrid (ADR-004 remains agent-owned PTY).
-2. **L3 productization** — worktree UI, fuzzy-open ACP bridge, min-version gate, security/a11y sign-off.
+1. **L2 residual** — optional terminal hybrid “Reveal in Terminal” (ADR-004); live Remote-SSH/WSL QA on Win/Linux.
+2. **L3 remaining** — fuzzy-open ACP bridge; security/a11y formal sign-off.
 3. **CI** — mock ACP integration tests; Win/Linux smoke.
 4. **Packaging** — first-run download or bundled binary if install friction dominates.
 

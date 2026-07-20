@@ -226,6 +226,12 @@
         "icon": "$(extensions)"
       },
       {
+        "command": "grok.worktrees",
+        "title": "Grok Build: Worktrees…",
+        "category": "Grok Build",
+        "icon": "$(git-branch)"
+      },
+      {
         "command": "grok.smokeTest",
         "title": "Grok Build: Smoke Test (L0)",
         "category": "Grok Build"
@@ -252,6 +258,11 @@
           "command": "grok.openExtensions",
           "when": "view == grok.chatView || view == grok.chatView.secondary",
           "group": "navigation@4"
+        },
+        {
+          "command": "grok.worktrees",
+          "when": "view == grok.chatView || view == grok.chatView.secondary",
+          "group": "navigation@5"
         }
       ],
       "editor/title": [
@@ -276,6 +287,11 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Absolute path to the `grok` binary. Empty = search PATH then `~/.grok/bin/grok`."
+        },
+        "grok.minCliVersion": {
+          "type": "string",
+          "default": "0.1.0",
+          "markdownDescription": "Minimum Grok Build CLI (`grok --version`) required to start the agent. Empty, `off`, or `0` disables the gate."
         },
         "grok.cwd": {
           "type": "string",

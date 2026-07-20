@@ -169,20 +169,20 @@ still show what ran.
 
 Upstream documents categories (non-exhaustive):
 
-| Prefix                        | Examples                     | Status in extension (0.3.8)                      |
-| ----------------------------- | ---------------------------- | ------------------------------------------------ |
-| `x.ai/fs/*`                   | list, exists, read, write    | Prefer client FS caps; agent may still use tools |
-| `x.ai/git/*`                  | status, stage, commit, diffs | Agent tools; no dedicated host UI yet            |
-| `x.ai/git/worktree/*`         | create, apply, list          | **Not wired** (L3 remaining)                     |
-| `x.ai/search/*`               | fuzzy open/change, content   | **Not wired** as ACP bridge                      |
-| `x.ai/terminal/*`             | create, kill, output         | **Off** — `terminal: false` (ADR-004)            |
-| `x.ai/session/*`              | admin, compact-related       | Partial (session admin / compact)                |
-| `x.ai/auth/*`                 | get_url, submit_code, info…  | **Shipped**                                      |
-| `x.ai/rewind/*`               | points, execute              | **Shipped**                                      |
-| `x.ai/queue/*`                | changed, remove, reorder…    | **Shipped**                                      |
-| `x.ai/hunkTracker` / git head | via client `_meta`           | **Shipped** (Accept/Reject on diffs)             |
-| task / subagent methods       | list, kill, get transcript   | **Shipped** (Tasks panel)                        |
-| feedback / telemetry          | optional                     | Not used by extension                            |
+| Prefix                        | Examples                        | Status in extension (0.3.8)                      |
+| ----------------------------- | ------------------------------- | ------------------------------------------------ |
+| `x.ai/fs/*`                   | list, exists, read, write       | Prefer client FS caps; agent may still use tools |
+| `x.ai/git/*`                  | status, stage, commit, diffs    | Agent tools; no dedicated host UI yet            |
+| `x.ai/git/worktree/*`         | create, apply, list, remove, gc | **Shipped** — QuickPick `/worktrees`             |
+| `x.ai/search/*`               | fuzzy open/change, content      | **Not wired** as ACP bridge                      |
+| `x.ai/terminal/*`             | create, kill, output            | **Off** — `terminal: false` (ADR-004)            |
+| `x.ai/session/*`              | admin, compact-related          | Partial (session admin / compact)                |
+| `x.ai/auth/*`                 | get_url, submit_code, info…     | **Shipped**                                      |
+| `x.ai/rewind/*`               | points, execute                 | **Shipped**                                      |
+| `x.ai/queue/*`                | changed, remove, reorder…       | **Shipped**                                      |
+| `x.ai/hunkTracker` / git head | via client `_meta`              | **Shipped** (Accept/Reject on diffs)             |
+| task / subagent methods       | list, kill, get transcript      | **Shipped** (Tasks panel)                        |
+| feedback / telemetry          | optional                        | Not used by extension                            |
 
 **Rule:** Core chat must work with **base ACP only**. Extension methods are
 progressive enhancement after capability discovery from `initialize`.
@@ -193,7 +193,7 @@ progressive enhancement after capability discovery from `initialize`.
 | --------------------------- | ---------------------------------------- |
 | `x.ai/fs_notify`            | Optional refresh explorer / diagnostics  |
 | `x.ai/fs/index` / `delta`   | Optional fuzzy index (L2)                |
-| `x.ai/git/worktree/status`  | Progress UI (L3)                         |
+| `x.ai/git/worktree/status`  | Progress log + toast on created/error    |
 | `x.ai/session_notification` | Diff review, retry, auto-compact banners |
 | `session/update`            | Primary chat stream                      |
 

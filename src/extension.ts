@@ -1,6 +1,8 @@
 import * as vscode from "vscode";
 import { AgentService } from "./agent/agentService";
 import { handleMissingCliError } from "./agent/missingCliPrompt";
+import { isCliVersionTooOldError } from "./agent/minCliVersion";
+import { getCliInstallInfo } from "./agent/cliInstallInfo";
 import { readTextFileHost, setBeforeWriteHook } from "./agent/hostFs";
 import {
   AuthService,
@@ -21,6 +23,7 @@ import {
   resolveFixWithGrok,
 } from "./context/fixWithGrokProvider";
 import type { FixWithGrokPayload } from "./context/fixWithGrok";
+import { runWorktreePicker } from "./agent/worktreePicker";
 import { ChatViewProvider } from "./ui/chatViewProvider";
 import { GrokStatusBar } from "./ui/statusBar";
 
@@ -413,6 +416,17 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     ),
 
+    vscode.commands.registerCommand("grok.worktrees", async () => {
+      try {
+        await agentService!.ensureStarted();
+        await runWorktreePicker(agentService!, {
+          cwd: resolveSessionCwd(),
+        });
+      } catch (err) {
+        await showStartError(err);
+      }
+    }),
+
     vscode.commands.registerCommand("grok.smokeTest", async () => {
       openOutput();
       try {
@@ -549,6 +563,27 @@ async function runLogoutFlow(
 async function showStartError(err: unknown): Promise<void> {
   logError("Command failed", err);
   if (await handleMissingCliError(err)) {
+    return;
+  }
+  if (isCliVersionTooOldError(err)) {
+    const info = getCliInstallInfo();
+    const choice = await vscode.window.showErrorMessage(
+      errMessage(err),
+      "Copy install command",
+      "Open install docs",
+      "Open Min CLI Version setting",
+    );
+    if (choice === "Copy install command") {
+      await vscode.env.clipboard.writeText(info.command);
+      void vscode.window.showInformationMessage(`Copied: ${info.command}`);
+    } else if (choice === "Open install docs") {
+      await vscode.env.openExternal(vscode.Uri.parse(info.docsUrl));
+    } else if (choice === "Open Min CLI Version setting") {
+      await vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        "grok.minCliVersion",
+      );
+    }
     return;
   }
   void vscode.window.showErrorMessage(`Grok Build: ${errMessage(err)}`);

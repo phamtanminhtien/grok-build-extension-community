@@ -66,7 +66,9 @@ export type HostAction =
   /** `x.ai/rewind/points` + `x.ai/rewind/execute` picker */
   | "rewind"
   /** List + refresh background tasks / subagents (Tasks panel). */
-  | "showTasks";
+  | "showTasks"
+  /** Manage git worktrees via x.ai/git/worktree/* QuickPick. */
+  | "showWorktrees";
 
 /** Row shown in the slash dropdown. */
 export interface SlashSuggestion {

@@ -9,14 +9,14 @@ layer.
 
 ## Status (synced 2026-07-20)
 
-| Item                      | Status                                                                                                               |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Design docs               | Live — keep in sync with `src/` + CHANGELOG                                                                          |
-| Extension scaffold        | Done (`src/`, esbuild, yarn)                                                                                         |
-| L0 protocol wire-up       | **Done** — [L0 manual test](L0-manual-test.md) + `yarn smoke:cli`                                                    |
-| L1 MVP chat               | **Done** — sidebar webview, permissions, host FS, status bar                                                         |
-| L2 IDE-native polish      | **Done** (except terminal host + Remote-SSH depth)                                                                   |
-| L3 depth & productization | **In progress** — Tasks, plan, Extensions, rewind, billing shipped; worktree / binary bundle / CI mock ACP remaining |
+| Item                      | Status                                                                                                                               |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Design docs               | Live — keep in sync with `src/` + CHANGELOG                                                                                          |
+| Extension scaffold        | Done (`src/`, esbuild, yarn)                                                                                                         |
+| L0 protocol wire-up       | **Done** — [L0 manual test](L0-manual-test.md) + `yarn smoke:cli`                                                                    |
+| L1 MVP chat               | **Done** — sidebar webview, permissions, host FS, status bar                                                                         |
+| L2 IDE-native polish      | **Done** (except optional terminal hybrid; Remote docs shipped)                                                                      |
+| L3 depth & productization | **In progress** — Tasks, plan, Extensions, rewind, billing, worktree UI, min CLI gate shipped; binary bundle / CI mock ACP remaining |
 
 ## Reading order
 
