@@ -120,6 +120,17 @@ import {
   type RemoveWorktreeResult,
   type WorktreeRecord,
 } from "./worktree";
+import {
+  FUZZY_SEARCH_METHODS,
+  fuzzyChangeParams,
+  fuzzyCloseParams,
+  fuzzyOpenParams,
+  parseFuzzyOpenResponse,
+  parseFuzzyStatusNotification,
+  type FuzzyOpenResult,
+  type FuzzyStatusUpdate,
+} from "./fuzzySearch";
+import { resetFuzzyMentionSession } from "./fuzzyMentionSearch";
 import { toAcpExtWireMethod } from "./acpExtMethod";
 import { buildInitializeClientCapabilities } from "./clientCapabilities";
 import { BinaryNotFoundError } from "./binaryResolver";
@@ -257,6 +268,10 @@ export class AgentService implements vscode.Disposable {
   private readonly _onXaiSessionEvent =
     new vscode.EventEmitter<ParsedXaiSessionNotification>();
   readonly onXaiSessionEvent = this._onXaiSessionEvent.event;
+  /** Agent fuzzy search status stream (`x.ai/search/fuzzy/status`). */
+  private readonly _onFuzzyStatus =
+    new vscode.EventEmitter<FuzzyStatusUpdate>();
+  readonly onFuzzyStatus = this._onFuzzyStatus.event;
   /** Background tasks / subagents / loops (extension Tasks panel). */
   private readonly tasksStore = new TasksStore();
   private readonly _onTasksChange = new vscode.EventEmitter<TasksSnapshot>();
@@ -1713,6 +1728,58 @@ export class AgentService implements vscode.Disposable {
     return parseGcReport(raw);
   }
 
+  // ── Fuzzy search (x.ai/search/fuzzy/*) ─────────────────────────────
+
+  /** Open a fuzzy search session; results arrive via `onFuzzyStatus`. */
+  async fuzzyOpen(opts?: {
+    sessionId?: string;
+    cwd?: string;
+    root?: string;
+    hidden?: boolean;
+  }): Promise<FuzzyOpenResult | null> {
+    logInfo(
+      `fuzzy/open session=${opts?.sessionId ?? ""} cwd=${opts?.cwd ?? ""}`,
+    );
+    const raw = await this.requestExt(
+      FUZZY_SEARCH_METHODS.open,
+      fuzzyOpenParams({
+        sessionId: opts?.sessionId,
+        cwd: opts?.cwd,
+        root: opts?.root,
+        hidden: opts?.hidden,
+      }),
+    );
+    return parseFuzzyOpenResponse(raw);
+  }
+
+  /** Update the query for an open fuzzy search. */
+  async fuzzyChange(opts: {
+    searchId: string;
+    query: string;
+    dirsOnly?: boolean;
+    limit?: number;
+  }): Promise<void> {
+    logInfo(
+      `fuzzy/change id=${opts.searchId} q=${opts.query.slice(0, 40)} dirsOnly=${opts.dirsOnly === true}`,
+    );
+    await this.requestExt(FUZZY_SEARCH_METHODS.change, fuzzyChangeParams(opts));
+  }
+
+  /** Close a fuzzy search session. */
+  async fuzzyClose(searchId: string): Promise<boolean> {
+    logInfo(`fuzzy/close id=${searchId}`);
+    try {
+      await this.requestExt(
+        FUZZY_SEARCH_METHODS.close,
+        fuzzyCloseParams(searchId),
+      );
+      return true;
+    } catch (err) {
+      logWarn(`fuzzy/close failed: ${formatUserError(err)}`);
+      return false;
+    }
+  }
+
   /**
    * Call an agent extension method (`x.ai/*`).
    *
@@ -2162,6 +2229,18 @@ export class AgentService implements vscode.Disposable {
     }
   }
 
+  private handleFuzzyStatusNotification(raw: unknown): void {
+    const update = parseFuzzyStatusNotification(unwrapExtParams(raw));
+    if (!update) {
+      logWarn("x.ai/search/fuzzy/status: invalid payload");
+      return;
+    }
+    logInfo(
+      `[fuzzy/status] id=${update.searchId} n=${update.matches.length} done=${update.done} gen=${update.generation}`,
+    );
+    this._onFuzzyStatus.fire(update);
+  }
+
   private handleWorktreeStatusNotification(raw: unknown): void {
     const ev = parseWorktreeStatusNotification(unwrapExtParams(raw));
     if (!ev) {
@@ -2388,6 +2467,7 @@ export class AgentService implements vscode.Disposable {
     this._onModelsChange.dispose();
     this._onModeChange.dispose();
     this._onXaiSessionEvent.dispose();
+    this._onFuzzyStatus.dispose();
     this.authInfo = undefined;
     this.authMeta = undefined;
     this._onAuthProfileChange.dispose();
@@ -2804,6 +2884,21 @@ export class AgentService implements vscode.Disposable {
         (p: unknown) => p,
         (ctx) => {
           this.handleWorktreeStatusNotification(ctx.params);
+        },
+      )
+      // Agent fuzzy file index → host QuickPick.
+      .onNotification(
+        "_x.ai/search/fuzzy/status",
+        (p: unknown) => p,
+        (ctx) => {
+          this.handleFuzzyStatusNotification(ctx.params);
+        },
+      )
+      .onNotification(
+        "x.ai/search/fuzzy/status",
+        (p: unknown) => p,
+        (ctx) => {
+          this.handleFuzzyStatusNotification(ctx.params);
         },
       )
       .connect(stream);
@@ -3350,6 +3445,8 @@ export class AgentService implements vscode.Disposable {
 
   private async stopInternal(): Promise<void> {
     this.authMethods = [];
+    // Drop @-mention fuzzy session so the next start re-opens cleanly.
+    resetFuzzyMentionSession();
     // Drop live profile; next ensureStarted re-fetches. Do not fire UI events
     // here if already disposing — logout path clears explicitly with fire.
     if (!this.disposed) {

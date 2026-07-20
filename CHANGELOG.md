@@ -7,7 +7,16 @@ All notable changes to **Grok Build - Community** are documented in this file.
 ### Features
 
 - **worktrees:** QuickPick manager for `x.ai/git/worktree/*` — list, create, open folder, apply, remove, GC; `/worktrees` slash + command palette; creation status notifications
+- **@ mentions:** workspace suggestions use agent fuzzy index (`x.ai/search/fuzzy/*`) when ready; host `findFiles` fallback when offline
 - **cli:** enforce minimum Grok CLI version via `grok.minCliVersion` (default `0.1.0`) with upgrade prompt
+
+### Accessibility
+
+- aria labels on composer, permission options, and question dialog actions
+
+### Tests
+
+- mock ACP wire smoke for fuzzy / worktree / queue envelopes (no live binary)
 
 ### Documentation
 

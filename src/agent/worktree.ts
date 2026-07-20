@@ -358,10 +358,8 @@ export function parseApplyResponse(raw: unknown): ApplyResult | null {
         if (!p) {
           return null;
         }
-        return {
-          path: p,
-          type: asString(cr.type) ?? asString(cr.change_type),
-        };
+        const t = asString(cr.type) ?? asString(cr.change_type);
+        return t ? { path: p, type: t } : { path: p };
       })
       .filter((x): x is { path: string; type?: string } => x != null);
     return { status: "conflicts", files, conflicts };

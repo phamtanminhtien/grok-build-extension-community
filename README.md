@@ -99,7 +99,7 @@ CLI must be installed **there**, not only on your laptop.
 ### Context & editor
 
 - **Auto-attach** active file and/or selection (`grok.context.autoAttach*`); composer chip toggle; skip secrets via `grok.context.excludeGlob`
-- **`@` context** — sticky chips (file / folder / selection) + inline `@` mentions in the composer
+- **`@` context** — sticky chips (file / folder / selection) + inline `@` mentions; workspace hits use the **agent fuzzy index** when the agent is ready (host `findFiles` fallback)
 - **Images** — paste, drop (Shift+drop if VS Code steals the event), or **Attach Image…**
 - **Fix with Grok** — diagnostics **Hover** + **Quick Fix** → composer with error + file snippet
 - **Editor title** Grok icon → **Open Chat**; context menu **Add Selection to Chat**

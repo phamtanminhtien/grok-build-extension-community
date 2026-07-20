@@ -1,5 +1,8 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
+import type { AgentService } from "../agent/agentService";
+import { searchAgentMentions } from "../agent/fuzzyMentionSearch";
+import type { FuzzyMatch } from "../agent/fuzzySearch";
 import { getSettings } from "../config/settings";
 import { isExcluded, type ContextChip } from "./editorContext";
 import {
@@ -7,27 +10,19 @@ import {
   matcherQuery,
   type AtContext,
 } from "./atContext";
-import { fuzzyScore } from "./fuzzyScore";
+import { fuzzyMatchIndices, fuzzyScore } from "./fuzzyScore";
+import { fuzzyMatchToSuggestion } from "./fuzzyMatchSuggest";
+import type { ContextSuggestion } from "./contextPickerTypes";
 
 export { fuzzyScore } from "./fuzzyScore";
 export { formatMentionInsertText } from "./atContext";
+export { fuzzyMatchToSuggestion } from "./fuzzyMatchSuggest";
+export type { ContextSuggestion, SuggestionIcon } from "./contextPickerTypes";
 
-export type SuggestionIcon = "file" | "folder" | "selection" | "search";
-
-/** Item shown in the in-webview @ mention popover (aligned with grok-build sources). */
-export interface ContextSuggestion {
-  id: string;
-  label: string;
-  description?: string;
-  icon: SuggestionIcon;
-  chip: ContextChip;
-  /**
-   * Text inserted into the composer when accepting (TUI `@path` / `@path:N-M`).
-   * Includes a trailing space so the user can keep typing.
-   */
-  insertText: string;
-  /** Simple rank — lower is better. */
-  score: number;
+export interface SearchContextOptions {
+  /** When set and agent is ready, prefer agent fuzzy index for workspace hits. */
+  agent?: AgentService;
+  cwd?: string;
 }
 
 function chipInsertText(chip: ContextChip, displayPath: string): string {
@@ -41,11 +36,18 @@ function chipInsertText(chip: ContextChip, displayPath: string): string {
 
 /**
  * Fuzzy-ish workspace + open-editor suggestions for the @ popover.
- * Mirrors grok-build file_search sources: open context first, then workspace files.
+ *
+ * Order:
+ * 1. Current selection
+ * 2. Open editors
+ * 3. Agent fuzzy index (`x.ai/search/fuzzy/*`) when agent ready + query
+ * 4. Host `findFiles` fallback (and when agent offline / empty)
+ * 5. Host folder candidates when path-like query
  */
 export async function searchContextSuggestions(
   rawQuery: string,
   limit = 24,
+  options?: SearchContextOptions,
 ): Promise<ContextSuggestion[]> {
   const settings = getSettings();
   const query = rawQuery.startsWith("!") ? rawQuery.slice(1) : rawQuery;
@@ -57,6 +59,13 @@ export async function searchContextSuggestions(
   const push = (s: ContextSuggestion): void => {
     if (seen.has(s.id) || isExcluded(s.chip.fsPath, settings.excludeGlob)) {
       return;
+    }
+    // Ensure label highlight for query (agent may already set indices).
+    if (q && (!s.highlightIndices || s.highlightIndices.length === 0)) {
+      const hi = fuzzyMatchIndices(s.label, query);
+      if (hi.length > 0) {
+        s = { ...s, highlightIndices: hi };
+      }
     }
     seen.add(s.id);
     results.push(s);
@@ -128,9 +137,27 @@ export async function searchContextSuggestions(
     });
   }
 
-  // 3) Workspace files via findFiles (only when there is a query — empty `@`
-  //    mirrors grok-build by leaning on open editors / selection first).
-  if (q) {
+  // 3) Agent fuzzy index (primary workspace search when ready).
+  let usedAgent = false;
+  if (q && options?.agent) {
+    const agentMatches = await searchAgentMentions(options.agent, query, {
+      cwd: options.cwd,
+      dirsOnly: dirOnly,
+      limit: Math.min(200, limit * 4),
+    });
+    if (agentMatches.length > 0) {
+      usedAgent = true;
+      for (const m of agentMatches) {
+        const sug = agentMatchToSuggestion(m, query);
+        if (sug) {
+          push(sug);
+        }
+      }
+    }
+  }
+
+  // 4) Host findFiles — empty `@` leans on open editors; also fallback if agent empty.
+  if (q && !usedAgent) {
     try {
       const glob = buildFindGlob(query);
       const uris = await vscode.workspace.findFiles(
@@ -177,8 +204,9 @@ export async function searchContextSuggestions(
     }
   }
 
-  // 4) Folder matches when query looks like a path prefix
-  if (q && (dirOnly || q.includes("/"))) {
+  // 5) Folder matches when query looks like a path prefix (host; agent may already
+  //    have returned directories via type=directory).
+  if (q && (dirOnly || q.includes("/")) && !usedAgent) {
     const folderUris = await findFolderCandidates(query, limit);
     for (const u of folderUris) {
       const rel = vscode.workspace.asRelativePath(u);
@@ -208,12 +236,26 @@ export async function searchContextSuggestions(
   return results.slice(0, limit);
 }
 
+function agentMatchToSuggestion(
+  m: FuzzyMatch,
+  query: string,
+): ContextSuggestion | null {
+  let display: string | undefined;
+  try {
+    display = vscode.workspace.asRelativePath(vscode.Uri.file(m.path));
+  } catch {
+    display = undefined;
+  }
+  return fuzzyMatchToSuggestion(m, display, query);
+}
+
 /** Build suggestions using matcher query from an AtContext. */
 export async function searchFromAtContext(
   ctx: AtContext,
   limit = 24,
+  options?: SearchContextOptions,
 ): Promise<ContextSuggestion[]> {
-  return searchContextSuggestions(matcherQuery(ctx), limit);
+  return searchContextSuggestions(matcherQuery(ctx), limit, options);
 }
 
 function buildFindGlob(query: string): string {

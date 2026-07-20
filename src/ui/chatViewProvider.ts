@@ -24,7 +24,7 @@ import {
   type AttachedImage,
 } from "../context/promptImages";
 import { searchContextSuggestions } from "../context/contextPicker";
-import { getSettings } from "../config/settings";
+import { getSettings, resolveSessionCwd } from "../config/settings";
 import {
   contextWindowFromCatalog,
   effortDisplayLabel,
@@ -914,7 +914,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           );
           this.postTurnStatus();
         } else {
-          logInfo(`billing usage empty response (${billingUsageResponseShape(raw)})`);
+          logInfo(
+            `billing usage empty response (${billingUsageResponseShape(raw)})`,
+          );
         }
       } catch (err) {
         logInfo(`billing usage unavailable: ${errMessage(err)}`);
@@ -1383,7 +1385,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const requestId = msg.requestId ?? 0;
         const query = msg.query ?? "";
         try {
-          const items = await searchContextSuggestions(query, 24);
+          const items = await searchContextSuggestions(query, 24, {
+            agent: this.agent,
+            cwd: resolveSessionCwd(),
+          });
           this.post({
             type: "mentionResults",
             requestId,
@@ -1396,6 +1401,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
               chip: s.chip,
               // Inline editor token — accept inserts this into #composer (not sticky).
               insertText: s.insertText,
+              highlightIndices: s.highlightIndices,
             })),
           });
         } catch (err) {
@@ -3610,9 +3616,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           <span class="hint">↑↓ · Enter · Esc</span>
         </div>
         <div id="permission-detail"></div>
-        <div id="permission-list" role="listbox"></div>
+        <div id="permission-list" role="listbox" aria-label="Permission options"></div>
         <div id="permission-foot">
-          <button type="button" class="secondary" id="permission-cancel">Deny</button>
+          <button type="button" class="secondary" id="permission-cancel" aria-label="Deny permission">Deny</button>
         </div>
       </div>
       <div id="question-popover" hidden role="dialog" aria-label="Agent question" aria-modal="true">
@@ -3620,15 +3626,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           <span id="question-title">Question</span>
           <span class="hint">↑↓ · Space · Enter · Esc</span>
         </div>
-        <div id="question-tabs"></div>
+        <div id="question-tabs" role="tablist" aria-label="Question tabs"></div>
         <div id="question-body"></div>
-        <div id="question-list" role="listbox"></div>
-        <textarea id="question-notes" hidden rows="2" placeholder="Optional notes…"></textarea>
+        <div id="question-list" role="listbox" aria-label="Answer options"></div>
+        <textarea id="question-notes" hidden rows="2" placeholder="Optional notes…" aria-label="Optional notes for this answer"></textarea>
         <div id="question-foot">
-          <button type="button" class="secondary" id="question-cancel">Cancel</button>
-          <button type="button" class="secondary" id="question-chat" hidden>Chat about this</button>
-          <button type="button" class="secondary" id="question-skip" hidden>Skip interview</button>
-          <button type="button" id="question-accept">Accept</button>
+          <button type="button" class="secondary" id="question-cancel" aria-label="Cancel question">Cancel</button>
+          <button type="button" class="secondary" id="question-chat" hidden aria-label="Chat about this instead">Chat about this</button>
+          <button type="button" class="secondary" id="question-skip" hidden aria-label="Skip interview">Skip interview</button>
+          <button type="button" id="question-accept" aria-label="Accept answer">Accept</button>
         </div>
       </div>
       <div id="turn-status" hidden aria-live="polite">
@@ -3646,7 +3652,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         <div id="image-previews" class="image-previews" hidden aria-label="Attached images"></div>
         <div class="composer-input-wrap">
           <div id="composer-highlight" class="composer-highlight" aria-hidden="true"></div>
-          <textarea id="composer" placeholder="Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)" rows="1" spellcheck="true"></textarea>
+          <textarea id="composer" placeholder="Message Grok… (/ commands, @ files, Enter send · Shift+Tab mode)" rows="1" spellcheck="true" aria-label="Message Grok" aria-multiline="true"></textarea>
         </div>
         <div class="actions">
           <button id="btn-mode" class="secondary mode-normal" type="button" title="Mode: Normal — Ask before running tools (Shift+Tab)" aria-label="Cycle session mode">

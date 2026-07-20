@@ -105,7 +105,7 @@ Productization residual ([09-roadmap](09-roadmap.md) L3 acceptance):
 
 - [ ] Formal security sign-off pass for marketplace “stable”
 - [x] Min binary version gate + upgrade prompts
-- [ ] Accessibility pass on chat + permissions
+- [x] Accessibility pass on chat + permissions _(composer + permission/question aria; external audit TBD)_
 - [x] Deeper Remote-SSH/WSL threat/install review _(README matrix; formal threat model TBD)_
 
 ## Next

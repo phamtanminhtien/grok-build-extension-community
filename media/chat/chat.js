@@ -1648,6 +1648,32 @@ function mentionIconName(icon) {
   return "file";
 }
 
+/** Highlight fuzzy-matched chars in a label (indices into the label string). */
+function highlightFuzzyLabel(label, indices) {
+  if (!label) return "";
+  if (!indices || !indices.length) return esc(label);
+  const set = new Set(
+    indices.filter(function (n) {
+      return typeof n === "number" && n >= 0 && n < label.length;
+    }),
+  );
+  if (!set.size) return esc(label);
+  var out = "";
+  var i = 0;
+  while (i < label.length) {
+    if (set.has(i)) {
+      var j = i + 1;
+      while (j < label.length && set.has(j)) j++;
+      out += '<span class="mi-hl">' + esc(label.slice(i, j)) + "</span>";
+      i = j;
+    } else {
+      out += esc(label[i]);
+      i++;
+    }
+  }
+  return out;
+}
+
 function renderMentionList() {
   if (!mentionOpen) return;
   mentionPopover.hidden = false;
@@ -1677,7 +1703,7 @@ function renderMentionList() {
         "</span>" +
         '<span class="mi-body">' +
         '<span class="mi-label">' +
-        esc(it.label) +
+        highlightFuzzyLabel(it.label, it.highlightIndices) +
         "</span>" +
         (it.description
           ? '<span class="mi-desc">' + esc(it.description) + "</span>"

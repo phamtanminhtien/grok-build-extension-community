@@ -2619,6 +2619,18 @@ footer {
   white-space: nowrap;
   font-weight: 500;
 }
+/* Fuzzy query match highlight inside @ mention labels */
+.mention-item .mi-hl {
+  color: var(--vscode-list-highlightForeground, var(--accent, #79b8ff));
+  font-weight: 700;
+  text-shadow: none;
+}
+.mention-item.active .mi-hl {
+  color: var(
+    --vscode-list-focusHighlightForeground,
+    var(--vscode-list-highlightForeground, #fff)
+  );
+}
 .mention-item .mi-desc,
 .slash-item .mi-desc,
 .model-item .mi-desc,

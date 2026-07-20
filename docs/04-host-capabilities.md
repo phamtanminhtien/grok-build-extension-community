@@ -6,16 +6,16 @@ fidelity (unsaved buffers, integrated terminals, encoding).
 
 ## Capability matrix
 
-| Capability        | ACP surface                         | Status (0.3.8) | Notes                                          |
-| ----------------- | ----------------------------------- | -------------- | ---------------------------------------------- |
-| Read text file    | `fs/read_text_file` (client method) | **Yes**        | Prefer open document text                      |
-| Write text file   | `fs/write_text_file`                | **Yes**        | Apply via WorkspaceEdit; snapshot for diffs    |
-| Terminal          | client terminal methods             | **No**         | `terminal: false` ([ADR-004](10-decisions.md)) |
-| Fs notify / index | `x.ai/*` notifications              | Partial        | Best-effort refresh / not a full index UI      |
-| Git               | `x.ai/git/*`                        | Agent-side     | No dedicated host git UI                       |
-| Hunk tracker      | client `_meta` + agent              | **Yes**        | Accept/Reject on diff review                   |
-| Fuzzy open        | `x.ai/search/*`                     | **No**         | In-chat `@` picker only (not ACP bridge)       |
-| Worktree          | `x.ai/git/worktree/*`               | **Yes**        | QuickPick UI + status notifications            |
+| Capability        | ACP surface                         | Status (0.3.8) | Notes                                                |
+| ----------------- | ----------------------------------- | -------------- | ---------------------------------------------------- |
+| Read text file    | `fs/read_text_file` (client method) | **Yes**        | Prefer open document text                            |
+| Write text file   | `fs/write_text_file`                | **Yes**        | Apply via WorkspaceEdit; snapshot for diffs          |
+| Terminal          | client terminal methods             | **No**         | `terminal: false` ([ADR-004](10-decisions.md))       |
+| Fs notify / index | `x.ai/*` notifications              | Partial        | Best-effort refresh / not a full index UI            |
+| Git               | `x.ai/git/*`                        | Agent-side     | No dedicated host git UI                             |
+| Hunk tracker      | client `_meta` + agent              | **Yes**        | Accept/Reject on diff review                         |
+| Fuzzy open        | `x.ai/search/*`                     | **Yes**        | In-chat `@` via agent index; host findFiles fallback |
+| Worktree          | `x.ai/git/worktree/*`               | **Yes**        | QuickPick UI + status notifications                  |
 
 ## Filesystem capability
 
@@ -136,15 +136,17 @@ Optional deny-list setting: `grok.context.excludeGlob`.
 
 ## Git / search host bridges
 
-| Bridge                               | Status                                          |
-| ------------------------------------ | ----------------------------------------------- |
-| `x.ai/search/fuzzy/open` → QuickOpen | **Not implemented** (L3)                        |
-| In-chat `@` file fuzzy pick          | **Shipped** (host-only, not ACP search methods) |
-| `x.ai/git/*` dedicated UI            | **Not implemented** — agent tools only          |
-| `x.ai/git/worktree/*` UI             | **Shipped** — list/create/open/apply/remove/GC  |
+| Bridge                              | Status                                                     |
+| ----------------------------------- | ---------------------------------------------------------- |
+| `x.ai/search/fuzzy/*` → `@` mention | **Shipped** — agent index when ready; `findFiles` fallback |
+| In-chat `@` file fuzzy pick         | **Shipped** (agent fuzzy + host selection/open editors)    |
+| `x.ai/git/*` dedicated UI           | **Not implemented** — agent tools only                     |
+| `x.ai/git/worktree/*` UI            | **Shipped** — list/create/open/apply/remove/GC             |
 
-When implementing fuzzy open: use `vscode.workspace.findFiles` / QuickPick and
-return selected URI to the agent. Do not fight VS Code SCM ownership for git.
+In-chat `@` mention: selection + open editors first; with a query, host prefers
+`x.ai/search/fuzzy/open|change|status` (agent file index) and maps hits to
+composer `@path` tokens. If the agent is offline or returns nothing, falls
+back to host `findFiles` / folder walk.
 
 ## Capability negotiation checklist
 

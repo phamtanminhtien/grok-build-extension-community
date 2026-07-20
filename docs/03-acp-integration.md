@@ -174,7 +174,7 @@ Upstream documents categories (non-exhaustive):
 | `x.ai/fs/*`                   | list, exists, read, write       | Prefer client FS caps; agent may still use tools |
 | `x.ai/git/*`                  | status, stage, commit, diffs    | Agent tools; no dedicated host UI yet            |
 | `x.ai/git/worktree/*`         | create, apply, list, remove, gc | **Shipped** — QuickPick `/worktrees`             |
-| `x.ai/search/*`               | fuzzy open/change, content      | **Not wired** as ACP bridge                      |
+| `x.ai/search/*`               | fuzzy open/change, content      | **Shipped** — powers in-chat `@` mention search  |
 | `x.ai/terminal/*`             | create, kill, output            | **Off** — `terminal: false` (ADR-004)            |
 | `x.ai/session/*`              | admin, compact-related          | Partial (session admin / compact)                |
 | `x.ai/auth/*`                 | get_url, submit_code, info…     | **Shipped**                                      |

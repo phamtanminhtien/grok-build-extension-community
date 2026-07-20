@@ -115,11 +115,11 @@ Spec: [superpowers/specs/2026-07-16-l2-full-polish-design.md](superpowers/specs/
 | Worktree UI (`x.ai/git/worktree/*`)               | **Shipped** — QuickPick + `/worktrees` + status notifications                   |
 | Plan mode surface                                 | **Partial** — plan approval UI, `exitPlanMode`, session_notification banners    |
 | Subagent / background task visualization          | **Shipped** — Tasks panel, status bar badge, `/tasks`, live subagent transcript |
-| Fuzzy open bridge (`x.ai/search/*` → QuickOpen)   | **Not started** as agent bridge; in-chat `@` fuzzy file pick exists             |
+| Fuzzy open bridge (`x.ai/search/*` → `@` mention) | **Shipped** — agent index powers `@` popover; host findFiles fallback           |
 | Plugin/skills management UI                       | **Partial** — Extensions panel (hooks, plugins, skills, MCP)                    |
 | Binary bundling or first-run download             | **Not started** — PATH + `grok.binaryPath` only                                 |
 | Marketplace listing, icons, telemetry policy      | **Partial** — Marketplace/Open VSX live; telemetry policy TBD                   |
-| Automated integration tests in CI with mocked ACP | **Partial** — pure unit tests via `yarn test`; no mock-ACP CI yet               |
+| Automated integration tests in CI with mocked ACP | **Partial** — unit + mock wire smoke in `yarn test`; no live agent process CI   |
 | Prompt queue (mid-turn follow-ups)                | **Shipped** — TUI-like queue UI + `x.ai/queue/*`                                |
 | Images in prompt                                  | **Shipped** — paste, drop, Attach Image…                                        |
 | Fix with Grok (diagnostics)                       | **Shipped** — hover / Quick Fix                                                 |
@@ -132,7 +132,7 @@ Spec: [superpowers/specs/2026-07-16-l2-full-polish-design.md](superpowers/specs/
 - [ ] Product checklist signed off
 - [ ] Security productization residual complete ([08](08-security.md) residual list)
 - [x] Version gate + upgrade prompts reliable
-- [ ] Accessibility pass on chat + permissions
+- [x] Accessibility pass on chat + permissions _(aria labels on composer, permission, question dialogs; full external audit TBD)_
 
 ---
 
@@ -154,8 +154,8 @@ Spec: [superpowers/specs/2026-07-16-l2-full-polish-design.md](superpowers/specs/
 ## Suggested next work (priority)
 
 1. **L2 residual** — optional terminal hybrid “Reveal in Terminal” (ADR-004); live Remote-SSH/WSL QA on Win/Linux.
-2. **L3 remaining** — fuzzy-open ACP bridge; security/a11y formal sign-off.
-3. **CI** — mock ACP integration tests; Win/Linux smoke.
+2. **L3 remaining** — formal security sign-off; external a11y audit if targeting “stable”.
+3. **CI** — live `smoke:cli` job when secrets/binary available; Win/Linux matrix.
 4. **Packaging** — first-run download or bundled binary if install friction dominates.
 
 ## Suggested timeline (indicative only)
