@@ -1,215 +1,192 @@
 # Grok Build Community Edition
 
-Community VS Code host for **Grok Build**: a thin TypeScript client
-that speaks **ACP** to `grok agent stdio`. The agent runtime stays in Rust.
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/tienpham.grok-build-community-edition?label=VS%20Marketplace&logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=tienpham.grok-build-community-edition)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/tienpham.grok-build-community-edition?label=installs)](https://marketplace.visualstudio.com/items?itemName=tienpham.grok-build-community-edition)
+[![Open VSX](https://img.shields.io/open-vsx/v/tienpham/grok-build-community-edition?label=Open%20VSX)](https://open-vsx.org/extension/tienpham/grok-build-community-edition)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
+Community VS Code / Cursor host for **Grok Build** — chat, tools, diffs, and sessions in the editor while the agent runs as `grok agent stdio` (Rust).
 
 ![Grok Build Community Edition demo](https://raw.githubusercontent.com/phamtanminhtien/grok-build-extension-community/main/media/demo.gif)
 
-| Phase                       | Status         |
-| --------------------------- | -------------- |
-| Design docs                 | Done (`docs/`) |
-| L0 — Protocol wire-up       | Done           |
-| L1 — MVP chat               | Done           |
-| L2 — IDE-native polish      | Implemented    |
-| L3 — Depth & productization | Not started    |
-
-> Do not reimplement the agent. Spawn `grok agent stdio`, speak ACP, map VS Code primitives.
-
----
-
-## Install (users)
+## Install
 
 | Store                              | Link                                                                                                                               |
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | **VS Code Marketplace**            | [tienpham.grok-build-community-edition](https://marketplace.visualstudio.com/items?itemName=tienpham.grok-build-community-edition) |
 | **Open VSX** (Cursor, VSCodium, …) | [tienpham/grok-build-community-edition](https://open-vsx.org/extension/tienpham/grok-build-community-edition)                      |
 
-Or in the editor: Extensions → search **“Grok Build Community Edition”** (publisher `tienpham`).
+Or search **“Grok Build Community Edition”** in Extensions (publisher `tienpham`).
 
 ### Prerequisites
 
-1. **VS Code** 1.93+ (Secondary Side Bar chat tab needs **≥ 1.106**)
-2. **Grok Build CLI** (`grok`) on your `PATH`, **or** set `grok.binaryPath` to the absolute path
-3. **Auth**: CLI login (`grok login` / `~/.grok`) **or** **Grok Build: Set API Key** / **Login** in the extension
+1. **VS Code** 1.93+ (Secondary Side Bar chat needs **≥ 1.106**)
+2. **Grok Build CLI** (`grok`) on `PATH`, or set `grok.binaryPath`
+3. **Auth**: `grok login` / `~/.grok`, or **Grok Build: Login** / **Set API Key**
 
-The VSIX does **not** bundle the `grok` binary. Install the CLI first on the machine that runs the extension host (local, or the **remote** side of SSH/WSL).
-
-### From VSIX (sideload)
-
-```bash
-# In this repo
-cd grok-vscode-extension
-yarn install
-yarn package   # → grok-build-community-edition-0.3.1.vsix
-```
-
-Then in VS Code: **Extensions → ⋯ → Install from VSIX…** and pick the `.vsix`.
+The VSIX does **not** bundle the `grok` binary. Install the CLI on the machine that runs the extension host (local, or the **remote** side of SSH/WSL).
 
 ### First run
 
-1. Open a **trusted** workspace (Workspace Trust is required to start the agent)
-2. Open chat: **Grok Build: Open Chat** (or the activity bar / secondary sidebar icon)
-3. If the agent is not running: **Grok Build: Start Agent**
-4. Type a prompt and Send (active file / selection attach by default)
+1. Open a **trusted** workspace
+2. **Grok Build: Open Chat** (activity bar or secondary sidebar)
+3. Sign in if needed, then send a prompt (active file / selection attach by default)
 
 ### Remote-SSH / WSL
 
-The extension host runs **on the remote**. Install `grok` **on the remote**, not only on your local Mac/PC. Set `grok.binaryPath` to the remote path if needed.
+Install `grok` **on the remote**, not only locally. Point `grok.binaryPath` at the remote path if needed.
 
 ### Troubleshooting
 
-| Symptom               | What to try                                                             |
-| --------------------- | ----------------------------------------------------------------------- |
-| Binary not found      | Install CLI; set `grok.binaryPath`; check Output → **Grok Build**       |
-| Workspace not trusted | Command Palette → **Manage Workspace Trust**                            |
-| Auth / 401            | **Grok Build: Login** or **Set API Key**; or `grok login` in a terminal |
-| Stuck / hung agent    | **Grok Build: Restart Agent**                                           |
+| Symptom               | What to try                                                   |
+| --------------------- | ------------------------------------------------------------- |
+| Binary not found      | Install CLI · set `grok.binaryPath` · Output → **Grok Build** |
+| Workspace not trusted | **Manage Workspace Trust**                                    |
+| Auth / 401            | **Login** / **Set API Key**, or `grok login`                  |
+| Stuck agent           | **Grok Build: Restart Agent**                                 |
+
+---
+
+## Features
+
+### Chat & agent
+
+- **Streaming chat** in the Activity Bar and Secondary Side Bar (Secondary Side Bar needs VS Code ≥ 1.106)
+- Assistant **markdown** (sanitized) with **code copy**, collapsible **thinking**, tool cards / **tool groups** (e.g. “Read N files”), live **shimmer** on the latest running tool
+- **Message actions** — copy / edit user messages back into the composer
+- **Permission popovers** — Allow once / Always allow (session) / Deny / Always deny (when offered); auto-deny after `grok.permissionTimeoutMs` (default 120s)
+- **Agent questions** — multi-question UI for `x.ai/ask_user_question` (options, multi-select, skip / chat-about-this)
+- **Plan mode** — Shift+Tab **Plan** arm + plan checklist / **exitPlanMode** approval when the agent proposes a plan
+- **Prompt queue** — mid-turn Enter queues follow-ups; pane: remove, reorder, edit, clear, send-now (`x.ai/queue/*`)
+- **Session notification banners** — compact, retry, subagent, interaction hints (`x.ai/session_notification`)
+- **Turn status bar** — elapsed time, context tokens / window, cost when available
+- **Virtualized message list** — windowed DOM for long threads
+- **Welcome / empty state** — sign-in CTAs, tips; **CLI missing** install guidance blocks agent use until `grok` is available
+- **Status bar** — idle / spinning “working…” + badge + tooltip when background work is running
+
+### Subagents & background work
+
+- **Tasks panel** (above composer, `/tasks`) — running **subagents**, background **tasks/monitors**, scheduled **loops**
+- **In-chat subagent panel** (View on a subagent row):
+  - **Live stream** while running — child `session/update` timeline (thinking / tools / text), same visual language as main chat
+  - **Snapshot** when done — `x.ai/subagent/get` transcript (tools used, tokens, worktree path, failure/cancel reason)
+  - **Kill** (`x.ai/subagent/cancel`) · **Refresh** · Esc / Done to close
+- List bootstrap via `x.ai/subagent/list_running` + `x.ai/task/list`; finished rows drop off the list (TUI `show_done=false` parity)
+- Subagent sessions are **hidden** from the resume picker by default (`session_kind` starting with `subagent`)
+
+### Context & editor
+
+- **Auto-attach** active file and/or selection (`grok.context.autoAttach*`); composer chip toggle; skip secrets via `grok.context.excludeGlob`
+- **`@` context** — sticky chips (file / folder / selection) + inline `@` mentions in the composer
+- **Images** — paste, drop (Shift+drop if VS Code steals the event), or **Attach Image…**
+- **Fix with Grok** — diagnostics **Hover** + **Quick Fix** → composer with error + file snippet
+- **Editor title** Grok icon → **Open Chat**; context menu **Add Selection to Chat**
+
+### Edits & review
+
+- **Multi-file diff review** — pre-write snapshots (`grok-diff:`), open with `vscode.diff`
+- **Accept / Reject** via agent hunk-tracker (`x.ai/hunk-tracker/*`) — per file or accept/reject all
+- Host **FS capabilities**: read prefers open buffers; write via WorkspaceEdit; optional auto-save (`grok.fs.*`)
+
+### Sessions & history
+
+- **New session** · **Home** welcome screen · **Resume** from `~/.grok/sessions` via ACP `session/load` when advertised
+- **Rewind** (`x.ai/rewind/*`, dry-run preview then execute) · **`/compact`** host action with loading feedback
+- **`/fork`** branch session (`x.ai/session/fork`) · **`/rename`** session title · **`/context`** / **`/session-info`**
+- **Slash registry** — host commands, ACP passthrough (skills / agent builtins), TUI-only names listed as unsupported
+
+### Extensions
+
+- **Extensions panel** — hooks, plugins, skills, MCP (enable/disable, install/uninstall where the agent supports it)
+- Host slash shortcuts: `/hooks`, `/plugins`, `/skills`, `/mcps`, `/marketplace` open the same panel
+
+### Auth, model & config
+
+- **Browser OAuth** / logout via `x.ai/auth/*`, shared with CLI `~/.grok/auth.json` (file watcher keeps empty-state in sync)
+- **API key** in SecretStorage · optional `XAI_API_KEY` when `grok.inheritEnvApiKey` is true
+- **Account / subscription** commands · **billing usage** in the context bar from `x.ai/billing` (usage %, effective %, auto-topup when present)
+- **Model + reasoning effort** in the chat model popover (in-session `setModel` / effort — no full agent restart for switches)
+- **Mode cycle** Shift+Tab: **Normal → Plan → Auto → Always Approve** (permission mode shared with CLI via `~/.grok/config.toml`)
+- **Workspace Trust** required to start the agent
+
+### Requires
+
+- Grok Build CLI (`grok`) on the machine that runs the extension host — **not** bundled in the VSIX
+- Shell tools run **agent-side** (`clientCapabilities.terminal: false`; incremental bash / hunk-tracker / git-head via client `_meta`)
+
+---
+
+## Settings
+
+| Setting                                                     | Description                                           |
+| ----------------------------------------------------------- | ----------------------------------------------------- |
+| `grok.binaryPath`                                           | Path to `grok` (empty = PATH then `~/.grok/bin/grok`) |
+| `grok.cwd`                                                  | Session cwd (empty = first workspace folder)          |
+| `grok.initializeTimeoutMs`                                  | Spawn + `initialize` timeout (default 30s)            |
+| `grok.permissionTimeoutMs`                                  | Permission dialog auto-deny (default 120s)            |
+| `grok.inheritEnvApiKey`                                     | Pass host `XAI_API_KEY` if no SecretStorage key       |
+| `grok.ui.showThoughts`                                      | Show thinking chunks in chat                          |
+| `grok.context.autoAttachActiveFile` / `autoAttachSelection` | Auto context on send                                  |
+| `grok.context.excludeGlob`                                  | Never auto-attach matching paths                      |
+| `grok.fs.preferOpenBuffers` / `autoSave` / `maxReadBytes`   | Host FS behavior                                      |
+
+Shared with CLI/TUI via `~/.grok/config.toml` (not VS Code settings): `[ui].permission_mode`, `[models].default`, `[models].default_reasoning_effort`.
+
+---
+
+## Commands
+
+| Command                                                         | Action                                                     |
+| --------------------------------------------------------------- | ---------------------------------------------------------- |
+| `Grok Build: Open Chat`                                         | Focus chat (activity bar or secondary sidebar)             |
+| `Grok Build: Open Chat (Activity Bar)`                          | Force activity-bar chat view                               |
+| `Grok Build: Open Output`                                       | Show Output channel **Grok Build**                         |
+| `Grok Build: Start Agent`                                       | Spawn → `initialize` → `session/new`                       |
+| `Grok Build: Restart Agent` / `Stop Agent`                      | Process lifecycle                                          |
+| `Grok Build: New Session`                                       | New ACP session + clear UI                                 |
+| `Grok Build: Cancel Turn`                                       | Cancel in-flight turn                                      |
+| `Grok Build: Add Context…`                                      | Sticky `@` context picker                                  |
+| `Grok Build: Add Selection to Chat` / `Add Active File to Chat` | Pin editor context chips                                   |
+| `Grok Build: Fix with Grok`                                     | Hover / Quick Fix → composer with diagnostic + snippet     |
+| `Grok Build: Select Model`                                      | Open in-chat model + effort popover                        |
+| `Grok Build: Resume Session…`                                   | Pick from `~/.grok/sessions` · `session/load` if supported |
+| `Grok Build: Review Edits…`                                     | Multi-file diff review + per-file Accept/Reject            |
+| `Grok Build: Accept All Edits` / `Reject All Edits`             | Hunk-tracker bulk actions                                  |
+| `Grok Build: Rewind…`                                           | Rewind checkpoints (`x.ai/rewind/*`)                       |
+| `Grok Build: Extensions…`                                       | Hooks, plugins, skills, MCP panel                          |
+| `Grok Build: Login` / `Logout` / `Paste Auth Code`              | Browser OAuth or finish loopback code                      |
+| `Grok Build: Set API Key` / `Clear API Key`                     | SecretStorage API key                                      |
+| `Grok Build: Check Subscription` / `Show Account Info`          | `x.ai/auth/*`                                              |
+| `Grok Build: Attach Image…`                                     | File dialog → image blocks on next prompt                  |
+| `Grok Build: Smoke Test (L0)`                                   | Dev prompt round-trip via agent                            |
+
+### Slash commands (chat composer)
+
+Type `/` in chat. Registry: **host** wins on name collision, then ACP-advertised commands (`src/slash/`).
+
+| Layer                      | Examples                                                                                                                                                                                                    | Behavior                                   |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| **Host**                   | `/new`, `/home`, `/resume`, `/compact`, `/rewind`, `/fork`, `/rename`, `/model`, `/always-approve`, `/tasks`, `/review`, `/hooks`…`/mcps`, `/copy`, `/export`, `/login`, `/logout`, `/help`, `/settings`, … | Handled in the extension                   |
+| **Passthrough**            | `/plan`, `/loop`, `/effort`, `/btw`, `/goal`, `/share`, `/recap`, `/usage`, skills, hooks-add, …                                                                                                            | Sent as the user prompt for the agent      |
+| **Unsupported (TUI-only)** | `/vim-mode`, `/theme`, `/dashboard`, `/minimal`, `/find`, `/jump`, `/voice`, …                                                                                                                              | Listed for parity; not executed in VS Code |
 
 ---
 
 ## Develop
 
 ```bash
-cd grok-vscode-extension
 yarn install
 yarn build
 yarn typecheck
 yarn test
+yarn smoke:cli    # needs grok on PATH
+yarn package      # → .vsix
 ```
 
-### Headless L0 smoke (no VS Code)
+**F5** → Extension Development Host → open chat and send a prompt.
 
-```bash
-yarn smoke:cli   # requires `grok` on PATH
-```
-
-### Extension Development Host
-
-1. Open this folder in VS Code / Cursor
-2. Press **F5** (Run Extension)
-3. **Activity Bar** (left) and/or **Secondary Side Bar** (right, VS Code ≥ 1.106)
-4. Send a prompt
-
-Full checklist: `docs/L0-manual-test.md`
-
-### Package / publish
-
-```bash
-yarn package          # local .vsix (grok-build-community-edition-<version>.vsix)
-# yarn publish:ovsx   # Open VSX first (needs OVSX_PAT)
-# yarn publish:vsce   # VS Code Marketplace (needs VSCE_PAT / vsce login)
-```
-
-**Automated release ([release-please](https://github.com/googleapis/release-please)):**
-
-Flow on every push to `main` (workflow **Release Please**):
-
-1. Opens/updates a **Release PR** (version bump + `CHANGELOG.md`) from [conventional commits](https://www.conventionalcommits.org/)
-2. You **merge** that PR
-3. release-please creates tag `vX.Y.Z` + GitHub Release
-4. Same workflow’s **Publish** job packages the VSIX, attaches it to the release, and (if secrets are set) publishes to:
-   1. [Open VSX](https://open-vsx.org/) (`ovsx`) — first
-   2. [VS Code Marketplace](https://marketplace.visualstudio.com/) (`vsce`)
-
-Use commit prefixes: `feat:`, `fix:`, `feat!:` / `BREAKING CHANGE:`.  
-`chore:` / `ci:` alone usually do **not** open a version bump.
-
-**Secrets** (repo → Settings → Secrets → Actions):
-
-| Secret     | Purpose                                                                                                     |
-| ---------- | ----------------------------------------------------------------------------------------------------------- |
-| `OVSX_PAT` | Token from [open-vsx.org/user-settings/tokens](https://open-vsx.org/user-settings/tokens) (published first) |
-| `VSCE_PAT` | Azure DevOps PAT with **Marketplace** (Acquire + Publish) for publisher `tienpham`                          |
-
----
-
-## Commands
-
-| Command                            | Action                                                               |
-| ---------------------------------- | -------------------------------------------------------------------- |
-| `Grok Build: Open Chat`            | Focus sidebar chat                                                   |
-| `Grok Build: Open Output`          | Show Output channel `Grok Build`                                     |
-| `Grok Build: Start Agent`          | Spawn → `initialize` → `session/new`                                 |
-| `Grok Build: New Session`          | New ACP session + clear UI                                           |
-| `Grok Build: Cancel Turn`          | `session/cancel`                                                     |
-| `Grok Build: Add Context…`         | `@` sticky context picker                                            |
-| `Grok Build: Fix with Grok`        | From hover / Quick Fix: fill composer with diagnostic + file snippet |
-| `Grok Build: Select Model`         | QuickPick → `grok.model` + agent restart                             |
-| `Grok Build: Resume Session…`      | Session history + `session/load` when available                      |
-| `Grok Build: Review Edits…`        | Multi-file diff review                                               |
-| `Grok Build: Login / Set API Key`  | Browser login or SecretStorage API key                               |
-| `Grok Build: Smoke Test (L0)`      | Headless-style prompt via agent                                      |
-| `Grok Build: Restart / Stop Agent` | Process lifecycle                                                    |
-
-### Slash commands (chat composer)
-
-Type `/` in the chat (same names as Grok Build TUI):
-
-| Layer        | Examples                                                                                            | Behavior                                    |
-| ------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| **Host**     | `/new`, `/resume`, `/model`, `/help`, `/settings`, `/copy`, `/export`, `/always-approve`, `/login`… | Run in the extension                        |
-| **Agent**    | `/compact`, `/loop`, `/plan`, skills, hooks/plugins…                                                | Pass-through as prompt                      |
-| **TUI-only** | `/vim-mode`, `/theme`, `/dashboard`, `/minimal`…                                                    | Listed for parity; not available in VS Code |
-
----
-
-## Settings
-
-| Setting                    | Description                                            |
-| -------------------------- | ------------------------------------------------------ |
-| `grok.binaryPath`          | Absolute path to `grok` (empty = PATH / `~/.grok/bin`) |
-| `grok.cwd`                 | Session cwd (empty = first workspace folder)           |
-| `grok.initializeTimeoutMs` | Spawn/init timeout (default 30s)                       |
-
-Shared with the CLI/TUI via `~/.grok/config.toml` (not VS Code settings):
-
-| Key              | Path                                                            |
-| ---------------- | --------------------------------------------------------------- |
-| Permission mode  | `[ui].permission_mode` — mode button / `/always-approve`        |
-| Default model    | `[models].default` — model picker / `/model`                    |
-| Reasoning effort | `[models].default_reasoning_effort` — effort picker / `/effort` |
-
----
-
-## Layout
-
-```
-src/
-  extension.ts
-  agent/          # process, ACP, host FS, permissions
-  ui/             # chat webview + status bar
-  auth/           # SecretStorage API key
-  context/        # active file / selection → ACP blocks
-  config/         # settings + permissionMode (config.toml)
-  log/output.ts
-media/demo.gif              # README product demo (GitHub raw; excluded from VSIX)
-media/grok.svg              # activity bar (monochrome Grok mark)
-media/grok-light.svg        # panel tab icon (light theme)
-media/grok-dark.svg         # panel tab icon (dark theme)
-media/icon.png              # marketplace icon (256×256 from media/icon.svg)
-media/icon.svg              # source for marketplace logo
-media/tabler/               # webfont (woff2 only) copied on build
-scripts/smoke-cli.mjs
-docs/
-```
-
-Chat UI uses **[@tabler/icons-webfont](https://tabler.io/icons)** (`yarn build` copies CSS + woff2 into `media/tabler/`).
-
----
-
-## Documentation
-
-Start here: `docs/README.md` (design docs in the repo; not shipped inside the VSIX).
-
-| Doc                          | Topic                       |
-| ---------------------------- | --------------------------- |
-| `docs/01-overview.md`        | Goals / non-goals           |
-| `docs/02-architecture.md`    | Process model & modules     |
-| `docs/03-acp-integration.md` | Protocol integration        |
-| `docs/08-security.md`        | Trust, permissions, secrets |
-| `docs/09-roadmap.md`         | L0–L3 phases                |
-| `CHANGELOG.md`               | Release notes               |
+Design docs: [`docs/README.md`](./docs/README.md) · releases: [`CHANGELOG.md`](./CHANGELOG.md)
 
 ## License
 
-MIT — see `LICENSE`.
+MIT — see [`LICENSE`](./LICENSE).

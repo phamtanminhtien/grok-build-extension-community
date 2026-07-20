@@ -57,7 +57,7 @@ the SDK for framing, typed methods, and request correlation.
 
 Client sends protocol version and **clientCapabilities**.
 
-Minimum for MVP:
+As implemented (`src/agent/clientCapabilities.ts`):
 
 ```json
 {
@@ -67,10 +67,19 @@ Minimum for MVP:
       "readTextFile": true,
       "writeTextFile": true
     },
-    "terminal": true
+    "terminal": false,
+    "_meta": {
+      "x.ai/incrementalBashOutput": true,
+      "x.ai/hunkTracker": { "mode": "agent_only" },
+      "x.ai/bashOutputNoColor": true,
+      "x.ai/gitHeadChanged": true
+    }
   }
 }
 ```
+
+`terminal: false` is intentional ([ADR-004](10-decisions.md)): agent-owned
+shell tools; no host PTY.
 
 Agent responds with server capabilities, auth methods, and available
 extension methods (discover; do not hard-code an exhaustive list).
@@ -124,7 +133,7 @@ Active editor context (recommended MVP shape):
 | `agent_thought_chunk` | Collapsible “Thinking” region                 |
 | `tool_call`           | Tool card: title, kind, status, input summary |
 | `tool_call_update`    | Update status / result / output tail          |
-| `plan`                | Plan panel / checklist (L2)                   |
+| `plan`                | Plan checklist / approval UI                  |
 
 UI must tolerate unknown update types (forward-compatible).
 
@@ -160,19 +169,22 @@ still show what ran.
 
 Upstream documents categories (non-exhaustive):
 
-| Prefix                     | Examples                     | Extension phase                                  |
-| -------------------------- | ---------------------------- | ------------------------------------------------ |
-| `x.ai/fs/*`                | list, exists, read, write    | Prefer client FS caps first; use later if needed |
-| `x.ai/git/*`               | status, stage, commit, diffs | L2–L3                                            |
-| `x.ai/git/worktree/*`      | create, apply, list          | L3                                               |
-| `x.ai/search/*`            | fuzzy open/change, content   | L2 (wire to QuickOpen)                           |
-| `x.ai/terminal/*`          | create, kill, output         | L1–L2 via Terminal API                           |
-| `x.ai/session/*`           | fork, worktree resume        | L2–L3                                            |
-| `x.ai/auth/*`              | get_url, submit_code         | L1 auth UX                                       |
-| rewind / compact / history | conversation ops             | L2                                               |
-| feedback / telemetry       | optional                     | L3 / product decision                            |
+| Prefix                        | Examples                     | Status in extension (0.3.8)                      |
+| ----------------------------- | ---------------------------- | ------------------------------------------------ |
+| `x.ai/fs/*`                   | list, exists, read, write    | Prefer client FS caps; agent may still use tools |
+| `x.ai/git/*`                  | status, stage, commit, diffs | Agent tools; no dedicated host UI yet            |
+| `x.ai/git/worktree/*`         | create, apply, list          | **Not wired** (L3 remaining)                     |
+| `x.ai/search/*`               | fuzzy open/change, content   | **Not wired** as ACP bridge                      |
+| `x.ai/terminal/*`             | create, kill, output         | **Off** — `terminal: false` (ADR-004)            |
+| `x.ai/session/*`              | admin, compact-related       | Partial (session admin / compact)                |
+| `x.ai/auth/*`                 | get_url, submit_code, info…  | **Shipped**                                      |
+| `x.ai/rewind/*`               | points, execute              | **Shipped**                                      |
+| `x.ai/queue/*`                | changed, remove, reorder…    | **Shipped**                                      |
+| `x.ai/hunkTracker` / git head | via client `_meta`           | **Shipped** (Accept/Reject on diffs)             |
+| task / subagent methods       | list, kill, get transcript   | **Shipped** (Tasks panel)                        |
+| feedback / telemetry          | optional                     | Not used by extension                            |
 
-**Rule:** MVP must work with **base ACP only**. Extension methods are
+**Rule:** Core chat must work with **base ACP only**. Extension methods are
 progressive enhancement after capability discovery from `initialize`.
 
 ### Notifications agent → client
@@ -226,10 +238,8 @@ const client = createAcpClient(proc);
 
 await client.initialize({
   protocolVersion: 1,
-  clientCapabilities: {
-    fs: { readTextFile: true, writeTextFile: true },
-    terminal: true,
-  },
+  clientCapabilities: buildInitializeClientCapabilities(),
+  // terminal: false; FS true; TUI-aligned _meta (hunk tracker, etc.)
 });
 
 const { sessionId } = await client.sessionNew({

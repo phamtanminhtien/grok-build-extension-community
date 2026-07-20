@@ -9,41 +9,34 @@ The extension must locate a compatible `grok` binary, spawn it as
 
 ```
 1. grok.binaryPath setting (if non-empty and executable)
-2. Bundled binary for platform/arch (if packaging includes one)
-3. PATH lookup: `grok` (and Windows `grok.exe`)
-4. Common install locations (optional fallbacks):
-   - ~/.grok/bin/grok
-   - /usr/local/bin/grok
-   - platform-specific install docs paths
+2. PATH lookup: `grok` (and Windows `grok.exe`)
+3. Fallback: ~/.grok/bin/grok
 ```
 
-On failure: show empty-state with install instructions (curl/irm from
-upstream README) and a button to set `grok.binaryPath`.
+Bundled binary / first-run download: **not implemented** (see [ADR-005](10-decisions.md)).
+
+On failure: show empty-state with install instructions and a path to set
+`grok.binaryPath` (blocks agent use until CLI is available).
 
 ## Version compatibility
 
-| Check | When |
-|-------|------|
-| `grok --version` | Before first spawn (cache result) |
-| Semver / minimum version | Compare to `engines.grok` in package.json or const |
-| Protocol | `initialize` negotiation |
+| Check          | When                     |
+| -------------- | ------------------------ |
+| Binary resolve | Before spawn             |
+| Protocol       | `initialize` negotiation |
 
-If binary too old:
-
-- Block with message: upgrade via `grok update` or reinstall.
-- Do not attempt unknown protocol dialects.
-
-Document minimum Grok version in release notes when extension ships.
+**Hard minimum-version gate:** not yet enforced (L3 acceptance item). When
+added: compare `grok --version` to a floor and block with upgrade guidance.
 
 ## Spawn specification
 
 ```ts
 spawn(binary, args, {
-  cwd: processCwd,          // often workspace root
+  cwd: processCwd, // often workspace root
   env: buildEnv(),
   stdio: ["pipe", "pipe", "pipe"],
   windowsHide: true,
-})
+});
 ```
 
 ### Args construction
@@ -60,11 +53,8 @@ grok agent --model grok-build stdio
 grok agent --always-approve stdio
 ```
 
-Validate `grok.agentExtraArgs`:
-
-- Allow only safe flag patterns.
-- Reject shell metacharacters / nested commands.
-- Prefer structured settings over raw args when a first-class setting exists.
+Flags are built from structured settings / config.toml (model, permission
+mode), not free-form shell strings.
 
 ### Stderr
 
@@ -79,13 +69,13 @@ Validate `grok.agentExtraArgs`:
 
 ## Supervision
 
-| Event | Action |
-|-------|--------|
-| Unexpected exit | State → errored; UI banner; offer Restart |
-| Spawn error (ENOENT) | Binary missing flow |
-| Hang (no initialize response) | Timeout (e.g. 30s) → kill → error |
-| User Restart | SIGTERM → wait → SIGKILL → respawn → re-initialize |
-| Extension deactivate | Graceful shutdown sequence |
+| Event                         | Action                                             |
+| ----------------------------- | -------------------------------------------------- |
+| Unexpected exit               | State → errored; UI banner; offer Restart          |
+| Spawn error (ENOENT)          | Binary missing flow                                |
+| Hang (no initialize response) | Timeout (e.g. 30s) → kill → error                  |
+| User Restart                  | SIGTERM → wait → SIGKILL → respawn → re-initialize |
+| Extension deactivate          | Graceful shutdown sequence                         |
 
 ### Shutdown sequence
 
@@ -99,23 +89,22 @@ Validate `grok.agentExtraArgs`:
 
 ## Packaging strategies
 
-| Strategy | Pros | Cons | Phase |
-|----------|------|------|-------|
-| **PATH-only** | Simple | Friction for new users | MVP OK |
-| **Document install script** | Official binaries | Extra step | MVP |
-| **Bundle binary in VSIX** | One-click | Large VSIX; update matrix; licensing | L2 |
-| **Download on first run** | Smaller VSIX | Network, trust, code sign | L2–L3 |
+| Strategy                        | Pros                  | Cons                      | Phase         |
+| ------------------------------- | --------------------- | ------------------------- | ------------- |
+| **PATH + binaryPath** (current) | Simple security story | Install friction          | **0.3.x**     |
+| **Document install**            | Official binaries     | Extra step                | Done (README) |
+| **Bundle binary in VSIX**       | One-click             | Large VSIX; update matrix | L3 open       |
+| **Download on first run**       | Smaller VSIX          | Network, trust, code sign | L3 open       |
 
-MVP recommendation: **PATH + `binaryPath` + install deep-link**.  
-Bundling deferred until product packaging decision.
+Current recommendation remains **PATH + `binaryPath`**.
 
 ## Platform matrix
 
-| Platform | Arch | Notes |
-|----------|------|-------|
-| macOS | arm64, x64 | Primary |
-| Linux | x64, arm64 | Primary |
-| Windows | x64 | Agent has Windows stdin hardening; test early |
+| Platform | Arch       | Notes                                         |
+| -------- | ---------- | --------------------------------------------- |
+| macOS    | arm64, x64 | Primary                                       |
+| Linux    | x64, arm64 | Primary                                       |
+| Windows  | x64        | Agent has Windows stdin hardening; test early |
 
 Remote / WSL / SSH:
 
@@ -130,14 +119,17 @@ Remote / WSL / SSH:
   version gate fails.
 - Do not silent-download binaries without user consent.
 
-## Health check command
+## Health / recovery commands
 
-`Grok: Restart Agent` and optional `Grok: Doctor`:
+| Command                       | Role                              |
+| ----------------------------- | --------------------------------- |
+| `Grok Build: Start Agent`     | Explicit spawn                    |
+| `Grok Build: Restart Agent`   | SIGTERM → respawn → re-initialize |
+| `Grok Build: Stop Agent`      | Tear down process                 |
+| `Grok Build: Open Output`     | Diagnostics channel               |
+| `Grok Build: Smoke Test (L0)` | Dev round-trip                    |
 
-1. Resolve binary
-2. Print version
-3. Spawn initialize round-trip
-4. Report cwd, model, auth present (boolean only)
+Optional **Doctor** (version + cwd + auth boolean report) is not shipped yet.
 
 ## Next
 

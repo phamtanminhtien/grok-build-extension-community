@@ -7,18 +7,18 @@ The agent process owns authentication with xAI backends. The extension
 
 ### Priority order (resolve at spawn / first prompt)
 
-1. **VS Code setting** `grok.apiKey` (secret storage preferred — see below)
-2. **Environment** `XAI_API_KEY` inherited if user opts in
+1. **SecretStorage API key** (via **Grok Build: Set API Key**)
+2. **Environment** `XAI_API_KEY` when `grok.inheritEnvApiKey` is true
 3. **Existing CLI auth** at `~/.grok/auth.json` (agent reads automatically)
-4. **Interactive login** via browser / device code (`x.ai/auth/*` or agent flow)
+4. **Interactive login** via browser (`x.ai/auth/*`)
 
 ### Secret storage
 
-| Storage                    | Use                                     |
-| -------------------------- | --------------------------------------- |
-| `SecretStorage` API        | API keys entered in extension           |
-| `settings.json` plain text | **Discouraged** for keys; if used, warn |
-| `~/.grok/auth.json`        | CLI OAuth tokens (agent-managed)        |
+| Storage                    | Use                                   |
+| -------------------------- | ------------------------------------- |
+| `SecretStorage` API        | API keys entered in extension         |
+| `settings.json` plain text | **Not used** for keys in current code |
+| `~/.grok/auth.json`        | CLI OAuth tokens (agent-managed)      |
 
 Never log secret values. Never send keys to the webview via unsanitized
 message posts without need.
@@ -37,7 +37,7 @@ User: Grok Build: Login  (or /login, or empty-state Sign in)
     5. wait for authenticate; x.ai/auth/info + check_subscription
     6. toast + empty-state profile / gate banner
   API key path:
-    → SecretStorage prompt (existing)
+    → SecretStorage prompt
 ```
 
 ### Account / subscription
@@ -48,6 +48,7 @@ User: Grok Build: Login  (or /login, or empty-state Sign in)
 | Grok Build: Check Subscription              | `x.ai/auth/check_subscription`                     |
 | Empty-state “Check subscription” when gated | same                                               |
 | Grok Build: Paste Auth Code                 | `x.ai/auth/submit_code`                            |
+| Billing usage in chat UI                    | Agent / auth-related responses (parsed in host)    |
 
 ### Logout
 
@@ -70,7 +71,7 @@ Extension and CLI share one account store:
 | Source            | Path / store                                                                    |
 | ----------------- | ------------------------------------------------------------------------------- |
 | OAuth session     | `~/.grok/auth.json` (agent `x.ai/auth/*`, same as `grok login` / `grok logout`) |
-| Extension API key | VS Code `SecretStorage` (`grok.apiKey`)                                         |
+| Extension API key | VS Code `SecretStorage`                                                         |
 | Env key           | `XAI_API_KEY` when `grok.inheritEnvApiKey` is true                              |
 
 The extension watches `~/.grok/auth.json` so a terminal `grok login` /
@@ -79,104 +80,70 @@ button without restarting VS Code.
 
 ## Configuration surface
 
-All settings under namespace **`grok`**.
+All VS Code settings under namespace **`grok`** (from `package.json`).
 
-### Core
+### Host (VS Code settings)
 
-| Key                   | Type     | Default | Description                                  |
-| --------------------- | -------- | ------- | -------------------------------------------- |
-| `grok.binaryPath`     | string   | `""`    | Absolute path to `grok`; empty = PATH lookup |
-| `grok.cwd`            | string   | `""`    | Override workspace cwd; empty = folder root  |
-| `grok.agentExtraArgs` | string[] | `[]`    | Extra args before `stdio` (validated)        |
+| Key                                 | Type     | Default                | Description                                                   |
+| ----------------------------------- | -------- | ---------------------- | ------------------------------------------------------------- |
+| `grok.binaryPath`                   | string   | `""`                   | Absolute path to `grok`; empty = PATH then `~/.grok/bin/grok` |
+| `grok.cwd`                          | string   | `""`                   | Override session cwd; empty = first workspace folder          |
+| `grok.initializeTimeoutMs`          | number   | `30000`                | Spawn + `initialize` timeout                                  |
+| `grok.permissionTimeoutMs`          | number   | `120000`               | Permission dialog auto-deny timeout                           |
+| `grok.inheritEnvApiKey`             | boolean  | `true`                 | Pass host `XAI_API_KEY` if no SecretStorage key               |
+| `grok.ui.showThoughts`              | boolean  | `true`                 | Show thinking chunks                                          |
+| `grok.context.autoAttachActiveFile` | boolean  | `true`                 | Auto-attach active file                                       |
+| `grok.context.autoAttachSelection`  | boolean  | `true`                 | Prefer selection when non-empty                               |
+| `grok.context.excludeGlob`          | string[] | `.env` / secrets globs | Deny-list for auto-attach                                     |
+| `grok.fs.preferOpenBuffers`         | boolean  | `true`                 | Host read prefers unsaved buffers                             |
+| `grok.fs.autoSave`                  | boolean  | `true`                 | Save after host write                                         |
+| `grok.fs.maxReadBytes`              | number   | `5000000`              | Cap for host reads                                            |
 
-These live in `~/.grok/config.toml` (shared with CLI/TUI), **not** VS Code settings:
-
-| Config key                          | Description                                                     |
-| ----------------------------------- | --------------------------------------------------------------- |
-| `[ui].permission_mode`              | Normal / Auto / Always Approve — mode button, `/always-approve` |
-| `[models].default`                  | Default model id — model picker, `/model`                       |
-| `[models].default_reasoning_effort` | Default effort — effort picker, `/effort`                       |
-
-### Auth
-
-| Key                     | Type    | Default | Description                               |
-| ----------------------- | ------- | ------- | ----------------------------------------- |
-| `grok.apiKey`           | string  | `""`    | Prefer SecretStorage UI over this         |
-| `grok.inheritEnvApiKey` | boolean | `true`  | Pass `XAI_API_KEY` from parent env if set |
-
-### FS host
-
-| Key                         | Type    | Default   | Description             |
-| --------------------------- | ------- | --------- | ----------------------- |
-| `grok.fs.preferOpenBuffers` | boolean | `true`    | Read open editors first |
-| `grok.fs.autoSave`          | boolean | `true`    | Save after host write   |
-| `grok.fs.maxReadBytes`      | number  | `5000000` | Cap for host reads      |
-
-### UI
-
-| Key                                 | Type           | Default   | Description                     |
-| ----------------------------------- | -------------- | --------- | ------------------------------- |
-| `grok.ui.showThoughts`              | boolean        | `true`    | Show thinking chunks            |
-| `grok.ui.fontSize`                  | number \| null | `null`    | Override webview font           |
-| `grok.context.autoAttachActiveFile` | boolean        | `true`    | Attach active file to prompts   |
-| `grok.context.autoAttachSelection`  | boolean        | `true`    | Attach selection when non-empty |
-| `grok.context.excludeGlob`          | string[]       | see below | Deny-list globs                 |
-
-Default exclude suggestions:
+Default exclude:
 
 ```json
 ["**/.env", "**/.env.*", "**/secrets/**", "**/*credential*", "**/*.pem"]
 ```
 
-### Diagnostics
+### Shared with CLI (`~/.grok/config.toml`)
 
-| Key                         | Type    | Default | Description                        |
-| --------------------------- | ------- | ------- | ---------------------------------- |
-| `grok.logging.logRpc`       | boolean | `false` | Log method names (not full bodies) |
-| `grok.logging.logRpcBodies` | boolean | `false` | Verbose; redaction required        |
+These are **not** VS Code settings; extension and TUI both read/write them:
+
+| Config key                          | Description                                                                |
+| ----------------------------------- | -------------------------------------------------------------------------- |
+| `[ui].permission_mode`              | Normal / Auto / Always Approve — mode button, Shift+Tab, `/always-approve` |
+| `[models].default`                  | Default model id — model picker, `/model`                                  |
+| `[models].default_reasoning_effort` | Default effort — effort UI, `/effort`                                      |
 
 ## Env passed to agent
 
-| Variable              | When                                    |
-| --------------------- | --------------------------------------- |
-| `XAI_API_KEY`         | If secret/setting/inherit provides it   |
-| `HOME` / user profile | Inherit                                 |
-| `PATH`                | Inherit (needed to find tools)          |
-| `GROK_*`              | Inherit selectively; document allowlist |
-
-Strip known noisy or dangerous overrides only when necessary. Do not pass
-the entire unsanitized env if product security review requires a allowlist
-(decision TBD).
+| Variable              | When                            |
+| --------------------- | ------------------------------- |
+| `XAI_API_KEY`         | If secret / inherit provides it |
+| `HOME` / user profile | Inherit                         |
+| `PATH`                | Inherit (needed to find tools)  |
 
 ## Config files outside VS Code
 
-The agent continues to honor Grok config:
+| Path                     | Role                                          |
+| ------------------------ | --------------------------------------------- |
+| `~/.grok/config.toml`    | User config (mode, model, effort, …)          |
+| `~/.grok/auth.json`      | Auth                                          |
+| `~/.grok/sessions/`      | Sessions (resume picker)                      |
+| project `AGENTS.md`      | Project rules                                 |
+| skills / plugins / hooks | Discovered by agent; Extensions panel manages |
 
-| Path                  | Role                |
-| --------------------- | ------------------- |
-| `~/.grok/config.toml` | User config         |
-| `~/.grok/auth.json`   | Auth                |
-| `~/.grok/sessions/`   | Sessions            |
-| project `AGENTS.md`   | Project rules       |
-| skills / plugins      | Discovered by agent |
-
-The extension reads/writes these for shared CLI state:
+The extension reads/writes shared CLI state:
 
 - **`~/.grok/auth.json`** — login status / empty-state account line.
-- **`~/.grok/config.toml` `[ui].permission_mode`** — permission mode (Normal / Auto / Always Approve), same keys and precedence as the TUI (`permission_mode` > legacy `approval_mode` > legacy `yolo`). Shift+Tab and `/always-approve` persist here so CLI and extension stay aligned.
-- **`~/.grok/config.toml` `[models].default` / `default_reasoning_effort`** — default model and reasoning effort; model/effort UI and `/model` persist here like the TUI.
-
-Other exceptions:
-
-- Optional “open config folder” command.
-- Version / login detection heuristics.
+- **`~/.grok/config.toml`** — permission mode, default model, reasoning effort.
+- **`~/.grok/sessions/`** — local history for resume.
 
 ## Settings UX
 
 - Contribute configuration in `package.json`.
-- Provide a thin **Grok: Open Settings** command filtering `@ext:…`.
-- Model picker: QuickPick fed by agent model list when available; else free
-  text setting.
+- Model picker: curated list + free text; persist to config.toml / restart agent when needed.
+- Mode / Always Approve: confirm modal before always-approve; write toml.
 
 ## Next
 

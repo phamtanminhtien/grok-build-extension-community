@@ -8,7 +8,7 @@
 | Extension auto-allows tools                            | Default `permission_mode=ask` in config.toml; confirm before Always Approve |
 | Secret exfiltration via prompt context                 | excludeGlob; no auto-attach `.env`                                          |
 | Secret leakage in logs / webview                       | Redaction; SecretStorage; minimal RPC body logging                          |
-| Arg injection via settings                             | Validate `agentExtraArgs`; no shell interpolation                           |
+| Arg injection via settings                             | Structured flags only; no shell interpolation                               |
 | Supply chain (deps / binary)                           | Lockfiles; checksums if bundling; official install only                     |
 | Prompt injection in webview HTML                       | Markdown sanitize; no raw HTML from model                                   |
 
@@ -30,7 +30,8 @@ Default posture: **ask**.
 
 ### Timeout
 
-If user ignores a permission dialog for `T` seconds (default 300):
+If user ignores a permission dialog for `T` ms (`grok.permissionTimeoutMs`,
+default **120000** = 120s):
 
 - Respond **deny**.
 - Toast: “Grok tool request timed out and was denied.”
@@ -88,15 +89,24 @@ The choice is written to `~/.grok/config.toml` `[ui].permission_mode` (same as C
 
 ## Security checklist before release
 
+Core controls (0.3.x):
+
 - [x] Workspace Trust honored (agent start refused when untrusted)
 - [x] permission_mode defaults ask; confirm before Always Approve (mode UI + `/always-approve`)
-- [x] Permission timeout deny
+- [x] Permission timeout deny (`grok.permissionTimeoutMs`, default 120s)
 - [x] SecretStorage for keys
-- [x] CSP on webview (nonce script-src)
+- [x] CSP on webview (nonce script-src); markdown sanitize
 - [x] spawn without shell (`shell: false`)
 - [x] binary path cannot execute through `sh -c`
 - [x] no full RPC body logging by default
-- [x] remote/WSL documented (binary on remote) — see root README
+- [x] remote/WSL documented at high level (binary on remote) — see root README
+
+Productization residual ([09-roadmap](09-roadmap.md) L3 acceptance):
+
+- [ ] Formal security sign-off pass for marketplace “stable”
+- [ ] Min binary version gate + upgrade prompts
+- [ ] Accessibility pass on chat + permissions
+- [ ] Deeper Remote-SSH/WSL threat/install review
 
 ## Next
 

@@ -6,14 +6,16 @@ fidelity (unsaved buffers, integrated terminals, encoding).
 
 ## Capability matrix
 
-| Capability | ACP surface | MVP | Notes |
-|------------|-------------|-----|-------|
-| Read text file | `fs/read_text_file` (client method) | **Yes** | Prefer open document text |
-| Write text file | `fs/write_text_file` | **Yes** | Apply via WorkspaceEdit |
-| Terminal | client terminal methods | **Yes (basic)** | VS Code Terminal API |
-| Fs notify / index | `x.ai/*` notifications | No | L2+ |
-| Git | `x.ai/git/*` | No | L2–L3 |
-| Fuzzy open | `x.ai/search/*` | No | Map to QuickOpen later |
+| Capability        | ACP surface                         | Status (0.3.8) | Notes                                          |
+| ----------------- | ----------------------------------- | -------------- | ---------------------------------------------- |
+| Read text file    | `fs/read_text_file` (client method) | **Yes**        | Prefer open document text                      |
+| Write text file   | `fs/write_text_file`                | **Yes**        | Apply via WorkspaceEdit; snapshot for diffs    |
+| Terminal          | client terminal methods             | **No**         | `terminal: false` ([ADR-004](10-decisions.md)) |
+| Fs notify / index | `x.ai/*` notifications              | Partial        | Best-effort refresh / not a full index UI      |
+| Git               | `x.ai/git/*`                        | Agent-side     | No dedicated host git UI                       |
+| Hunk tracker      | client `_meta` + agent              | **Yes**        | Accept/Reject on diff review                   |
+| Fuzzy open        | `x.ai/search/*`                     | **No**         | In-chat `@` picker only (not ACP bridge)       |
+| Worktree          | `x.ai/git/worktree/*`               | **No**         | L3 remaining                                   |
 
 ## Filesystem capability
 
@@ -40,12 +42,12 @@ function readTextFile(path or uri):
 
 Edge cases:
 
-| Case | Behavior |
-|------|----------|
+| Case               | Behavior                                                       |
+| ------------------ | -------------------------------------------------------------- |
 | Binary / huge file | Cap size; return error if over limit (align with agent limits) |
-| Non-UTF8 | Try utf-8; on failure return structured error |
-| File not found | ACP error `invalid_params` / not found |
-| Untitled buffer | Only if URI scheme supported |
+| Non-UTF8           | Try utf-8; on failure return structured error                  |
+| File not found     | ACP error `invalid_params` / not found                         |
+| Untitled buffer    | Only if URI scheme supported                                   |
 
 ### Write algorithm
 
@@ -60,11 +62,11 @@ function writeTextFile(path, content):
 
 Policies (settings):
 
-| Setting | Default | Meaning |
-|---------|---------|---------|
-| `grok.fs.preferOpenBuffers` | `true` | Read from TextDocument when open |
-| `grok.fs.autoSave` | `true` | Save after host write |
-| `grok.fs.maxReadBytes` | e.g. 5_000_000 | Hard cap |
+| Setting                     | Default        | Meaning                          |
+| --------------------------- | -------------- | -------------------------------- |
+| `grok.fs.preferOpenBuffers` | `true`         | Read from TextDocument when open |
+| `grok.fs.autoSave`          | `true`         | Save after host write            |
+| `grok.fs.maxReadBytes`      | e.g. 5_000_000 | Hard cap                         |
 
 ### Interaction with agent-side tools
 
@@ -90,59 +92,59 @@ Even when the agent writes to disk directly, the extension should:
 
 ### Mapping
 
-| ACP intent | VS Code API |
-|------------|-------------|
-| Create terminal | `window.createTerminal({ name, cwd })` |
-| Write to stdin | `terminal.sendText(cmd, true)` (approximation) |
-| Read output | Limited — VS Code does not expose full PTY capture easily |
-| Kill | `terminal.dispose()` |
+| ACP intent      | VS Code API                                               |
+| --------------- | --------------------------------------------------------- |
+| Create terminal | `window.createTerminal({ name, cwd })`                    |
+| Write to stdin  | `terminal.sendText(cmd, true)` (approximation)            |
+| Read output     | Limited — VS Code does not expose full PTY capture easily |
+| Kill            | `terminal.dispose()`                                      |
 
 ### Limitation (important)
 
 VS Code’s public Terminal API **does not** give full bidirectional PTY
 capture comparable to a raw PTY. Practical approaches:
 
-| Approach | Pros | Cons |
-|----------|------|------|
-| **A. Let agent own PTY** (agent-side shell tools) | Full fidelity | Terminals outside VS Code UI |
-| **B. Host terminal sendText only** | Visible in IDE | Weak output capture |
-| **C. Hybrid** | Shell tools agent-side; optional “show in terminal” | Best MVP compromise |
+| Approach                                          | Pros                                                | Cons                         |
+| ------------------------------------------------- | --------------------------------------------------- | ---------------------------- |
+| **A. Let agent own PTY** (agent-side shell tools) | Full fidelity                                       | Terminals outside VS Code UI |
+| **B. Host terminal sendText only**                | Visible in IDE                                      | Weak output capture          |
+| **C. Hybrid**                                     | Shell tools agent-side; optional “show in terminal” | Best MVP compromise          |
 
-**MVP decision (proposed):** capability `terminal: true` only if we can meet
-ACP contract; otherwise declare `terminal: false` and rely on agent-side
-shell tools, while still offering “Reveal terminal” UX later.
-
-Record final choice in [10-decisions](10-decisions.md) before coding.
+**Decision (Accepted):** `terminal: false` — agent owns PTY/shell tools;
+output appears in tool cards. Optional “Reveal in Terminal” hybrid remains a
+future residual (see [ADR-004](10-decisions.md)).
 
 ## Editor context (outbound, not a capability)
 
 Not an ACP client capability — the client **enriches prompts**:
 
-| Context | Content block |
-|---------|----------------|
-| Active file | `resource_link` with `file://` URI |
-| Selection | Meta on link or fenced text excerpt |
-| Workspace root | `session/new.cwd` |
-| Open tabs (optional) | Multiple resource_links (cap count) |
-| Diagnostics (optional) | Text summary block (L2) |
-| Git status (optional) | Text summary (L2) or agent tools |
+| Context               | Content block                                  |
+| --------------------- | ---------------------------------------------- |
+| Active file           | `resource_link` with `file://` URI             |
+| Selection             | Meta on link or fenced text excerpt            |
+| Workspace root        | `session/new.cwd`                              |
+| Sticky chips / `@`    | Explicit file / folder / selection             |
+| Images                | `image` content blocks (paste / drop / attach) |
+| Diagnostics           | Fix with Grok + optional text summary          |
+| Open tabs (optional)  | Multiple resource_links (cap count)            |
+| Git status (optional) | Agent tools primarily                          |
 
 ### Privacy
 
 Do not auto-attach secrets files (`.env`, credentials) without user action.
 Optional deny-list setting: `grok.context.excludeGlob`.
 
-## Git / search host bridges (later)
+## Git / search host bridges
 
-When implementing `x.ai/search/fuzzy/open`:
+| Bridge                               | Status                                          |
+| ------------------------------------ | ----------------------------------------------- |
+| `x.ai/search/fuzzy/open` → QuickOpen | **Not implemented** (L3)                        |
+| In-chat `@` file fuzzy pick          | **Shipped** (host-only, not ACP search methods) |
+| `x.ai/git/*` dedicated UI            | **Not implemented** — agent tools only          |
+| `x.ai/git/worktree/*` UI             | **Not implemented** (L3)                        |
 
-- Use `vscode.workspace.findFiles` / QuickPick.
-- Return selected URI to agent.
-
-When implementing git UI:
-
-- Prefer agent `x.ai/git/*` results rendered in webview.
-- Optionally open SCM view; do not fight VS Code SCM ownership.
+When implementing fuzzy open: use `vscode.workspace.findFiles` / QuickPick and
+return selected URI to the agent. Do not fight VS Code SCM ownership for git.
 
 ## Capability negotiation checklist
 

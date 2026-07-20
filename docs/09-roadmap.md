@@ -1,8 +1,12 @@
 # 09 — Roadmap
 
 Phased delivery. Each phase has **entry criteria**, **scope**, and
-**acceptance checks**. Do not start phase _N+1_ features until phase _N_
-acceptance passes unless explicitly parallelized.
+**acceptance checks**.
+
+**As of v0.3.8 (2026-07-20):** L0–L2 core complete; L3 partially shipped ahead
+of the original sequence (Tasks, plan UI, Extensions panel, rewind, billing).
+Remaining work is mostly terminal host, remote docs/fixes, worktree UI, binary
+packaging, and productization checklists.
 
 ## Phase L0 — Protocol wire-up
 
@@ -33,7 +37,7 @@ acceptance passes unless explicitly parallelized.
 ### Exit artifacts
 
 - [x] Runnable extension in Extension Development Host (`F5`)
-- [x] Smoke test script (`npm run smoke:cli`) + [L0 manual test](L0-manual-test.md)
+- [x] Smoke test script (`npm run smoke:cli` / `yarn smoke:cli`) + [L0 manual test](L0-manual-test.md)
 
 Verified headless 2026-07-16: `initialize` + `session/new` + prompt → `L0 OK` / `PASS`.
 
@@ -68,8 +72,8 @@ Verified headless 2026-07-16: `initialize` + `session/new` + prompt → `L0 OK` 
 ### Exit artifacts
 
 - [x] Runnable extension in Extension Development Host (`F5`) + sidebar chat
-- [x] Internal VSIX packaging polish (icon, MIT, CHANGELOG, `npm run package`)
-- Known limitations: terminal host capability deferred; binary not bundled; Win/Linux smoke TBD
+- [x] Internal VSIX packaging polish (icon, MIT, CHANGELOG, `yarn package`)
+- Known limitations: terminal host capability deferred ([ADR-004](10-decisions.md)); binary not bundled; Win/Linux smoke TBD
 
 ---
 
@@ -79,15 +83,15 @@ Verified headless 2026-07-16: `initialize` + `session/new` + prompt → `L0 OK` 
 
 ### Scope
 
-- [x] Diff presentation for edits
-- [x] Session resume / history list (`~/.grok/sessions` like TUI + ACP `session/load`)
-- [x] Richer `@` context picker
-- [x] Model QuickPick (settings + restart; curated list + free text)
-- [ ] Better terminal story (per [04](04-host-capabilities.md) decision)
+- [x] Diff presentation for edits (snapshots + `vscode.diff` + hunk Accept/Reject)
+- [x] Session resume / history list (`~/.grok/sessions` + ACP `session/load`)
+- [x] Richer `@` context picker (sticky chips, inline mentions)
+- [x] Model QuickPick / popover (settings + config.toml + effort)
+- [ ] Better terminal story (per [04](04-host-capabilities.md) / [ADR-004](10-decisions.md))
 - [x] `x.ai/auth/*` polished browser login (`get_url`, `submit_code`, `info`, `check_subscription`, `logout`)
-- [x] Select `x.ai/session` ops: compact, rewind (if stable)
-- [x] Virtualized message list / performance
-- [ ] Remote-SSH/WSL documentation + fixes
+- [x] Select `x.ai/session` ops: compact, rewind
+- [x] Virtualized message list / performance (windowed DOM + host markdown throttle)
+- [ ] Remote-SSH/WSL documentation + fixes _(basic notes in root README; deeper QA TBD)_
 
 ### Acceptance
 
@@ -106,19 +110,26 @@ Spec: [superpowers/specs/2026-07-16-l2-full-polish-design.md](superpowers/specs/
 
 ### Scope
 
-- Worktree UI (`x.ai/git/worktree/*`)
-- Plan mode surface
-- Subagent / background task visualization (Tasks panel, status bar badge, `/tasks` host, subagent transcript markdown)
-- Fuzzy open bridge
-- Plugin/skills management UI (thin)
-- Binary bundling or first-run download
-- Marketplace listing, icons, telemetry policy
-- Automated integration tests in CI with mocked ACP
+| Item                                              | Status (v0.3.8)                                                                 |
+| ------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Worktree UI (`x.ai/git/worktree/*`)               | **Not started**                                                                 |
+| Plan mode surface                                 | **Partial** — plan approval UI, `exitPlanMode`, session_notification banners    |
+| Subagent / background task visualization          | **Shipped** — Tasks panel, status bar badge, `/tasks`, live subagent transcript |
+| Fuzzy open bridge (`x.ai/search/*` → QuickOpen)   | **Not started** as agent bridge; in-chat `@` fuzzy file pick exists             |
+| Plugin/skills management UI                       | **Partial** — Extensions panel (hooks, plugins, skills, MCP)                    |
+| Binary bundling or first-run download             | **Not started** — PATH + `grok.binaryPath` only                                 |
+| Marketplace listing, icons, telemetry policy      | **Partial** — Marketplace/Open VSX live; telemetry policy TBD                   |
+| Automated integration tests in CI with mocked ACP | **Partial** — pure unit tests via `yarn test`; no mock-ACP CI yet               |
+| Prompt queue (mid-turn follow-ups)                | **Shipped** — TUI-like queue UI + `x.ai/queue/*`                                |
+| Images in prompt                                  | **Shipped** — paste, drop, Attach Image…                                        |
+| Fix with Grok (diagnostics)                       | **Shipped** — hover / Quick Fix                                                 |
+| Billing usage display                             | **Shipped**                                                                     |
+| Hunk-tracker Accept/Reject                        | **Shipped**                                                                     |
 
 ### Acceptance
 
 - [ ] Product checklist signed off
-- [ ] Security checklist complete ([08](08-security.md))
+- [ ] Security productization residual complete ([08](08-security.md) residual list)
 - [ ] Version gate + upgrade prompts reliable
 - [ ] Accessibility pass on chat + permissions
 
@@ -126,11 +137,12 @@ Spec: [superpowers/specs/2026-07-16-l2-full-polish-design.md](superpowers/specs/
 
 ## Parallel tracks (any phase)
 
-| Track          | Notes                                                    |
-| -------------- | -------------------------------------------------------- |
-| Design assets  | Icons, empty-state illustrations                         |
-| Docs for users | Install, Remote-SSH, FAQ (separate from this design set) |
-| Upstream fixes | File issues against Grok Build if ACP gaps found         |
+| Track          | Notes                                                   |
+| -------------- | ------------------------------------------------------- |
+| Design assets  | Icons, empty-state illustrations                        |
+| Docs for users | Install, Remote-SSH, FAQ (root README + this set)       |
+| Upstream fixes | File issues against Grok Build if ACP gaps found        |
+| Doc sync       | After each release: patch roadmap + ADRs + UI/auth docs |
 
 ## Explicitly deferred forever (unless goals change)
 
@@ -138,14 +150,21 @@ Spec: [superpowers/specs/2026-07-16-l2-full-polish-design.md](superpowers/specs/
 - Embedding the ratatui TUI
 - Full clone of TUI keybindings / theme engine
 
+## Suggested next work (priority)
+
+1. **Close L2 residual** — Remote-SSH/WSL QA + docs; optional terminal hybrid (ADR-004 remains agent-owned PTY).
+2. **L3 productization** — worktree UI, fuzzy-open ACP bridge, min-version gate, security/a11y sign-off.
+3. **CI** — mock ACP integration tests; Win/Linux smoke.
+4. **Packaging** — first-run download or bundled binary if install friction dominates.
+
 ## Suggested timeline (indicative only)
 
-| Phase | Calendar (1–2 eng) |
-| ----- | ------------------ |
-| L0    | 2–4 days           |
-| L1    | 2–3 weeks          |
-| L2    | 4–6 weeks          |
-| L3    | ongoing            |
+| Phase | Calendar (1–2 eng) | Reality                  |
+| ----- | ------------------ | ------------------------ |
+| L0    | 2–4 days           | Done 2026-07-16          |
+| L1    | 2–3 weeks          | Done ~0.3.x              |
+| L2    | 4–6 weeks          | Core done; residual open |
+| L3    | ongoing            | Partial from 0.3.5+      |
 
 ## Next
 

@@ -13,9 +13,9 @@ VS Code-native, not a terminal emulator inside a webview.
 
 ### 1. Activity Bar + Side Panel (primary)
 
-- Icon: Grok / SpaceXAI mark (product assets TBD).
-- View container id: `grok`.
-- Default view: **Chat**.
+- Icon: `media/grok.svg` (activity bar + secondary sidebar container).
+- View containers: `grok` (activity bar), `grok-secondary` (secondary sidebar when supported).
+- Default view: **Chat** (`grok.chatView` / `grok.chatView.secondary`).
 
 ### 2. Chat webview
 
@@ -26,12 +26,12 @@ Layout (top → bottom):
 │ Session · Model · ··· menu          │  header
 ├─────────────────────────────────────┤
 │                                     │
-│  message list (virtualized later)   │
+│  message list (windowed / virtualized)│
 │  - user bubbles                     │
-│  - assistant markdown               │
+│  - assistant markdown (sanitized)   │
 │  - thought (collapsed)              │
-│  - tool cards                       │
-│  - errors                           │
+│  - tool cards / timeline            │
+│  - plan / errors / banners          │
 │                                     │
 ├─────────────────────────────────────┤
 │ [ tasks: N running (when any)   ] │  bg tasks / subagents / loops
@@ -99,27 +99,38 @@ Inject / send-now is **not** on that button — use the bolt control on a queue 
 
 ### 5. Commands (Command Palette)
 
-| Command id                | Title                         | MVP |
-| ------------------------- | ----------------------------- | --- |
-| `grok.openChat`           | Grok: Open Chat               | Yes |
-| `grok.newSession`         | Grok: New Session             | Yes |
-| `grok.cancel`             | Grok: Cancel Turn             | Yes |
-| `grok.restartAgent`       | Grok: Restart Agent           | Yes |
-| `grok.selectModel`        | Grok: Select Model            | Yes |
-| `grok.login`              | Grok: Login                   | Yes |
-| `grok.addSelectionToChat` | Grok: Add Selection to Chat   | Yes |
-| `grok.addFileToChat`      | Grok: Add Active File to Chat | Yes |
-| `grok.showOutput`         | Grok: Show Output Channel     | Yes |
-| `grok.resumeSession`      | Grok: Resume Session…         | L2  |
+Titles use the **Grok Build:** prefix in `package.json`. Core set:
+
+| Command id                                                 | Title (short)            | Notes                    |
+| ---------------------------------------------------------- | ------------------------ | ------------------------ |
+| `grok.openChat`                                            | Open Chat                | Also editor title icon   |
+| `grok.openChatActivityBar`                                 | Open Chat (Activity Bar) |                          |
+| `grok.newSession`                                          | New Session              | View title               |
+| `grok.cancel`                                              | Cancel Turn              |                          |
+| `grok.startAgent` / `restartAgent` / `stopAgent`           | Agent lifecycle          |                          |
+| `grok.openOutput`                                          | Open Output              | Channel **Grok Build**   |
+| `grok.selectModel`                                         | Select Model             |                          |
+| `grok.login` / `logout` / `pasteAuthCode`                  | Auth                     |                          |
+| `grok.setApiKey` / `clearApiKey`                           | API key                  | SecretStorage            |
+| `grok.checkSubscription` / `accountInfo`                   | Account                  |                          |
+| `grok.addSelectionToChat` / `addFileToChat` / `addContext` | Context                  |                          |
+| `grok.attachImage`                                         | Attach Image…            |                          |
+| `grok.fixWithGrok`                                         | Fix with Grok            | Diagnostics              |
+| `grok.resumeSession`                                       | Resume Session…          |                          |
+| `grok.reviewEdits` / `acceptAllEdits` / `rejectAllEdits`   | Diff review              |                          |
+| `grok.rewind`                                              | Rewind…                  |                          |
+| `grok.openExtensions`                                      | Extensions…              | Hooks/plugins/skills/MCP |
+| `grok.smokeTest`                                           | Smoke Test (L0)          | Dev                      |
 
 ### 6. Keybindings (proposed defaults)
 
-| Key                     | Command     | When                         |
-| ----------------------- | ----------- | ---------------------------- |
-| (none global mandatory) | —           | Avoid fighting Copilot       |
-| `Enter` in composer     | Send        | Webview only                 |
-| `Shift+Enter`           | Newline     | Webview only                 |
-| `Escape`                | Cancel turn | When running (webview focus) |
+| Key                     | Command                    | When                          |
+| ----------------------- | -------------------------- | ----------------------------- |
+| (none global mandatory) | —                          | Avoid fighting Copilot        |
+| `Enter` in composer     | Send / Queue               | Idle send; busy + text queues |
+| `Shift+Enter`           | Newline                    | Webview only                  |
+| `Shift+Tab`             | Mode cycle                 | Permission mode like TUI      |
+| `Escape`                | Cancel turn / close panels | Webview focus                 |
 
 Users may bind `grok.openChat` themselves.
 
@@ -132,8 +143,9 @@ Users may bind `grok.openChat` themselves.
 | `agent_thought_chunk` | Collapsible “Thinking”                           |
 | `tool_call`           | Card: icon by kind, title, status badge          |
 | `tool_call_update`    | Progress / completed / failed + truncated output |
-| Plan                  | Ordered checklist (L2)                           |
+| Plan                  | Ordered checklist + approval UI                  |
 | Permission pending    | Inline banner + modal                            |
+| Session notification  | Banner (diff review, compact, retry, …)          |
 
 ### Markdown rules
 
@@ -176,29 +188,24 @@ Rules:
 
 ## Diffs & edits
 
-### MVP
+**Shipped (L2):**
 
-- Tool card for edits lists file paths.
-- Click path → open file.
-- If on-disk change detected, show “File changed on disk” via VS Code.
-
-### L2
-
-- On edit tool completion, offer **Compare with previous** using
-  `vscode.diff` and content from agent update or local snapshot.
-- Multi-file review list in panel.
+- Pre-write snapshots (`SnapshotStore` + `grok-diff:` content provider).
+- Multi-file review via `vscode.diff` (`DiffReviewService`).
+- Hunk-tracker Accept / Reject (and Accept/Reject all commands).
+- Tool cards list paths; click opens file.
 
 Do not invent a parallel SCM system.
 
 ## Context chips
 
-Composer can show chips:
+Composer shows sticky chips (in-composer row):
 
-- `file:src/a.ts`
-- `selection:src/a.ts#L10-L40`
-- `workspace:my-app`
+- `file:…` / `selection:…` / `folder:…`
+- Auto-attach chip for focused file (toggle)
+- Inline `@mentions` with picker popover
 
-Removal: click ×. Adding: commands / drag file (L2) / `@` menu (L2).
+Removal: click ×. Adding: `@` menu, commands, or Attach Image.
 
 ## Empty states
 
@@ -230,11 +237,11 @@ between Sign in and Log out from that shared status.
 
 ## Performance budgets (targets)
 
-| Metric              | Target                                                                        |
-| ------------------- | ----------------------------------------------------------------------------- |
-| Webview first paint | < 300 ms after open                                                           |
-| Stream chunk apply  | No full re-render of entire history each chunk (L1 may simple; L2 virtualize) |
-| History length      | Soft-trim UI at N messages; full history remains in agent session             |
+| Metric              | Target                                                            |
+| ------------------- | ----------------------------------------------------------------- |
+| Webview first paint | < 300 ms after open                                               |
+| Stream chunk apply  | Throttled host posts; windowed DOM for long threads               |
+| History length      | Soft-trim UI at N messages; full history remains in agent session |
 
 ## Next
 
