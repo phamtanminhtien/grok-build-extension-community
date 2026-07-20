@@ -22,6 +22,14 @@ All notable changes to **Grok Build - Community** are documented in this file.
 
 - expand Remote-SSH / WSL install matrix and troubleshooting in README
 
+## [0.3.9](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.8...v0.3.9) (2026-07-20)
+
+
+### Features
+
+* implement fuzzy mention search and related functionality ([ad89ea5](https://github.com/phamtanminhtien/grok-build-extension-community/commit/ad89ea5f3ead481d6d310684f809b32c55e790d0))
+* implement worktree management features ([070e0de](https://github.com/phamtanminhtien/grok-build-extension-community/commit/070e0de2244583c0e1a428daf8ec712f36e274d5))
+
 ## [0.3.8](https://github.com/phamtanminhtien/grok-build-extension-community/compare/v0.3.7...v0.3.8) (2026-07-18)
 
 ### Features
